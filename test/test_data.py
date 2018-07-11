@@ -2,6 +2,8 @@ import numpy as np
 from math import inf
 import json
 
+from test_setup import *
+
 
 def create_chunk(cgraph, vertices=None, edges=None, timestamp=None):
     """
@@ -37,19 +39,17 @@ def create_chunk(cgraph, vertices=None, edges=None, timestamp=None):
     cross_edge_affs = np.array(
         cross_edge_affs, dtype=np.float32).reshape(-1, 1)
     isolated_node_ids = np.array(isolated_node_ids, dtype=np.uint64)
-    rg2cg = dict(list(enumerate(vertices, 1)))
-    cg2rg = {v: k for k, v in rg2cg.items()}
 
     cgraph.add_atomic_edges_in_chunks(edge_ids, cross_edge_ids,
                                       edge_affs, cross_edge_affs,
-                                      isolated_node_ids, cg2rg, rg2cg)
+                                      isolated_node_ids, timestamp=timestamp)
 
 
 def to_label(cgraph, l, x, y, z, segment_id):
     return cgraph.get_node_id(np.uint64(segment_id), layer=l, x=x, y=y, z=z)
 
 
-def test_data(chunkgraph, annodb, test_annon_dataset):
+def test_data(gen_graph, amdb, test_annon_dataset):
     """
     Create graph with edges as depicted below
     where there is an synapse annotation that connects supervoxels 3 and 4
@@ -62,7 +62,8 @@ def test_data(chunkgraph, annodb, test_annon_dataset):
     +--------+--------+--------+
     """
 
-    cgraph = chunkgraph
+    cgraph = gen_graph()
+    annodb = amdb()
 
     # Chunk A
     create_chunk(cgraph,
@@ -70,14 +71,14 @@ def test_data(chunkgraph, annodb, test_annon_dataset):
                            to_label(cgraph, 1, 0, 0, 0, 1)],
                  edges=[(to_label(cgraph, 1, 0, 0, 0, 0),
                          to_label(cgraph, 1, 0, 0, 0, 1), 0.5),
-                        (to_label(cgraph, 1, 0, 0, 0, 0),
+                        (to_label(cgraph, 1, 0, 0, 0, 1),
                          to_label(cgraph, 1, 1, 0, 0, 0), inf)])
 
     # Chunk B
     create_chunk(cgraph,
                  vertices=[to_label(cgraph, 1, 1, 0, 0, 0),
                            to_label(cgraph, 1, 1, 0, 0, 1)],
-                 edges=[(to_label(cgraph, 1, 1, 0, 0, 0),
+                 edges=[(to_label(cgraph, 1, 1, 0, 0, 1),
                          to_label(cgraph, 1, 0, 0, 0, 0), inf),
                         (to_label(cgraph, 1, 1, 0, 0, 1),
                          to_label(cgraph, 1, 2, 0, 0, 0), inf)])
@@ -91,7 +92,10 @@ def test_data(chunkgraph, annodb, test_annon_dataset):
                         (to_label(cgraph, 1, 2, 0, 0, 0),
                          to_label(cgraph, 1, 1, 0, 0, 1), inf)])
 
-    cgraph.add_layer(3, np.array([[0, 0, 0], [1, 0, 0], [2, 0, 0]]))
+    cgraph.add_layer(3, np.array([[0, 0, 0], [1, 0, 0]]))
+    cgraph.add_layer(3, np.array([[2, 0, 0]]))
+
+    cgraph.add_layer(4, np.array([[0, 0, 0], [1, 0, 0]]))
 
     res = cgraph.table.read_rows()
     res.consume_all()
@@ -100,11 +104,11 @@ def test_data(chunkgraph, annodb, test_annon_dataset):
         "type": "synapse",
         "pre_pt": {
             "position": [1000, 256, 8],
-            "supervoxel_id": 3
+            "supervoxel_id": to_label(cgraph, 1, 1, 0, 0, 0)
         },
         "post_pt": {
             "position": [1010, 256, 8],
-            "supervoxel_id": 4
+            "supervoxel_id": to_label(cgraph, 1, 1, 0, 0, 1)
         },
         "ctr_pt": {
             "position": [1005, 256, 8]
