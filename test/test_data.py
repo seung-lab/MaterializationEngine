@@ -100,22 +100,24 @@ def test_data(gen_graph, amdb, test_annon_dataset):
     res = cgraph.table.read_rows()
     res.consume_all()
 
+    pre_id = to_label(cgraph, 1, 1, 0, 0, 0)
+    post_id = to_label(cgraph, 1, 1, 0, 0, 1)
     synapse_d = {
         "type": "synapse",
         "pre_pt": {
             "position": [1000, 256, 8],
-            "supervoxel_id": to_label(cgraph, 1, 1, 0, 0, 0)
+            "supervoxel_id": pre_id
         },
         "post_pt": {
             "position": [1010, 256, 8],
-            "supervoxel_id": to_label(cgraph, 1, 1, 0, 0, 1)
+            "supervoxel_id": post_id
         },
         "ctr_pt": {
             "position": [1005, 256, 8]
         }
     }
 
-    sv_ids = [np.array([3, 4], dtype=np.uint64)]
+    sv_ids = [np.array([pre_id, post_id], dtype=np.uint64)]
     annotations = [(sv_ids, json.dumps(synapse_d))]
     annodb.insert_annotations(test_annon_dataset, 'synapse', annotations,
                               "testing")
