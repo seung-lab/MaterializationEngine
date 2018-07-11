@@ -67,13 +67,33 @@ def flatten_ann(ann, seperator="_"):
     return ann
 
 
+def materialize_annoation_as_dictionary(oid,
+                                        blob,
+                                        root_id_dict,
+                                        annotation_type):
+    schema = get_schema_in_context(annotation_type, root_id_dict)
+    result = schema.load(json.loads(blob))
+
+    if len(result.errors) > 0:
+        msg = "ann {} does not meet schema of {}. Errors ({})"
+        raise AnnotationParseFailure(msg.format(blob,
+                                                annotation_type,
+                                                result.errors))
+
+    ann = result.data
+    ann_flat = flatten_ann(ann)
+    ann_flat['oid'] = oid
+
+    return ann_flat
+
+
 def materialize_all_annotations(dataset_name,
                                 annotation_type,
                                 cg_table_id,
                                 n_threads=1):
     '''create a materialized pandas data frame
     of an annotation type
-    
+
     :param dataset_name: str
         name of dataset
     :param annotation_type: str
@@ -90,18 +110,11 @@ def materialize_all_annotations(dataset_name,
 
     ds = []
     for oid, blob, root_id_dict in ann_list:
-        schema = get_schema_in_context(annotation_type, root_id_dict)
-        result = schema.load(json.loads(blob))
-
-        if len(result.errors) > 0:
-            msg = "ann {} does not meet schema of {}. Errors ({})"
-            raise AnnotationParseFailure(msg.format(blob,
-                                                    annotation_type,
-                                                    result.errors))
-
-        ann = result.data
-        ann_flat = flatten_ann(ann)
-        ann_flat['oid'] = oid
+        d = materialize_annoation_as_dictionary(oid,
+                                                blob,
+                                                root_id_dict,
+                                                annotation_type)
+        ds.append(d)
     df = pd.DataFrame(ds, index='oid')
 
     return df
