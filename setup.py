@@ -15,7 +15,12 @@ setup(
     packages=find_packages(),
     install_requires=[
         "dynamicannotationdb",
-        "pychunkedgraph"
+        "pychunkedgraph",
+        "emannotationschemas"
+    ],
+    setup_requires=['pytest-runner'],
+    tests_require=[
+        "pytest"
     ],
     classifiers=(
         "Programming Language :: Python :: 3",
