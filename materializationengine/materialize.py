@@ -95,16 +95,25 @@ def materialize_annotation_as_dictionary(oid,
 
 def _process_all_annotations_thread(args):
     """ Helper for process_all_annotations """
-    anno_id_start, anno_id_end, dataset_name, annotation_type, cg_table_id = args
+    anno_id_start, anno_id_end, dataset_name, annotation_type, cg_table_id, \
+        serialized_amdb_info, serialized_cg_info = args
 
-    amdb = annodb.AnnotationMetaDB()
-    cg = chunkedgraph.ChunkedGraph(cg_table_id)
+    amdb = annodb.AnnotationMetaDB(project_id=serialized_amdb_info["project_id"],
+                                   instance_id=serialized_amdb_info["instance_id"],
+                                   credentials=serialized_amdb_info["credentials"])
+
+    cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id,
+                                   project_id=serialized_amdb_info["project_id"],
+                                   instance_id=serialized_amdb_info["instance_id"],
+                                   credentials=serialized_amdb_info["credentials"])
 
     anno_dict = {}
 
     for annotation_id in range(anno_id_start, anno_id_end):
         # Read annoation data from dynamicannotationdb
-        annotation_data_b, sv_ids = amdb.get_annotation(annotation_id)
+        annotation_data_b, sv_ids = amdb.get_annotation(dataset_name,
+                                                        annotation_type,
+                                                        annotation_id)
 
         if annotation_data_b is None:
             continue
@@ -115,15 +124,17 @@ def _process_all_annotations_thread(args):
             # Read root_id from pychunkedgraph
             sv_id_to_root_id_dict[sv_id] = cg.get_root(sv_id)
 
-        anno_dict[annotation_id] = materialize_annoation_as_dictionary(
+        anno_dict[annotation_id] = materialize_annotation_as_dictionary(
             annotation_id, annotation_data_b, sv_id_to_root_id_dict,
             annotation_type)
 
     return anno_dict
 
 
-def process_all_annotations(dataset_name, annotation_type, cg_table_id,
-                            n_threads=1, client=None):
+def process_all_annotations(cg_table_id, dataset_name=None,
+                            annotation_type=None, amdb_client=None,
+                            amdb_instance_id=None, cg_client=None,
+                            cg_instance_id=None, n_threads=1):
     """ Reads data from all annotations and acquires their mapping to root_ids
 
     :param dataset_name: str
@@ -134,10 +145,23 @@ def process_all_annotations(dataset_name, annotation_type, cg_table_id,
     :return: dict
         annotation_id -> deserialized data
     """
-    if client is None:
+    if amdb_client is None:
         amdb = annodb.AnnotationMetaDB()
+    elif amdb_instance_id is not None:
+        amdb = annodb.AnnotationMetaDB(client=amdb_client,
+                                       instance_id=amdb_instance_id)
     else:
-        amdb = annodb.AnnotationMetaDB(client)
+        raise Exception("Missing Instance ID for AnnotationMetaDB")
+
+    if cg_client is None:
+        cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id)
+    elif cg_instance_id is not None:
+        cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id,
+                                       client=cg_client,
+                                       instance_id=cg_instance_id)
+    else:
+        raise Exception("Missing Instance ID")
+
     # The `max_annotation_id` sets an upper limit and can be used to iterate
     # through all smaller ids. However, there is no guarantee that any smaller
     # id exists, it is only a guarantee that no larger id exists at the time
@@ -145,13 +169,19 @@ def process_all_annotations(dataset_name, annotation_type, cg_table_id,
     max_annotation_id = amdb.get_max_annotation_id(dataset_name,
                                                    annotation_type)
 
+    if max_annotation_id == 0:
+        return {}
+
     # Annotation ids start at 1
-    id_chunks = np.linspace(1, max_annotation_id + 1, n_threads * 3 + 1)
+    id_chunks = np.linspace(1, max_annotation_id + 1,
+                            min([n_threads * 3, max_annotation_id]) + 1).astype(np.uint64)
 
     multi_args = []
     for i_id_chunk in range(len(id_chunks) - 1):
         multi_args.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1],
-                           dataset_name, annotation_type, cg_table_id])
+                           dataset_name, annotation_type, cg_table_id,
+                           amdb.get_serialized_info(),
+                           cg.get_serialized_info()])
 
     if n_threads == 1:
         results = mu.multiprocess_func(
@@ -171,9 +201,13 @@ def process_all_annotations(dataset_name, annotation_type, cg_table_id,
     return anno_dict
 
 
-def materialize_all_annotations(dataset_name,
+def materialize_all_annotations(cg_table_id,
+                                dataset_name,
                                 annotation_type,
-                                cg_table_id,
+                                amdb_client=None,
+                                amdb_instance_id=None,
+                                cg_client=None,
+                                cg_instance_id=None,
                                 n_threads=1):
     """ Create a materialized pandas data frame
     of an annotation type
@@ -188,9 +222,13 @@ def materialize_all_annotations(dataset_name,
          number of threads to use to materialize
     """
 
-    anno_dict = process_all_annotations(dataset_name,
-                                        annotation_type,
-                                        cg_table_id,
+    anno_dict = process_all_annotations(cg_table_id,
+                                        dataset_name=dataset_name,
+                                        annotation_type=annotation_type,
+                                        amdb_client=amdb_client,
+                                        amdb_instance_id=amdb_instance_id,
+                                        cg_client=cg_client,
+                                        cg_instance_id=cg_instance_id,
                                         n_threads=n_threads)
 
     df = pd.DataFrame.from_dict(anno_dict, orient="index")

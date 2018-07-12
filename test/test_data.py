@@ -51,7 +51,7 @@ def to_label(cgraph, l, x, y, z, segment_id):
 
 
 @pytest.fixture(scope="session")
-def test_data(chunkgraph_tuple, annodb, test_annon_dataset):
+def test_data(chunkgraph_tuple, test_annon_dataset):
     """
     Create graph with edges as depicted below
     where there is an synapse annotation that connects supervoxels 3 and 4
@@ -64,6 +64,8 @@ def test_data(chunkgraph_tuple, annodb, test_annon_dataset):
     +--------+--------+--------+
     """
 
+    annotation_type = 'synapse'
+    amdb, dataset_name = test_annon_dataset
     cgraph, table_id = chunkgraph_tuple
 
     # Chunk A
@@ -104,7 +106,7 @@ def test_data(chunkgraph_tuple, annodb, test_annon_dataset):
     pre_id = to_label(cgraph, 1, 1, 0, 0, 0)
     post_id = to_label(cgraph, 1, 1, 0, 0, 1)
     synapse_d = {
-        "type": "synapse",
+        "type": annotation_type,
         "pre_pt": {
             "position": [1000, 256, 8],
             "supervoxel_id": int(pre_id)
@@ -120,19 +122,31 @@ def test_data(chunkgraph_tuple, annodb, test_annon_dataset):
 
     sv_ids = np.array([pre_id, post_id], dtype=np.uint64)
     annotations = [(sv_ids, json.dumps(synapse_d))]
-    annodb.insert_annotations(test_annon_dataset, 'synapse', annotations,
-                              "testing")
+
+    print(amdb)
+
+    # Insert into table
+    amdb.insert_annotations(dataset_name=dataset_name,
+                            annotation_type=annotation_type,
+                            annotations=annotations,
+                            user_id="user_id")
 
     yield chunkgraph_tuple
 
 
-def test_simple_test(test_data, annodb, test_annon_dataset):
+def test_simple_test(test_data, test_annon_dataset):
     cgraph, table_id = test_data
-    print(table_id)
+    amdb, dataset_name = test_annon_dataset
 
-    df = materialize_all_annotations(test_annon_dataset,
-                                     "synapse",
-                                     table_id,
+    print(amdb.get_existing_tables())
+
+    df = materialize_all_annotations(table_id,
+                                     dataset_name=dataset_name,
+                                     annotation_type="synapse",
+                                     amdb_client=amdb.client,
+                                     amdb_instance_id=amdb.instance_id,
+                                     cg_client=cgraph.client,
+                                     cg_instance_id=cgraph.instance_id,
                                      n_threads=1)
     print(df)
     assert(False)
