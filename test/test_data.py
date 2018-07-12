@@ -1,9 +1,9 @@
 import numpy as np
 from math import inf
 import json
-
+import pytest
 from test_setup import *
-
+from materializationengine.materialize import materialize_all_annotations
 
 def create_chunk(cgraph, vertices=None, edges=None, timestamp=None):
     """
@@ -42,14 +42,15 @@ def create_chunk(cgraph, vertices=None, edges=None, timestamp=None):
 
     cgraph.add_atomic_edges_in_chunks(edge_ids, cross_edge_ids,
                                       edge_affs, cross_edge_affs,
-                                      isolated_node_ids, timestamp=timestamp)
+                                      isolated_node_ids)
 
 
 def to_label(cgraph, l, x, y, z, segment_id):
     return cgraph.get_node_id(np.uint64(segment_id), layer=l, x=x, y=y, z=z)
 
 
-def test_data(gen_graph, amdb, test_annon_dataset):
+@pytest.fixture(scope="session")
+def test_data(chunkgraph_tuple, annodb, test_annon_dataset):
     """
     Create graph with edges as depicted below
     where there is an synapse annotation that connects supervoxels 3 and 4
@@ -62,9 +63,8 @@ def test_data(gen_graph, amdb, test_annon_dataset):
     +--------+--------+--------+
     """
 
-    cgraph = gen_graph()
-    annodb = amdb()
-
+    cgraph, table_id = chunkgraph_tuple
+  
     # Chunk A
     create_chunk(cgraph,
                  vertices=[to_label(cgraph, 1, 0, 0, 0, 0),
@@ -106,18 +106,33 @@ def test_data(gen_graph, amdb, test_annon_dataset):
         "type": "synapse",
         "pre_pt": {
             "position": [1000, 256, 8],
-            "supervoxel_id": pre_id
+            "supervoxel_id": int(pre_id)
         },
         "post_pt": {
             "position": [1010, 256, 8],
-            "supervoxel_id": post_id
+            "supervoxel_id": int(post_id)
         },
         "ctr_pt": {
             "position": [1005, 256, 8]
         }
     }
 
-    sv_ids = [np.array([pre_id, post_id], dtype=np.uint64)]
+
+    sv_ids = np.array([pre_id, post_id], dtype=np.uint64)
     annotations = [(sv_ids, json.dumps(synapse_d))]
     annodb.insert_annotations(test_annon_dataset, 'synapse', annotations,
                               "testing")
+
+    yield chunkgraph_tuple
+
+
+def test_simple_test(test_data, annodb, test_annon_dataset):
+    cgraph, table_id = test_data
+    print(table_id)
+    
+    df=materialize_all_annotations(test_annon_dataset,
+                                "synapse",
+                                table_id,
+                                n_threads=1)
+    print(df)
+    assert(False)

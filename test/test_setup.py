@@ -1,6 +1,6 @@
 import pytest
 from dynamicannotationdb.annodb import AnnotationMetaDB
-from pychunkgraph.backend import chunkedgraph
+from pychunkedgraph.backend import chunkedgraph
 import subprocess
 import os
 from google.auth import credentials
@@ -63,7 +63,7 @@ def annodb(bigtable_client):
 
     yield db
 
-
+@pytest.fixture(scope='session')
 def test_annon_dataset(annodb):
     name = 'test'
     annodb.create_table(name, 'synapse')
@@ -71,13 +71,14 @@ def test_annon_dataset(annodb):
 
 
 @pytest.fixture(scope='session')
-def chunkgraph(bigtable_client, fan_out=2, n_layers=10):
-    graph = chunkedgraph.ChunkedGraph("materialization_test",
+def chunkgraph_tuple(bigtable_client, fan_out=2, n_layers=10):
+    cg_table_id = "materialization_test"
+    graph = chunkedgraph.ChunkedGraph(cg_table_id,
                                       project_id='emulated',
                                       credentials=DoNothingCreds(),
                                       instance_id="chunkedgraph",
                                       is_new=True, fan_out=fan_out,
                                       n_layers=n_layers)
 
-    yield graph
+    yield graph, cg_table_id
     graph.table.delete()
