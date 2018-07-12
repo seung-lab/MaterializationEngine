@@ -29,7 +29,8 @@ def bigtable_client(request):
     os.environ["BIGTABLE_EMULATOR_HOST"] = "localhost:8086"
     startup_msg = "Waiting for BigTables Emulator to start up at {}..."
     print(startup_msg.format(os.environ["BIGTABLE_EMULATOR_HOST"]))
-    c = bigtable.Client(project='', credentials=DoNothingCreds(), admin=True)
+    c = bigtable.Client(project='emulated', credentials=DoNothingCreds(),
+                        admin=True)
     retries = 5
     while retries > 0:
         try:
@@ -59,26 +60,30 @@ def bigtable_client(request):
 
 @pytest.fixture(scope='session')
 def annodb(bigtable_client):
-    db = AnnotationMetaDB(client=bigtable_client, instance_id='test')
+    db = AnnotationMetaDB(client=bigtable_client, instance_id="test_instance")
 
     yield db
 
+
 @pytest.fixture(scope='session')
 def test_annon_dataset(annodb):
-    name = 'test'
-    annodb.create_table(name, 'synapse')
-    yield name
+    amdb = annodb
+
+    dataset_name = 'test_dataset'
+    amdb.create_table(dataset_name, 'synapse')
+    yield amdb, dataset_name
 
 
 @pytest.fixture(scope='session')
-def chunkgraph_tuple(bigtable_client, fan_out=2, n_layers=10):
-    cg_table_id = "materialization_test"
+def chunkgraph_tuple(bigtable_client, fan_out=2, n_layers=4):
+    cg_table_id = "test_cg"
     graph = chunkedgraph.ChunkedGraph(cg_table_id,
-                                      project_id='emulated',
-                                      credentials=DoNothingCreds(),
-                                      instance_id="chunkedgraph",
+                                      client=bigtable_client,
+                                      instance_id="test_instance",
                                       is_new=True, fan_out=fan_out,
                                       n_layers=n_layers)
 
     yield graph, cg_table_id
     graph.table.delete()
+
+    print("\n\nTABLE DELETED")
