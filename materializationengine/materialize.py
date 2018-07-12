@@ -75,7 +75,7 @@ def flatten_ann(ann, seperator="_"):
     return ann
 
 
-def materialize_annoation_as_dictionary(oid,
+def materialize_annotation_as_dictionary(oid,
                                         blob,
                                         root_id_dict,
                                         annotation_type):
@@ -123,7 +123,7 @@ def _process_all_annotations_thread(args):
 
 
 def process_all_annotations(dataset_name, annotation_type, cg_table_id,
-                            n_threads=1):
+                            n_threads=1, client=None):
     """ Reads data from all annotations and acquires their mapping to root_ids
 
     :param dataset_name: str
@@ -134,8 +134,10 @@ def process_all_annotations(dataset_name, annotation_type, cg_table_id,
     :return: dict
         annotation_id -> deserialized data
     """
-    amdb = annodb.AnnotationMetaDB()
-
+    if client is None:
+        amdb = annodb.AnnotationMetaDB()
+    else:
+        amdb = annodb.AnnotationMetaDB(client)
     # The `max_annotation_id` sets an upper limit and can be used to iterate
     # through all smaller ids. However, there is no guarantee that any smaller
     # id exists, it is only a guarantee that no larger id exists at the time
