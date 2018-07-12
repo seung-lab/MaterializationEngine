@@ -5,6 +5,7 @@ import pytest
 from test_setup import *
 from materializationengine.materialize import materialize_all_annotations
 
+
 def create_chunk(cgraph, vertices=None, edges=None, timestamp=None):
     """
     Helper function to add vertices and edges to the chunkedgraph - no safety checks!
@@ -64,7 +65,7 @@ def test_data(chunkgraph_tuple, annodb, test_annon_dataset):
     """
 
     cgraph, table_id = chunkgraph_tuple
-  
+
     # Chunk A
     create_chunk(cgraph,
                  vertices=[to_label(cgraph, 1, 0, 0, 0, 0),
@@ -117,7 +118,6 @@ def test_data(chunkgraph_tuple, annodb, test_annon_dataset):
         }
     }
 
-
     sv_ids = np.array([pre_id, post_id], dtype=np.uint64)
     annotations = [(sv_ids, json.dumps(synapse_d))]
     annodb.insert_annotations(test_annon_dataset, 'synapse', annotations,
@@ -129,10 +129,10 @@ def test_data(chunkgraph_tuple, annodb, test_annon_dataset):
 def test_simple_test(test_data, annodb, test_annon_dataset):
     cgraph, table_id = test_data
     print(table_id)
-    
-    df=materialize_all_annotations(test_annon_dataset,
-                                "synapse",
-                                table_id,
-                                n_threads=1)
+
+    df = materialize_all_annotations(test_annon_dataset,
+                                     "synapse",
+                                     table_id,
+                                     n_threads=1)
     print(df)
     assert(False)
