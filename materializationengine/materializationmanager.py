@@ -33,7 +33,7 @@ def materialize_bsp(sv_id_to_root_id_dict, item):
     """
 
     try:
-        item['root_id'] = sv_id_to_root_id_dict[item['supervoxel_id']]
+        item['root_id'] = int(sv_id_to_root_id_dict[item['supervoxel_id']])
     except KeyError:
         msg = "cannot process {}, root_id not found in {}"
         raise RootIDNotFoundException(msg.format(item, sv_id_to_root_id_dict))
@@ -60,7 +60,6 @@ class MaterializationManager(object):
             self._sqlalchemy_session = None
 
         self._schema_init = get_schema(self.annotation_type)
-
 
     @property
     def annotation_type(self):
@@ -105,6 +104,11 @@ class MaterializationManager(object):
 
         return info
 
+    def _drop_table(self):
+        """ Deletes the table in the database """
+        table_name = "%s_%s" % (self.dataset_name, self.annotation_type)
+        Base.metadata.tables[table_name].drop(self.sqlalchemy_engine)
+
     def get_schema(self, sv_id_to_root_id_dict):
         """ Loads schema with appropriate context
 
@@ -112,8 +116,8 @@ class MaterializationManager(object):
         :return:
         """
         context = dict()
-        # context['bsp_fn'] = functools.partial(materialize_bsp,
-        #                                       sv_id_to_root_id_dict)
+        context['bsp_fn'] = functools.partial(materialize_bsp,
+                                              sv_id_to_root_id_dict)
         context['postgis'] = self.is_sql
         return self.schema_init(context=context)
 
@@ -142,8 +146,6 @@ class MaterializationManager(object):
 
         # # create a new model instance with data
         annotation = self.annotation_model(**deserialized_annotation)
-
-        print(annotation)
 
         # create a new db session
         this_session = self.sqlalchemy_session()
