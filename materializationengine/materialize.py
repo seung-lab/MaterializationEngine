@@ -20,18 +20,11 @@ def _process_all_annotations_thread(args):
     anno_id_start, anno_id_end, dataset_name, annotation_type, cg_table_id, \
         serialized_amdb_info, serialized_cg_info, serialized_mm_info = args
 
-    amdb = annodb.AnnotationMetaDB(project_id=serialized_amdb_info["project_id"],
-                                   instance_id=serialized_amdb_info["instance_id"],
-                                   credentials=serialized_amdb_info["credentials"])
+    amdb = annodb.AnnotationMetaDB(**serialized_amdb_info)
 
-    cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id,
-                                   project_id=serialized_amdb_info["project_id"],
-                                   instance_id=serialized_amdb_info["instance_id"],
-                                   credentials=serialized_amdb_info["credentials"])
+    cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id, **serialized_amdb_info)
 
-    mm = materializationmanager.MaterializationManager(dataset_name=serialized_mm_info["dataset_name"],
-                                                       annotation_type=serialized_mm_info["annotation_type"],
-                                                       sqlalchemy_database_uri=serialized_mm_info["sqlalchemy_database_uri"])
+    mm = materializationmanager.MaterializationManager(**serialized_mm_info)
 
     annos_dict = {}
 
@@ -106,16 +99,22 @@ def process_all_annotations(cg_table_id, dataset_name, annotation_type,
     if max_annotation_id == 0:
         return {}
 
+    cg_info = cg.get_serialized_info()
+    amdb_info = amdb.get_serialized_info()
+
+    if n_threads > 1:
+        del cg_info["credentials"]
+        del amdb_info["credentials"]
+
     # Annotation ids start at 1
     id_chunks = np.linspace(1, max_annotation_id + 1,
                             min([n_threads * 3, max_annotation_id]) + 1).astype(np.uint64)
-
     multi_args = []
     for i_id_chunk in range(len(id_chunks) - 1):
         multi_args.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1],
                            dataset_name, annotation_type, cg_table_id,
-                           amdb.get_serialized_info(),
-                           cg.get_serialized_info(),
+                           amdb_info,
+                           cg_info,
                            mm.get_serialized_info()])
 
     if n_threads == 1:
