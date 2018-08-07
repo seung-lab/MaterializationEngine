@@ -27,8 +27,9 @@ def load_synapses(path=HOME + "/Downloads/pinky40_run2_remapped.df"):
     return df
 
 
-def insert_synapses(syn_df, dataset_name='pinky40', annotation_type="synapse"):
-    ac = annotationclient.AnnotationClient("https://35.196.20.36:4001")
+def insert_synapses(syn_df, dataset_name='pinky40', annotation_type="synapse",
+                    endpoint="https://104.196.61.54:4001"):
+    ac = annotationclient.AnnotationClient(endpoint)
     ac.bulk_import_df(dataset_name, annotation_type, syn_df)
 
 
