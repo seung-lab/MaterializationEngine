@@ -49,8 +49,8 @@ def _process_all_annotations_thread(args):
             mm.add_annotation_to_sql_database(deserialized_annotation)
         else:
             annos_dict[annotation_id] = deserialized_annotation
-
-    return annos_dict
+    if not mm.is_sql:
+        return annos_dict
 
 
 def process_all_annotations(cg_table_id, dataset_name, annotation_type,

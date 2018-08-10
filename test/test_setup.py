@@ -1,5 +1,6 @@
 import pytest
 from dynamicannotationdb.annodb import AnnotationMetaDB
+from emannotationschemas import get_types
 from pychunkedgraph.backend import chunkedgraph
 import subprocess
 import os
@@ -70,7 +71,9 @@ def test_annon_dataset(annodb):
     amdb = annodb
 
     dataset_name = 'test_dataset'
-    amdb.create_table(dataset_name, 'synapse')
+    types = get_types()
+    for type_ in types:
+        amdb.create_table(dataset_name, type_)
     yield amdb, dataset_name
 
 
