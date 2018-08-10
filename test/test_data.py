@@ -4,6 +4,7 @@ import json
 import pytest
 from test_setup import *
 from materializationengine.materialize import materialize_all_annotations
+import pdb
 
 
 def create_chunk(cgraph, vertices=None, edges=None, timestamp=None):
@@ -123,14 +124,24 @@ def test_data(chunkgraph_tuple, test_annon_dataset):
     sv_ids = np.array([pre_id, post_id], dtype=np.uint64)
     annotations = [(sv_ids, json.dumps(synapse_d))]
 
-    print(amdb)
-
     # Insert into table
-    amdb.insert_annotations(dataset_name=dataset_name,
-                            annotation_type=annotation_type,
-                            annotations=annotations,
-                            user_id="user_id")
+    oids = amdb.insert_annotations(dataset_name=dataset_name,
+                                   annotation_type=annotation_type,
+                                   annotations=annotations,
+                                   user_id="user_id")
 
+    bouton_shape_annotation = {
+        'target_id': int(oids[0]),
+        'shape': 'potato'
+    }
+
+    blank_sv_ids = np.array([], dtype=np.uint64)
+    ref_annotations = [(blank_sv_ids, json.dumps(bouton_shape_annotation))]
+    oids = amdb.insert_annotations(dataset_name=dataset_name,
+                                   annotation_type='bouton_shape',
+                                   annotations=ref_annotations,
+                                   user_id="user_id")
+    print('bouton_shape_oids', oids)
     yield chunkgraph_tuple
 
 
@@ -149,4 +160,16 @@ def test_simple_test(test_data, test_annon_dataset):
                                      cg_instance_id=cgraph.instance_id,
                                      n_threads=1)
     print(df)
-   
+
+    df_bs = materialize_all_annotations(table_id,
+                                        dataset_name=dataset_name,
+                                        annotation_type="bouton_shape",
+                                        amdb_client=amdb.client,
+                                        amdb_instance_id=amdb.instance_id,
+                                        cg_client=cgraph.client,
+                                        cg_instance_id=cgraph.instance_id,
+                                        n_threads=1)
+
+    print(df_bs)
+
+    assert(False)
