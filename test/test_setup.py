@@ -81,7 +81,7 @@ def chunkgraph_tuple(bigtable_client, fan_out=2, n_layers=4):
                                       client=bigtable_client,
                                       instance_id="test_instance",
                                       is_new=True, fan_out=fan_out,
-                                      n_layers=n_layers)
+                                      n_layers=n_layers, cv_path="", chunk_size=(64, 64, 64))
 
     yield graph, cg_table_id
     graph.table.delete()

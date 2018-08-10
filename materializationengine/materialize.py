@@ -50,8 +50,7 @@ def _process_all_annotations_thread(args):
         else:
             annos_dict[annotation_id] = deserialized_annotation
 
-    if mm.is_sql:
-        return annos_dict
+    return annos_dict
 
 
 def process_all_annotations(cg_table_id, dataset_name, annotation_type,

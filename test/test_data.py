@@ -149,4 +149,4 @@ def test_simple_test(test_data, test_annon_dataset):
                                      cg_instance_id=cgraph.instance_id,
                                      n_threads=1)
     print(df)
-    assert(False)
+   
