@@ -122,9 +122,9 @@ def process_all_annotations(cg_table_id, dataset_name, annotation_type,
             n_threads=n_threads,
             verbose=True, debug=n_threads == 1)
     else:
-        results = mu.multiprocess_func(
+        results = mu.multisubprocess_func(
             _process_all_annotations_thread, multi_args,
-            n_threads=n_threads)
+            n_threads=n_threads, package_name="materializationengine")
 
     if not mm.is_sql:
         # Collect the results
