@@ -2,9 +2,7 @@ import numpy as np
 from math import inf
 import json
 import pytest
-from test_setup import *
 from materializationengine.materialize import materialize_all_annotations
-import pdb
 
 
 def create_chunk(cgraph, vertices=None, edges=None, timestamp=None):
@@ -171,5 +169,3 @@ def test_simple_test(test_data, test_annon_dataset):
                                         n_threads=1)
 
     print(df_bs)
-
-    assert(False)
