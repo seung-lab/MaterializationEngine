@@ -36,11 +36,12 @@ def _process_all_annotations_thread(args):
             continue
 
         sv_id_to_root_id_dict = {}
-        for i_sv_id, sv_id in enumerate(sv_ids):
-            print("%d / %d" % (i_sv_id + 1, len(sv_ids)), end='\r')
+        if sv_ids is not None:
+            for i_sv_id, sv_id in enumerate(sv_ids):
+                print("%d / %d" % (i_sv_id + 1, len(sv_ids)), end='\r')
 
-            # Read root_id from pychunkedgraph
-            sv_id_to_root_id_dict[sv_id] = cg.get_root(sv_id)
+                # Read root_id from pychunkedgraph
+                sv_id_to_root_id_dict[sv_id] = cg.get_root(sv_id)
 
         deserialized_annotation = mm.deserialize_single_annotation(
             annotation_data_b, sv_id_to_root_id_dict)
