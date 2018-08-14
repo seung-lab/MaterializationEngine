@@ -1,8 +1,10 @@
 from materializationengine import materialize
-from emannotationschemas import get_types
+from emannotationschemas import get_types, get_schema
+from emannotationschemas.base import ReferenceAnnotation
 import argschema
 import os
 import marshmallow as mm
+
 
 class BatchMaterializationSchema(argschema.ArgSchema):
     cg_table_id = mm.fields.Str(default="pinky40_fanout2_v7",
@@ -21,11 +23,26 @@ class BatchMaterializationSchema(argschema.ArgSchema):
 
 
 if __name__ == '__main__':
-    mod = argschema.ArgSchemaParser(schema_type= BatchMaterializationSchema)
-    sql_uri = mod.args.get('sql_uri', os.environ['MATERIALIZATION_POSTGRES_URI'])
-    
+    mod = argschema.ArgSchemaParser(schema_type=BatchMaterializationSchema)
+    sql_uri = mod.args.get(
+        'sql_uri', os.environ['MATERIALIZATION_POSTGRES_URI'])
+
     types = get_types()
-    for type_ in types:
+
+    normal_types = [type_ for type_ in types if not issubclass(get_schema(type_),
+                                                               ReferenceAnnotation)]
+    reference_types = [type_ for type_ in types if issubclass(get_schema(type_),
+                                                              ReferenceAnnotation)]
+    for type_ in normal_types:
+        materialize.materialize_all_annotations(mod.args["cg_table_id"],
+                                                mod.args["dataset_name"],
+                                                type_,
+                                                amdb_instance_id=mod.args["amdb_instance_id"],
+                                                cg_instance_id=mod.args["cg_instance_id"],
+                                                sqlalchemy_database_uri=sql_uri,
+                                                n_threads=mod.args["n_threads"])
+
+    for type_ in reference_types:
         materialize.materialize_all_annotations(mod.args["cg_table_id"],
                                                 mod.args["dataset_name"],
                                                 type_,
