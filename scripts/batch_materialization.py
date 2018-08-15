@@ -31,14 +31,14 @@ if __name__ == '__main__':
 
     types = get_types()
 
+    # sort so the Reference annotations are materialized after the regular ones
+    # TODO clarify if Reference of references are something we want to allow
     sorted_types = sorted(types, lambda x: issubclass(get_schema(x),
                                                       ReferenceAnnotation))
 
     engine = sqlalchemy.create_engine(sql_uri)
 
     for type_ in sorted_types:
-        Model = make_annotation_model(mod.args["dataset_name"], type_)
-        Model.__table__.drop(engine)
         materialize.materialize_all_annotations(mod.args["cg_table_id"],
                                                 mod.args["dataset_name"],
                                                 type_,
