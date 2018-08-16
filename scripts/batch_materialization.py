@@ -1,6 +1,8 @@
 from materializationengine import materialize
 from emannotationschemas import get_types, get_schema
 from emannotationschemas.base import ReferenceAnnotation
+from emannotationschemas.models import make_annotation_model
+import sqlalchemy
 import argschema
 import os
 import marshmallow as mm
@@ -29,20 +31,14 @@ if __name__ == '__main__':
 
     types = get_types()
 
-    normal_types = [type_ for type_ in types if not issubclass(get_schema(type_),
-                                                               ReferenceAnnotation)]
-    reference_types = [type_ for type_ in types if issubclass(get_schema(type_),
-                                                              ReferenceAnnotation)]
-    for type_ in normal_types:
-        materialize.materialize_all_annotations(mod.args["cg_table_id"],
-                                                mod.args["dataset_name"],
-                                                type_,
-                                                amdb_instance_id=mod.args["amdb_instance_id"],
-                                                cg_instance_id=mod.args["cg_instance_id"],
-                                                sqlalchemy_database_uri=sql_uri,
-                                                n_threads=mod.args["n_threads"])
+    # sort so the Reference annotations are materialized after the regular ones
+    # TODO clarify if Reference of references are something we want to allow
+    sorted_types = sorted(types, lambda x: issubclass(get_schema(x),
+                                                      ReferenceAnnotation))
 
-    for type_ in reference_types:
+    engine = sqlalchemy.create_engine(sql_uri)
+
+    for type_ in sorted_types:
         materialize.materialize_all_annotations(mod.args["cg_table_id"],
                                                 mod.args["dataset_name"],
                                                 type_,
