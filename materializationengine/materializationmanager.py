@@ -40,18 +40,22 @@ def materialize_bsp(sv_id_to_root_id_dict, item):
 
 
 class MaterializationManager(object):
-    def __init__(self, dataset_name, annotation_type,
+    def __init__(self, dataset_name, annotation_type, annotation_model=None,
                  sqlalchemy_database_uri=None):
         self._dataset_name = dataset_name
         self._annotation_type = annotation_type
         self._sqlalchemy_database_uri = sqlalchemy_database_uri
 
-        self._annotation_model = make_annotation_model(dataset_name,
-                                                       annotation_type)
+        if annotation_model is not None:
+            self._annotation_model = annotation_model
+        else:
+            self._annotation_model = make_annotation_model(dataset_name,
+                                                           annotation_type)
 
         if sqlalchemy_database_uri is not None:
             self._sqlalchemy_engine = create_engine(sqlalchemy_database_uri,
-                                                    echo=True)
+                                                    echo=True, pool_size=20,
+                                                    max_overflow=-1)
             Base.metadata.create_all(self.sqlalchemy_engine)
 
             self._sqlalchemy_session = sessionmaker(bind=self.sqlalchemy_engine)
@@ -59,7 +63,10 @@ class MaterializationManager(object):
             self._sqlalchemy_engine = None
             self._sqlalchemy_session = None
 
-        self._schema_init = get_schema(self.annotation_type)
+        try:
+            self._schema_init = get_schema(self.annotation_type)
+        except:
+            self._schema_init = None
 
     @property
     def annotation_type(self):
@@ -115,6 +122,8 @@ class MaterializationManager(object):
         :param root_id_d:
         :return:
         """
+        assert self.schema_init is not None
+
         context = dict()
         context['bsp_fn'] = functools.partial(materialize_bsp,
                                               sv_id_to_root_id_dict)
@@ -128,12 +137,16 @@ class MaterializationManager(object):
         :param sv_id_to_root_id_dict: dict
         :return: dict
         """
+
         schema = self.get_schema(sv_id_to_root_id_dict)
         data = schema.load(json.loads(blob)).data
 
         return flatten_dict(data)
 
     def add_annotation_to_sql_database(self, deserialized_annotation):
+        self.add_annotations_to_sql_database([deserialized_annotation])
+
+    def add_annotations_to_sql_database(self, deserialized_annotations):
         """ Transforms annotation object into postgis format and commits to the
             database
 
@@ -141,17 +154,18 @@ class MaterializationManager(object):
         """
         assert self.is_sql
 
-        # remove the type field because we don't want it as a column
-        deserialized_annotation.pop('type', None)
-
-        # # create a new model instance with data
-        annotation = self.annotation_model(**deserialized_annotation)
-
         # create a new db session
         this_session = self.sqlalchemy_session()
 
-        # add this annotation object to database
-        this_session.add(annotation)
+        for deserialized_annotation in deserialized_annotations:
+            # remove the type field because we don't want it as a column
+            deserialized_annotation.pop('type', None)
+
+            # # create a new model instance with data
+            annotation = self.annotation_model(**deserialized_annotation)
+
+            # add this annotation object to database
+            this_session.add(annotation)
 
         # commit this transaction to database
         this_session.commit()

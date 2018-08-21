@@ -1,5 +1,5 @@
 import pandas as pd
-from emannotationschemas.models import make_all_models, Base
+from emannotationschemas.models import make_all_models, Base, root_model_name, make_cell_segment_model
 from emannotationschemas.base import flatten_dict
 from emannotationschemas import get_schema
 from functools import partial
@@ -18,7 +18,8 @@ from . import materializationmanager
 def _process_all_annotations_thread(args):
     """ Helper for process_all_annotations """
     anno_id_start, anno_id_end, dataset_name, annotation_type, cg_table_id, \
-        serialized_amdb_info, serialized_cg_info, serialized_mm_info = args
+        serialized_amdb_info, serialized_cg_info, serialized_mm_info, \
+        time_stamp = args
 
     amdb = annodb.AnnotationMetaDB(**serialized_amdb_info)
 
@@ -30,7 +31,10 @@ def _process_all_annotations_thread(args):
 
     for annotation_id in range(anno_id_start, anno_id_end):
         # Read annoation data from dynamicannotationdb
-        annotation_data_b, sv_ids = amdb.get_annotation(dataset_name, annotation_type, annotation_id)
+        annotation_data_b, sv_ids = amdb.get_annotation(dataset_name,
+                                                        annotation_type,
+                                                        annotation_id,
+                                                        time_stamp=time_stamp)
 
         if annotation_data_b is None:
             continue
@@ -55,7 +59,7 @@ def _process_all_annotations_thread(args):
 
 
 def process_all_annotations(cg_table_id, dataset_name, annotation_type,
-                            sqlalchemy_database_uri=None,
+                            time_stamp, sqlalchemy_database_uri=None,
                             amdb_client=None, amdb_instance_id=None,
                             cg_client=None, cg_instance_id=None, n_threads=1):
     """ Reads data from all annotations and acquires their mapping to root_ids
@@ -115,7 +119,8 @@ def process_all_annotations(cg_table_id, dataset_name, annotation_type,
                            dataset_name, annotation_type, cg_table_id,
                            amdb_info,
                            cg_info,
-                           mm.get_serialized_info()])
+                           mm.get_serialized_info(),
+                           time_stamp])
 
     if n_threads == 1:
         results = mu.multiprocess_func(
@@ -135,10 +140,91 @@ def process_all_annotations(cg_table_id, dataset_name, annotation_type,
 
         return anno_dict
 
+def _materialize_root_ids_thread(args):
+    root_ids, mm_info, serialized_mm_info = args
+
+    mm = materializationmanager.MaterializationManager(**serialized_mm_info)
+
+    batch_size = 100
+    annotations = []
+
+    annos_dict = {}
+    for root_id in root_ids:
+
+        if mm.is_sql:
+            annotations.append({"root_id": int(root_id)})
+            if len(annotations) >= batch_size:
+                mm.add_annotations_to_sql_database(annotations)
+                annotations = []
+        else:
+            annos_dict[root_id] = {"root_id": root_id}
+
+        if len(annotations) > 0:
+            mm.add_annotations_to_sql_database(annotations)
+
+    if not mm.is_sql:
+        return annos_dict
+
+def materialize_root_ids(cg_table_id, dataset_name, time_stamp,
+                         sqlalchemy_database_uri=None, cg_client=None,
+                         cg_instance_id=None, n_threads=1):
+
+    if cg_client is None:
+        cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id)
+    elif cg_instance_id is not None:
+        cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id,
+                                       client=cg_client,
+                                       instance_id=cg_instance_id)
+    else:
+        raise Exception("Missing Instance ID")
+
+    root_ids = cg.get_latest_roots(time_stamp=time_stamp, n_threads=n_threads)
+
+    print(len(root_ids))
+
+    mm = materializationmanager.MaterializationManager(
+        dataset_name=dataset_name, annotation_type=root_model_name.lower(),
+        annotation_model=make_cell_segment_model(dataset_name),
+        sqlalchemy_database_uri=sqlalchemy_database_uri)
+
+    if mm.is_sql:
+        mm._drop_table()
+        print("Dropped table")
+
+        mm = materializationmanager.MaterializationManager(
+            dataset_name=dataset_name,
+            annotation_type=root_model_name.lower(),
+            annotation_model=make_cell_segment_model(dataset_name),
+            sqlalchemy_database_uri=sqlalchemy_database_uri)
+
+    root_id_blocks = np.array_split(root_ids, n_threads*3)
+    multi_args = []
+
+    for root_id_block in root_id_blocks:
+        multi_args.append([root_id_block, mm.get_serialized_info()])
+
+    if n_threads == 1:
+        results = mu.multiprocess_func(
+            _materialize_root_ids_thread, multi_args,
+            n_threads=n_threads,
+            verbose=True, debug=n_threads == 1)
+    else:
+        results = mu.multisubprocess_func(
+            _materialize_root_ids_thread, multi_args,
+            n_threads=n_threads, package_name="materializationengine")
+
+    if not mm.is_sql:
+        # Collect the results
+        anno_dict = {}
+        for result in results:
+            anno_dict.update(result)
+
+        return anno_dict
 
 def materialize_all_annotations(cg_table_id,
                                 dataset_name,
                                 annotation_type,
+                                time_stamp,
                                 sqlalchemy_database_uri=None,
                                 amdb_client=None,
                                 amdb_instance_id=None,
@@ -157,8 +243,16 @@ def materialize_all_annotations(cg_table_id,
     :param n_threads: int
          number of threads to use to materialize
     """
+    mm = materializationmanager.MaterializationManager(dataset_name=dataset_name,
+                                                       annotation_type=annotation_type,
+                                                       sqlalchemy_database_uri=sqlalchemy_database_uri)
+
+    if mm.is_sql:
+        mm._drop_table()
+        print("Dropped table")
 
     anno_dict = process_all_annotations(cg_table_id,
+                                        time_stamp=time_stamp,
                                         dataset_name=dataset_name,
                                         annotation_type=annotation_type,
                                         sqlalchemy_database_uri=sqlalchemy_database_uri,
