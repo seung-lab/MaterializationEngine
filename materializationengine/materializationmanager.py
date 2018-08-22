@@ -6,7 +6,12 @@ from emannotationschemas.base import flatten_dict
 from emannotationschemas import get_schema
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.schema import DropTable
+from sqlalchemy.ext.compiler import compiles
 
+@compiles(DropTable, "postgresql")
+def _compile_drop_table(element, compiler, **kwargs):
+    return compiler.visit_drop_table(element) + " CASCADE"
 
 class MaterializeAnnotationException(Exception):
     pass
@@ -39,6 +44,32 @@ def materialize_bsp(sv_id_to_root_id_dict, item):
         raise RootIDNotFoundException(msg.format(item, sv_id_to_root_id_dict))
 
 
+class DB(object):
+    def __init__(self, sqlalchemy_database_uri):
+        self._sqlalchemy_database_uri = sqlalchemy_database_uri
+
+        self._sqlalchemy_engine = create_engine(sqlalchemy_database_uri,
+                                                echo=False, pool_size=20,
+                                                max_overflow=-1)
+        Base.metadata.create_all(self.sqlalchemy_engine)
+
+        self._sqlalchemy_session = sessionmaker(bind=self.sqlalchemy_engine)
+
+
+    @property
+    def sqlalchemy_database_uri(self):
+        return self._sqlalchemy_database_uri
+
+    @property
+    def sqlalchemy_engine(self):
+        return self._sqlalchemy_engine
+
+    @property
+    def sqlalchemy_session(self):
+        return self._sqlalchemy_session
+
+
+
 class MaterializationManager(object):
     def __init__(self, dataset_name, annotation_type, annotation_model=None,
                  sqlalchemy_database_uri=None):
@@ -54,7 +85,7 @@ class MaterializationManager(object):
 
         if sqlalchemy_database_uri is not None:
             self._sqlalchemy_engine = create_engine(sqlalchemy_database_uri,
-                                                    echo=True, pool_size=20,
+                                                    echo=False, pool_size=20,
                                                     max_overflow=-1)
             Base.metadata.create_all(self.sqlalchemy_engine)
 

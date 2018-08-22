@@ -27,15 +27,16 @@ def _process_all_annotations_thread(args):
 
     mm = materializationmanager.MaterializationManager(**serialized_mm_info)
 
-    annos_dict = {}
+    batch_size = 100
+    annotations = []
 
+    annos_dict = {}
     for annotation_id in range(anno_id_start, anno_id_end):
         # Read annoation data from dynamicannotationdb
         annotation_data_b, sv_ids = amdb.get_annotation(dataset_name,
                                                         annotation_type,
                                                         annotation_id,
                                                         time_stamp=time_stamp)
-
         if annotation_data_b is None:
             continue
 
@@ -51,9 +52,17 @@ def _process_all_annotations_thread(args):
             annotation_data_b, sv_id_to_root_id_dict)
 
         if mm.is_sql:
-            mm.add_annotation_to_sql_database(deserialized_annotation)
+            annotations.append(deserialized_annotation)
+
+            if len(annotations) >= batch_size:
+                mm.add_annotations_to_sql_database(annotations)
+                annotations = []
         else:
             annos_dict[annotation_id] = deserialized_annotation
+
+    if len(annotations) > 0:
+        mm.add_annotations_to_sql_database(annotations)
+
     if not mm.is_sql:
         return annos_dict
 
@@ -141,9 +150,10 @@ def process_all_annotations(cg_table_id, dataset_name, annotation_type,
         return anno_dict
 
 def _materialize_root_ids_thread(args):
-    root_ids, mm_info, serialized_mm_info = args
+    root_ids, serialized_mm_info = args
 
-    mm = materializationmanager.MaterializationManager(**serialized_mm_info)
+    mm = materializationmanager.MaterializationManager(**serialized_mm_info,
+                                                       annotation_model=make_cell_segment_model(serialized_mm_info["dataset_name"]),)
 
     batch_size = 100
     annotations = []
@@ -153,14 +163,15 @@ def _materialize_root_ids_thread(args):
 
         if mm.is_sql:
             annotations.append({"root_id": int(root_id)})
+
             if len(annotations) >= batch_size:
                 mm.add_annotations_to_sql_database(annotations)
                 annotations = []
         else:
             annos_dict[root_id] = {"root_id": root_id}
 
-        if len(annotations) > 0:
-            mm.add_annotations_to_sql_database(annotations)
+    if len(annotations) > 0:
+        mm.add_annotations_to_sql_database(annotations)
 
     if not mm.is_sql:
         return annos_dict
@@ -179,8 +190,6 @@ def materialize_root_ids(cg_table_id, dataset_name, time_stamp,
         raise Exception("Missing Instance ID")
 
     root_ids = cg.get_latest_roots(time_stamp=time_stamp, n_threads=n_threads)
-
-    print(len(root_ids))
 
     mm = materializationmanager.MaterializationManager(
         dataset_name=dataset_name, annotation_type=root_model_name.lower(),
@@ -247,9 +256,9 @@ def materialize_all_annotations(cg_table_id,
                                                        annotation_type=annotation_type,
                                                        sqlalchemy_database_uri=sqlalchemy_database_uri)
 
-    if mm.is_sql:
-        mm._drop_table()
-        print("Dropped table")
+    # if mm.is_sql:
+    #     mm._drop_table()
+    #     print("Dropped table")
 
     anno_dict = process_all_annotations(cg_table_id,
                                         time_stamp=time_stamp,
