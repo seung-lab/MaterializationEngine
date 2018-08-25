@@ -55,8 +55,10 @@ def bigtable_client(request):
     # setup Emulator-Finalizer
 
     def fin():
+        print('tearing down emulator')
         os.killpg(os.getpgid(bigtables_emulator.pid), SIGTERM)
         bigtables_emulator.wait()
+        print('emulator down')
 
     request.addfinalizer(fin)
 
@@ -93,3 +95,8 @@ def chunkgraph_tuple(bigtable_client, fan_out=2, n_layers=4):
     graph.table.delete()
 
     print("\n\nTABLE DELETED")
+
+
+@pytest.fixture(scope='session')
+def dburi():
+    return os.environ.get('MATERIALIZATION_POSTGRES_URI', None)

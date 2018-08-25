@@ -2,7 +2,9 @@ import numpy as np
 from math import inf
 import json
 import pytest
-from materializationengine.materialize import materialize_all_annotations
+from materializationengine.materialize import materialize_all_annotations, materialize_root_ids
+import datetime
+import pdb
 
 
 def create_chunk(cgraph, vertices=None, edges=None, timestamp=None):
@@ -128,44 +130,32 @@ def test_data(chunkgraph_tuple, test_annon_dataset):
                                    annotations=annotations,
                                    user_id="user_id")
 
-    bouton_shape_annotation = {
-        'target_id': int(oids[0]),
-        'shape': 'potato'
-    }
-
-    blank_sv_ids = np.array([], dtype=np.uint64)
-    ref_annotations = [(blank_sv_ids, json.dumps(bouton_shape_annotation))]
-    oids = amdb.insert_annotations(dataset_name=dataset_name,
-                                   annotation_type='bouton_shape',
-                                   annotations=ref_annotations,
-                                   user_id="user_id")
-    print('bouton_shape_oids', oids)
+    print('oids', oids)
     yield chunkgraph_tuple
 
 
-def test_simple_test(test_data, test_annon_dataset):
+def test_simple_test(test_data, test_annon_dataset, dburi):
     cgraph, table_id = test_data
     amdb, dataset_name = test_annon_dataset
 
     print(amdb.get_existing_tables())
+    time_stamp = datetime.datetime.utcnow()
 
-    df = materialize_all_annotations(table_id,
-                                     dataset_name=dataset_name,
-                                     annotation_type="synapse",
-                                     amdb_client=amdb.client,
-                                     amdb_instance_id=amdb.instance_id,
-                                     cg_client=cgraph.client,
-                                     cg_instance_id=cgraph.instance_id,
-                                     n_threads=1)
-    print(df)
-
-    df_bs = materialize_all_annotations(table_id,
-                                        dataset_name=dataset_name,
-                                        annotation_type="bouton_shape",
-                                        amdb_client=amdb.client,
-                                        amdb_instance_id=amdb.instance_id,
-                                        cg_client=cgraph.client,
-                                        cg_instance_id=cgraph.instance_id,
-                                        n_threads=1)
-
-    print(df_bs)
+    materialize_root_ids(table_id,
+                         dataset_name,
+                         time_stamp,
+                         cg_client=cgraph.client,
+                         cg_instance_id=cgraph.instance_id,
+                         sqlalchemy_database_uri=dburi,
+                         n_threads=1)
+    
+    materialize_all_annotations(table_id,
+                                dataset_name=dataset_name,
+                                annotation_type="synapse",
+                                time_stamp=time_stamp,
+                                sqlalchemy_database_uri=dburi,
+                                amdb_client=amdb.client,
+                                amdb_instance_id=amdb.instance_id,
+                                cg_client=cgraph.client,
+                                cg_instance_id=cgraph.instance_id,
+                                n_threads=1)
