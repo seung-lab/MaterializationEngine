@@ -9,7 +9,6 @@ addons:
     packages:
     - postgresql-9.6-postgis-2.3
 before_script:
-  - psql -U postgres -c 'create database postgres'
   - psql -U postgres -c "create extension postgis"
 install:
   - pip install codecov Flask Flask_Cors google-cloud-bigtable==0.28.1 bitstring cloud-volume networkx
