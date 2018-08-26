@@ -256,9 +256,9 @@ def materialize_all_annotations(cg_table_id,
                                                        annotation_type=annotation_type,
                                                        sqlalchemy_database_uri=sqlalchemy_database_uri)
 
-    # if mm.is_sql:
-    #     mm._drop_table()
-    #     print("Dropped table")
+    if mm.is_sql:
+         mm._drop_table()
+         print("Dropped table")
 
     anno_dict = process_all_annotations(cg_table_id,
                                         time_stamp=time_stamp,

@@ -9,7 +9,8 @@ from google.cloud import bigtable, exceptions
 from time import sleep
 from signal import SIGTERM
 import grpc
-
+from sqlalchemy import create_engine
+from emannotationschemas.models import Base, make_all_models
 
 class DoNothingCreds(credentials.Credentials):
     def refresh(self, request):
@@ -74,7 +75,7 @@ def annodb(bigtable_client):
 def test_annon_dataset(annodb):
     amdb = annodb
 
-    dataset_name = 'test_dataset'
+    dataset_name = 'testdataset'
     types = get_types()
     for type_ in types:
         amdb.create_table(dataset_name, type_)
@@ -98,5 +99,12 @@ def chunkgraph_tuple(bigtable_client, fan_out=2, n_layers=4):
 
 
 @pytest.fixture(scope='session')
-def dburi():
-    return os.environ.get('MATERIALIZATION_POSTGRES_URI', None)
+def dburi(test_annon_dataset):
+    amdb, dataset_name = test_annon_dataset
+    uri = os.environ.get('MATERIALIZATION_POSTGRES_URI', None)
+    if uri is not None:
+        engine = create_engine(uri)
+        models = make_all_models([dataset_name])
+        Base.metadata.create_all(engine)
+
+    return uri

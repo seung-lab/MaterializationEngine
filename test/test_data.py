@@ -2,9 +2,9 @@ import numpy as np
 from math import inf
 import json
 import pytest
-from materializationengine.materialize import materialize_all_annotations, materialize_root_ids
+from materializationengine.materialize import materialize_all_annotations
+from materializationengine.materialize import materialize_root_ids
 import datetime
-import pdb
 from emannotationschemas.models import make_dataset_models, root_model_name
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -141,35 +141,34 @@ def test_simple_test(test_data, test_annon_dataset, dburi):
     cgraph, table_id = test_data
     amdb, dataset_name = test_annon_dataset
 
-    print(amdb.get_existing_tables())
     time_stamp = datetime.datetime.utcnow()
 
-    root_df = materialize_root_ids(table_id,
-                              dataset_name,
-                              time_stamp,
-                              cg_client=cgraph.client,
-                              cg_instance_id=cgraph.instance_id,
-                              sqlalchemy_database_uri=dburi,
-                              n_threads=1)
-
+    root_d = materialize_root_ids(table_id,
+                                  dataset_name,
+                                  time_stamp,
+                                  cg_client=cgraph.client,
+                                  cg_instance_id=cgraph.instance_id,
+                                  sqlalchemy_database_uri=dburi,
+                                  n_threads=1)
 
     syn_df = materialize_all_annotations(table_id,
-                                     dataset_name=dataset_name,
-                                     annotation_type="synapse",
-                                     time_stamp=time_stamp,
-                                     sqlalchemy_database_uri=dburi,
-                                     amdb_client=amdb.client,
-                                     amdb_instance_id=amdb.instance_id,
-                                     cg_client=cgraph.client,
-                                     cg_instance_id=cgraph.instance_id,
-                                     n_threads=1)
+                                         dataset_name=dataset_name,
+                                         annotation_type="synapse",
+                                         time_stamp=time_stamp,
+                                         sqlalchemy_database_uri=dburi,
+                                         amdb_client=amdb.client,
+                                         amdb_instance_id=amdb.instance_id,
+                                         cg_client=cgraph.client,
+                                         cg_instance_id=cgraph.instance_id,
+                                         n_threads=1)
 
     if dburi is None:
-        assert(root_df.shape[0] == 2)
-        assert(syn_df.shape[0]==1)
+        assert(len(root_d.keys()) == 2)
+        assert(syn_df.shape[0] == 1)
     else:
         models = make_dataset_models(dataset_name)
         RootModel = models[root_model_name.lower()]
+        SynapseModel = models['synapse']
         engine = create_engine(dburi,
                                echo=False, pool_size=20,
                                max_overflow=-1)
@@ -178,3 +177,5 @@ def test_simple_test(test_data, test_annon_dataset, dburi):
         session = Session()
         num_roots = session.query(RootModel).count()
         assert(num_roots == 2)
+        num_synapses = session.query(SynapseModel).count()
+        assert(num_synapses == 1)
