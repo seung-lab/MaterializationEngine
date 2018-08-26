@@ -17,7 +17,7 @@ install:
   - git clone --depth 1 https://github.com/seung-lab/dynamicannotationdb.git dynamicannotationdb -b master
   - cd dynamicannotationdb && python setup.py install && cd ..
   - git clone --depth 1 https://github.com/seung-lab/emannotationschemas.git emannotationschemas -b master
-  - cd emannotationschemas && python emannotationschemas/setup.py install && cd ..
+  - cd emannotationschemas && python setup.py install && cd ..
   - pip install -r requirements.txt
   - pip install -r test_requirements.txt
 env:
