@@ -18,7 +18,7 @@ install:
   - python dynamicannotationdb/setup.py install 
   - git clone --depth 1 https://github.com/seung-lab/emannotationschemas.git emannotationschemas -b master
   - python emannotationschemas/setup.py install 
-  - pip install codecov flask
+  - pip install codecov flask flask_cors
   - pip install -r requirements.txt
   - pip install -r test_requirements.txt
 env:
