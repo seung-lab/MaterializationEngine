@@ -3,7 +3,6 @@ python:
   - "3.6"
 services:
   - docker
-# command to install dependencies
 install:
   - git clone --depth 1 https://github.com/seung-lab/pychunkedgraph.git pychunkedgraph -b svenmd-mst
   - python pychunkedgraph/setup.py install 
