@@ -12,7 +12,7 @@ before_script:
   - psql -U postgres -c 'create database postgres'
   - psql -U postgres -c "create extension postgis"
 install:
-  - pip install codecov Flask Flask_Cors google-cloud-bigtable
+  - pip install codecov Flask Flask_Cors google-cloud-bigtable bitstring cloud-volume networkx
   - git clone --depth 1 https://github.com/seung-lab/pychunkedgraph.git pychunkedgraph -b svenmd-mst
   - python pychunkedgraph/setup.py install 
   - git clone --depth 1 https://github.com/seung-lab/dynamicannotationdb.git dynamicannotationdb -b master
