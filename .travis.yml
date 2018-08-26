@@ -1,0 +1,26 @@
+language: python
+python:
+  - "3.6"
+services:
+  - docker
+# command to install dependencies
+install:
+  - git clone --depth 1 https://github.com/seung-lab/pychunkedgraph.git pychunkedgraph -b svenmd-mst
+  - python pychunkedgraph/setup.py install 
+  - git clone --depth 1 https://github.com/seung-lab/dynamicannotationdb.git dynamicannotationdb -b master
+  - python dynamicannotationdb/setup.py install 
+  - git clone --depth 1 https://github.com/seung-lab/emannotationschemas.git emannotationschemas -b master
+  - python emannotationschemas/setup.py install 
+  - pip install codecov
+  - pip install -r requirements.txt
+  - pip install -r test_requirements.txt
+before_install:
+  - docker-compose up -d
+env:
+  global:
+     - MATERIALIZATION_POSTGRES_URI=postgres://postgres:synapsedb@localhost:5432/postgres
+# command to run tests
+script:
+  - python setup.py pytest # or py.test for Python versions 3.5 and below
+cache:   
+  pip: true                                                                    
