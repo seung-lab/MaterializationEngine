@@ -85,7 +85,7 @@ def test_data(chunkgraph_tuple, test_annon_dataset):
     create_chunk(cgraph,
                  vertices=[to_label(cgraph, 1, 1, 0, 0, 0),
                            to_label(cgraph, 1, 1, 0, 0, 1)],
-                 edges=[(to_label(cgraph, 1, 1, 0, 0, 1),
+                 edges=[(to_label(cgraph, 1, 1, 0, 0, 0),
                          to_label(cgraph, 1, 0, 0, 0, 0), inf),
                         (to_label(cgraph, 1, 1, 0, 0, 1),
                          to_label(cgraph, 1, 2, 0, 0, 0), inf)])
@@ -103,9 +103,6 @@ def test_data(chunkgraph_tuple, test_annon_dataset):
     cgraph.add_layer(3, np.array([[2, 0, 0]]))
 
     cgraph.add_layer(4, np.array([[0, 0, 0], [1, 0, 0]]))
-
-    res = cgraph.table.read_rows()
-    res.consume_all()
 
     pre_id = to_label(cgraph, 1, 1, 0, 0, 0)
     post_id = to_label(cgraph, 1, 1, 0, 0, 1)
