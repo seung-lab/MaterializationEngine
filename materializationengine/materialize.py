@@ -1,5 +1,5 @@
 import pandas as pd
-from emannotationschemas.models import make_all_models, Base
+from emannotationschemas.models import make_all_models, Base, make_annotation_model_from_schema
 from emannotationschemas.base import flatten_dict
 from emannotationschemas import get_schema
 from functools import partial
@@ -171,3 +171,10 @@ def materialize_all_annotations(cg_table_id,
     if anno_dict is not None:
         df = pd.DataFrame.from_dict(anno_dict, orient="index")
         return df
+
+
+def bulk_process_annotations(dataset:str, table_name: str, schema_name: str, annotation_ids:list, version_name: str):
+
+    Schema = get_schema(schema_name)
+    Model = make_annotation_model_from_schema(dataset, table_name, Schema)
+    

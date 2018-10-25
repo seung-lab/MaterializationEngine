@@ -28,9 +28,7 @@ def materialize_dataset(dataset):
     # TODO clarify if Reference of references are something we want to allow
     sorted_types = sorted(types, lambda x: issubclass(get_schema(x),
                                                       ReferenceAnnotation))
-
-    engine = sqlalchemy.create_engine(sql_uri)
-
+xs
     for type_ in sorted_types:
         materialize.materialize_all_annotations(cg_table,
                                                 dataset,
