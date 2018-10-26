@@ -12,19 +12,19 @@ from pandas.io.json import json_normalize
 from pychunkedgraph.backend import chunkedgraph
 from multiwrapper import multiprocessing_utils as mu
 from dynamicannotationdb import annodb
-
+import cloudvolume
 from . import materializationmanager
 
 
 def _process_all_annotations_thread(args):
     """ Helper for process_all_annotations """
     anno_id_start, anno_id_end, dataset_name, table_name, schema_name, version, cg_table_id, \
-        serialized_amdb_info, serialized_cg_info, serialized_mm_info, pixel_ratios = args
+        serialized_amdb_info, serialized_cg_info, serialized_mm_info, serialized_cv_info, pixel_ratios = args
 
     amdb = annodb.AnnotationMetaDB(**serialized_amdb_info)
 
     cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id, **serialized_cg_info)
-
+    cv = cloudvolume.CloudVolume(**serialized_cv_info)
     mm = materializationmanager.MaterializationManager(**serialized_mm_info)
 
     annos_dict = {}
