@@ -1,3 +1,4 @@
 dynamicannotationdb
 pychunkedgraph
+emannotationschemas>=1.0.1
 argschema
