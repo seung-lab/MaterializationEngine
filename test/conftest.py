@@ -9,7 +9,10 @@ from google.cloud import bigtable, exceptions
 from time import sleep
 from signal import SIGTERM
 import grpc
+import tempfile
 
+tempdir = tempfile.mkdtemp()
+TEST_PATH = "file:/{}".format(tempdir)
 
 class DoNothingCreds(credentials.Credentials):
     def refresh(self, request):
@@ -77,6 +80,34 @@ def test_annon_dataset(annodb):
 
 
 @pytest.fixture(scope='session')
-def cv():
+def cv(N=64, blockN=16):
 
-    
+    block_per_row = int(N / blockN)
+
+    chunk_size = [32, 32, 32]
+    info = cloudvolume.CloudVolume.create_new_info(
+        num_channels=1,
+        layer_type='segmentation',
+        data_type='uint64',
+        encoding='raw',
+        resolution=[4, 4, 40],  # Voxel scaling, units are in nanometers
+        voxel_offset=[0, 0, 0],  # x,y,z offset in voxels from the origin
+        # Pick a convenient size for your underlying chunk representation
+        # Powers of two are recommended, doesn't need to cover image exactly
+        chunk_size=chunk_size,  # units are voxels
+        volume_size=[N, N, N],
+    )
+    vol = cloudvolume.CloudVolume(TEST_PATH, info=info)
+    vol.commit_info()
+    xx, yy, zz = np.meshgrid(*[np.arange(0, N) for cs in chunk_size])
+    id_ind = (np.uint64(xx / blockN),
+              np.uint64(yy / blockN),
+              np.uint64(zz / blockN))
+    id_shape = (block_per_row, block_per_row, block_per_row)
+
+    seg = np.ravel_multi_index(id_ind, id_shape)
+    vol[:] = np.uint64(seg)
+
+    yield TEST_PATH
+
+    shutil.rmtree(tempdir)
