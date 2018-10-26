@@ -69,15 +69,16 @@ def lookup_sv_and_cg_bsp(cg, cv, item, pixel_ratios = (1.0, 1.0, 1.0)):
 
 
 class MaterializationManager(object):
-    def __init__(self, dataset_name, annotation_type,
+    def __init__(self, dataset_name, schema_name,
                  table_name, version = 'v1',
                  sqlalchemy_database_uri=None):
         self._dataset_name = dataset_name
-        self._annotation_type = annotation_type
+        self._schema_name = schema_name
+        self._table_name = table_name
         self._sqlalchemy_database_uri = sqlalchemy_database_uri
 
         self._annotation_model = make_annotation_model(dataset_name,
-                                                       annotation_type, 
+                                                       schema_name,
                                                        table_name,
                                                        version=version)
         if sqlalchemy_database_uri is not None:
@@ -90,11 +91,15 @@ class MaterializationManager(object):
             self._sqlalchemy_engine = None
             self._sqlalchemy_session = None
 
-        self._schema_init = get_schema(self.annotation_type)
+        self._schema_init = get_schema(self.schema_name)
 
     @property
-    def annotation_type(self):
-        return self._annotation_type
+    def schema_name(self):
+        return self._schema_name
+
+    @property
+    def table_name(self):
+        return self._table_name
 
     @property
     def dataset_name(self):
@@ -130,14 +135,15 @@ class MaterializationManager(object):
         :return: dict
         """
         info = {"dataset_name": self.dataset_name,
-                "annotation_type": self.annotation_type,
+                "schema_name": self.schema_name,
+                "table_name": self.table_name,
                 "sqlalchemy_database_uri": self.sqlalchemy_database_uri}
 
         return info
 
     def _drop_table(self):
         """ Deletes the table in the database """
-        table_name = "%s_%s" % (self.dataset_name, self.annotation_type)
+        table_name = "%s_%s" % (self.dataset_name, self.schema_name)
         Base.metadata.tables[table_name].drop(self.sqlalchemy_engine)
 
     def get_schema(self, cg, cv, pixel_ratios = (1.0, 1.0, 1.0)):
