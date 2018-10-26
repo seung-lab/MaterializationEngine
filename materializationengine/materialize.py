@@ -59,7 +59,7 @@ def _process_all_annotations_thread(args):
         return annos_dict
 
 
-def process_all_annotations(cg_table_id, dataset_name, annotation_type,
+def process_all_annotations(cg_table_id, dataset_name, schema_name,
                             table_name, version='v1',
                             sqlalchemy_database_uri=None,
                             amdb_client=None, amdb_instance_id=None,
@@ -91,9 +91,12 @@ def process_all_annotations(cg_table_id, dataset_name, annotation_type,
     else:
         raise Exception("Missing Instance ID")
 
+    #TODO: call to infoservice asking for pixelratios and cv path
+    pixel_ratios =
+    cv_path =
 
     mm = materializationmanager.MaterializationManager(dataset_name=dataset_name,
-                                                       annotation_type=annotation_type,
+                                                       schema_name=schema_name,
                                                        table_name=table_name,
                                                        version=version,
                                                        sqlalchemy_database_uri=sqlalchemy_database_uri)
@@ -108,6 +111,7 @@ def process_all_annotations(cg_table_id, dataset_name, annotation_type,
     if max_annotation_id == 0:
         return {}
 
+    cv_info = {"cloudpath": cv_path}
     cg_info = cg.get_serialized_info()
     amdb_info = amdb.get_serialized_info()
 
@@ -121,10 +125,9 @@ def process_all_annotations(cg_table_id, dataset_name, annotation_type,
     multi_args = []
     for i_id_chunk in range(len(id_chunks) - 1):
         multi_args.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1],
-                           dataset_name, annotation_type, cg_table_id,
-                           amdb_info,
-                           cg_info,
-                           mm.get_serialized_info()])
+                           dataset_name, table_name, schema_name, version,
+                           cg_table_id, amdb_info, cg_info,
+                           mm.get_serialized_info(), cv_info, pixel_ratios])
 
     if n_threads == 1:
         results = mu.multiprocess_func(
@@ -147,7 +150,7 @@ def process_all_annotations(cg_table_id, dataset_name, annotation_type,
 
 def materialize_all_annotations(cg_table_id,
                                 dataset_name,
-                                annotation_type,
+                                schema_name,
                                 table_name,
                                 version='v1',
                                 sqlalchemy_database_uri=None,
@@ -161,7 +164,7 @@ def materialize_all_annotations(cg_table_id,
 
     :param dataset_name: str
         name of dataset
-    :param annotation_type: str
+    :param schema_name: str
         type of annotation
     :param cg_table_id: str
         chunk graph table
@@ -171,7 +174,7 @@ def materialize_all_annotations(cg_table_id,
 
     anno_dict = process_all_annotations(cg_table_id,
                                         dataset_name=dataset_name,
-                                        annotation_type=annotation_type,
+                                        schema_name=schema_name,
                                         table_name=table_name,
                                         version=version,
                                         sqlalchemy_database_uri=sqlalchemy_database_uri,
