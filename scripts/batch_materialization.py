@@ -17,7 +17,7 @@ class BatchMaterializationSchema(argschema.ArgSchema):
                                      description="name of google instance for DynamicAnnotationDb")
     cg_instance_id = mm.fields.Str(default="pychunkedgraph",
                                    description="name of google instance for PyChunkedGraph")
-    n_threads = mm.fields.Int(default=128,
+    n_threads = mm.fields.Int(default=1,
                               description="number of threads to use in parallelization")
     sql_uri = mm.fields.Str(
         description="connection uri string to postgres database"
@@ -26,8 +26,7 @@ class BatchMaterializationSchema(argschema.ArgSchema):
 
 if __name__ == '__main__':
     mod = argschema.ArgSchemaParser(schema_type=BatchMaterializationSchema)
-    sql_uri = mod.args.get('sql_uri',
-                           os.environ['MATERIALIZATION_POSTGRES_URI'])
+    sql_uri = 'postgresql://postgres:welcometothematrix@35.196.105.34/postgres'
 
     # types = get_types()
 
@@ -41,7 +40,7 @@ if __name__ == '__main__':
     # for type_ in sorted_types:
 
     schema_name = "synapse"
-    table_name = 'pni_synapses'
+    table_name = 'pni_auto_synapses'
     materialize.materialize_all_annotations(mod.args["cg_table_id"],
                                             mod.args["dataset_name"],
                                             schema_name,
