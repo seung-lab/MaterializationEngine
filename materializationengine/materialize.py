@@ -177,3 +177,11 @@ def materialize_all_annotations(cg_table_id,
         df = pd.DataFrame.from_dict(anno_dict, orient="index")
         return df
 
+
+        #   img_cv = MyCloudVolume(vol_path, mip=0)
+
+        #         self.cvd[dataset] = MyCloudVolume(path, mip=0,
+        #                                           fill_missing=True,
+        #                                           cache=True)
+        #         scale_factor = img_cv.resolution / self.cvd[dataset].resolution
+        #         self.scale_factors[dataset] = scale_factor
