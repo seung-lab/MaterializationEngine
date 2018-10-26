@@ -5,7 +5,7 @@ from emannotationschemas import get_schema
 from functools import partial
 import json
 import numpy as np
-
+import requests
 from pandas.io.json import json_normalize
 
 
@@ -58,6 +58,19 @@ def _process_all_annotations_thread(args):
     if not mm.is_sql:
         return annos_dict
 
+def get_segmentation_and_scales_from_infoservice(dataset, endpoint = 'https://www.dynamicannotationframework.com/info'):
+    url = endpoint + '/api/dataset/{}'.format(dataset)
+    print(url)
+    r = requests.get(url)
+    assert (r.status_code == 200)
+    info = r.json()
+
+    img_cv = cloudvolume.CloudVolume(info['image_source'], mip=0)
+    pcg_seg_cv = cloudvolume.CloudVolume(info['pychunkgraph_segmentation_source'], mip=0)
+    scale_factor = img_cv.resolution / pcg_seg_cv.resolution
+    pixel_ratios = tuple(scale_factor)
+
+    return info['pychunkgraph_segmentation_source'], pixel_ratios
 
 def process_all_annotations(cg_table_id, dataset_name, schema_name,
                             table_name, version='v1',
@@ -91,9 +104,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     else:
         raise Exception("Missing Instance ID")
 
-    #TODO: call to infoservice asking for pixelratios and cv path
-    pixel_ratios =
-    cv_path =
+    cv_path, pixel_ratios = get_segmentation_and_scales_from_infoservice(dataset_name)
 
     mm = materializationmanager.MaterializationManager(dataset_name=dataset_name,
                                                        schema_name=schema_name,

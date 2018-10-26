@@ -76,3 +76,7 @@ def test_annon_dataset(annodb):
     yield amdb, dataset_name
 
 
+@pytest.fixture(scope='session')
+def cv():
+
+    
