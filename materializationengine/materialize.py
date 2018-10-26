@@ -60,6 +60,7 @@ def _process_all_annotations_thread(args):
 
 
 def process_all_annotations(cg_table_id, dataset_name, annotation_type,
+                            table_name, version='v1',
                             sqlalchemy_database_uri=None,
                             amdb_client=None, amdb_instance_id=None,
                             cg_client=None, cg_instance_id=None, n_threads=1):
@@ -90,8 +91,11 @@ def process_all_annotations(cg_table_id, dataset_name, annotation_type,
     else:
         raise Exception("Missing Instance ID")
 
+
     mm = materializationmanager.MaterializationManager(dataset_name=dataset_name,
                                                        annotation_type=annotation_type,
+                                                       table_name=table_name,
+                                                       version=version,
                                                        sqlalchemy_database_uri=sqlalchemy_database_uri)
 
     # The `max_annotation_id` sets an upper limit and can be used to iterate
@@ -99,7 +103,7 @@ def process_all_annotations(cg_table_id, dataset_name, annotation_type,
     # id exists, it is only a guarantee that no larger id exists at the time
     # the function is called.
     max_annotation_id = amdb.get_max_annotation_id(dataset_name,
-                                                   annotation_type)
+                                                   table_name)
 
     if max_annotation_id == 0:
         return {}
@@ -144,6 +148,8 @@ def process_all_annotations(cg_table_id, dataset_name, annotation_type,
 def materialize_all_annotations(cg_table_id,
                                 dataset_name,
                                 annotation_type,
+                                table_name,
+                                version='v1',
                                 sqlalchemy_database_uri=None,
                                 amdb_client=None,
                                 amdb_instance_id=None,
@@ -166,6 +172,8 @@ def materialize_all_annotations(cg_table_id,
     anno_dict = process_all_annotations(cg_table_id,
                                         dataset_name=dataset_name,
                                         annotation_type=annotation_type,
+                                        table_name=table_name,
+                                        version=version,
                                         sqlalchemy_database_uri=sqlalchemy_database_uri,
                                         amdb_client=amdb_client,
                                         amdb_instance_id=amdb_instance_id,
