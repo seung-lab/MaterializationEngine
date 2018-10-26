@@ -170,6 +170,7 @@ class MaterializationManager(object):
         :param sv_id_to_root_id_dict: dict
         :return: dict
         """
+        print(self.schema_name)
         schema = self.get_schema(cg, cv, pixel_ratios=pixel_ratios)
         data = schema.load(json.loads(blob)).data
 
