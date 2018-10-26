@@ -1,9 +1,10 @@
 import pandas as pd
-from emannotationschemas.models import make_all_models, Base, make_annotation_model_from_schema
-from emannotationschemas.base import flatten_dict
-from emannotationschemas import get_schema
-from functools import partial
-import json
+# from emannotationschemas.models import make_all_models, Base, make_annotation_model_from_schema
+# from emannotationschemas.base import flatten_dict
+# from emannotationschemas import get_schema
+# from functools import partial
+# import json
+import requests
 import numpy as np
 
 from pandas.io.json import json_normalize
@@ -16,6 +17,21 @@ import cloudvolume
 from . import materializationmanager
 
 
+def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.dynamicannotationframework.com/info'):
+    url = endpoint + '/api/dataset/{}'.format(dataset)
+    print(url)
+    r = requests.get(url)
+    assert (r.status_code == 200)
+    info = r.json()
+
+    img_cv = cloudvolume.CloudVolume(info['image_source'], mip=0)
+    pcg_seg_cv = cloudvolume.CloudVolume(info['pychunkgraph_segmentation_source'], mip=0)
+    scale_factor = img_cv.resolution / pcg_seg_cv.resolution
+    pixel_ratios = tuple(scale_factor)
+
+    return info['pychunkgraph_segmentation_source'], pixel_ratios
+
+
 def _process_all_annotations_thread(args):
     """ Helper for process_all_annotations """
     anno_id_start, anno_id_end, dataset_name, table_name, schema_name, version, cg_table_id, \
@@ -23,7 +39,9 @@ def _process_all_annotations_thread(args):
 
     amdb = AnnotationMetaDB(**serialized_amdb_info)
 
-    cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id, **serialized_cg_info)
+    cg = chunkedgraph.ChunkedGraph(**serialized_cg_info)
+
+    print(serialized_cv_info)
     cv = cloudvolume.CloudVolume(**serialized_cv_info)
     mm = materializationmanager.MaterializationManager(**serialized_mm_info)
 
@@ -32,7 +50,7 @@ def _process_all_annotations_thread(args):
     for annotation_id in range(anno_id_start, anno_id_end):
         # Read annoation data from dynamicannotationdb
         annotation_data_b, bsps = amdb.get_annotation(
-            dataset_name, table_name, schema_name, annotation_id)
+            dataset_name, table_name, annotation_id)
 
         if annotation_data_b is None:
             continue
@@ -41,6 +59,8 @@ def _process_all_annotations_thread(args):
                                                                    cg,
                                                                    cg.cv,
                                                                    pixel_ratios=pixel_ratios)
+
+        print(deserialized_annotation)
 
         # this is now done in deserialization
         # sv_id_to_root_id_dict = {}
@@ -51,12 +71,12 @@ def _process_all_annotations_thread(args):
         #         # Read root_id from pychunkedgraph
         #         sv_id_to_root_id_dict[sv_id] = cg.get_root(sv_id)
 
-        if mm.is_sql:
-            mm.add_annotation_to_sql_database(deserialized_annotation)
-        else:
-            annos_dict[annotation_id] = deserialized_annotation
-    if not mm.is_sql:
-        return annos_dict
+    #     if mm.is_sql:
+    #         mm.add_annotation_to_sql_database(deserialized_annotation)
+    #     else:
+    #         annos_dict[annotation_id] = deserialized_annotation
+    # if not mm.is_sql:
+    #     return annos_dict
 
 
 def process_all_annotations(cg_table_id, dataset_name, schema_name,
@@ -92,8 +112,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
         raise Exception("Missing Instance ID")
 
     #TODO: call to infoservice asking for pixelratios and cv path
-    pixel_ratios =
-    cv_path =
+    cv_path, pixel_ratios = get_segmentation_and_scales_from_infoservice(dataset_name)
 
     mm = materializationmanager.MaterializationManager(dataset_name=dataset_name,
                                                        schema_name=schema_name,
