@@ -17,12 +17,12 @@ from . import materializationmanager
 
 def _process_all_annotations_thread(args):
     """ Helper for process_all_annotations """
-    anno_id_start, anno_id_end, dataset_name, annotation_type, cg_table_id, \
-        serialized_amdb_info, serialized_cg_info, serialized_mm_info = args
+    anno_id_start, anno_id_end, dataset_name, table_name, schema_name, version, cg_table_id, \
+        serialized_amdb_info, serialized_cg_info, serialized_mm_info, pixel_ratios = args
 
     amdb = annodb.AnnotationMetaDB(**serialized_amdb_info)
 
-    cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id, **serialized_amdb_info)
+    cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id, **serialized_cg_info)
 
     mm = materializationmanager.MaterializationManager(**serialized_mm_info)
 
@@ -30,21 +30,25 @@ def _process_all_annotations_thread(args):
 
     for annotation_id in range(anno_id_start, anno_id_end):
         # Read annoation data from dynamicannotationdb
-        annotation_data_b, sv_ids = amdb.get_annotation(dataset_name, annotation_type, annotation_id)
+        annotation_data_b, bsps = amdb.get_annotation(
+            dataset_name, table_name, schema_name, annotation_id)
 
         if annotation_data_b is None:
             continue
 
-        sv_id_to_root_id_dict = {}
-        if sv_ids is not None:
-            for i_sv_id, sv_id in enumerate(sv_ids):
-                print("%d / %d" % (i_sv_id + 1, len(sv_ids)), end='\r')
+        deserialized_annotation = mm.deserialize_single_annotation(annotation_data_b,
+                                                                   cg,
+                                                                   cg.cv,
+                                                                   pixel_ratios=pixel_ratios)
 
-                # Read root_id from pychunkedgraph
-                sv_id_to_root_id_dict[sv_id] = cg.get_root(sv_id)
+        # this is now done in deserialization
+        # sv_id_to_root_id_dict = {}
+        # if sv_ids is not None:
+        #     for i_sv_id, sv_id in enumerate(sv_ids):
+        #         print("%d / %d" % (i_sv_id + 1, len(sv_ids)), end='\r')
 
-        deserialized_annotation = mm.deserialize_single_annotation(
-            annotation_data_b, sv_id_to_root_id_dict)
+        #         # Read root_id from pychunkedgraph
+        #         sv_id_to_root_id_dict[sv_id] = cg.get_root(sv_id)
 
         if mm.is_sql:
             mm.add_annotation_to_sql_database(deserialized_annotation)
@@ -173,8 +177,66 @@ def materialize_all_annotations(cg_table_id,
         return df
 
 
-def bulk_process_annotations(dataset:str, table_name: str, schema_name: str, annotation_ids:list, version_name: str):
+def bulk_process_annotations(dataset_name: str,
+                             table_name: str,
+                             schema_name: str,
+                             annotation_ids: list,
+                             sqlalchemy_database_uri: str,
+                             serialized_amdb_info,
+
+                             version_name: str = 'v1',
+                             ):
 
     Schema = get_schema(schema_name)
     Model = make_annotation_model_from_schema(dataset, table_name, Schema)
-    
+
+    # setup dadb object
+    amdb = annodb.AnnotationMetaDB(**serialized_amdb_info)
+
+    cg = chunkedgraph.ChunkedGraph(
+        table_id=cg_table_id, **serialized_amdb_info)
+
+    mm = materializationmanager.MaterializationManager(**serialized_mm_info)
+
+    annos_dict = {}
+
+    for annotation_id in range(anno_id_start, anno_id_end):
+        # Read annoation data from dynamicannotationdb
+        annotation_data_b, sv_ids = amdb.get_annotation(
+            dataset_name, annotation_type, annotation_id)
+
+        if annotation_data_b is None:
+            continue
+
+        sv_id_to_root_id_dict = {}
+        if sv_ids is not None:
+            for i_sv_id, sv_id in enumerate(sv_ids):
+                print("%d / %d" % (i_sv_id + 1, len(sv_ids)), end='\r')
+
+                # Read root_id from pychunkedgraph
+                sv_id_to_root_id_dict[sv_id] = cg.get_root(sv_id)
+
+        deserialized_annotation = mm.deserialize_single_annotation(
+            annotation_data_b, sv_id_to_root_id_dict)
+
+        if mm.is_sql:
+            mm.add_annotation_to_sql_database(deserialized_annotation)
+        else:
+            annos_dict[annotation_id] = deserialized_annotation
+    if not mm.is_sql:
+        return annos_dict
+
+        setup database session
+
+        # loop over annotations:
+        read annotation blob from dadb
+
+        deserialize the blob using schema.load voxel lookup mechanism, will also query pcg for root_id
+
+        flatten blob
+
+        create new model with flattened blob
+
+        add this row to the session
+
+        commit session

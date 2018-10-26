@@ -6,7 +6,7 @@ from emannotationschemas.base import flatten_dict
 from emannotationschemas import get_schema
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
+import numpy as np
 
 class MaterializeAnnotationException(Exception):
     pass
@@ -20,35 +20,66 @@ class AnnotationParseFailure(MaterializeAnnotationException):
     pass
 
 
-def materialize_bsp(sv_id_to_root_id_dict, item):
-    """ Function to fill in root_id of BoundSpatialPoint fields
-    using the dictionary provided. Will alter item in place.
-    Meant to be passed to mm.Schema as a context variable ('bsp_fn')
-    :param sv_id_to_root_id_dict: dict
-        dictionary to look up root ids from supervoxel id
+def lookup_sv_and_cg_bsp(cg, cv, item, pixel_ratios = (1.0, 1.0, 1.0)):
+    """ function to fill in the supervoxel_id and root_id
+
+    :param cg: pychunkedgraph.ChunkedGraph
+        chunkedgraph instance to use to lookup supervoxel and root_ids
     :param item: dict
         deserialized boundspatialpoint to process
+    :parm pixel_ratios: tuple
+        ratios to multiple position coordinates to get cg.cv segmentation coordinates
     :return: None
         will edit item in place
     """
+    try:
+        voxel = np.array(item['position'])*np.array(pixel_ratios)
+        sv_id = cv[voxel[0], voxel[1], voxel[2]]
+    except:
+        msg = "failed to lookup sv_id of voxel {}", voxel
+        raise AnnotationParseFailure(msg)
 
     try:
-        item['root_id'] = int(sv_id_to_root_id_dict[item['supervoxel_id']])
-    except KeyError:
-        msg = "cannot process {}, root_id not found in {}"
-        raise RootIDNotFoundException(msg.format(item, sv_id_to_root_id_dict))
+        root_id = cg.get_root(sv_id)
+    except:
+        msg = "failed to lookup root_id of sv_id {}", sv_id
+        raise AnnotationParseFailure(msg)
+
+    item['supervoxel_id'] = sv_id
+    item['root_id'] = root_id
+
+# DEPRECATED
+# def materialize_bsp(sv_id_to_root_id_dict, item):
+#     """ Function to fill in root_id of BoundSpatialPoint fields
+#     using the dictionary provided. Will alter item in place.
+#     Meant to be passed to mm.Schema as a context variable ('bsp_fn')
+#     :param sv_id_to_root_id_dict: dict
+#         dictionary to look up root ids from supervoxel id
+#     :param item: dict
+#         deserialized boundspatialpoint to process
+#     :return: None
+#         will edit item in place
+#     """
+
+#     try:
+#         item['root_id'] = int(sv_id_to_root_id_dict[item['supervoxel_id']])
+#     except KeyError:
+#         msg = "cannot process {}, root_id not found in {}"
+#         raise RootIDNotFoundException(msg.format(item, sv_id_to_root_id_dict))
 
 
 class MaterializationManager(object):
     def __init__(self, dataset_name, annotation_type,
+                 table_name, version = 'v1',
                  sqlalchemy_database_uri=None):
         self._dataset_name = dataset_name
         self._annotation_type = annotation_type
         self._sqlalchemy_database_uri = sqlalchemy_database_uri
 
         self._annotation_model = make_annotation_model(dataset_name,
-                                                       annotation_type)
-
+                                                       annotation_type, 
+                                                       table_name,
+                                                       version=version)
         if sqlalchemy_database_uri is not None:
             self._sqlalchemy_engine = create_engine(sqlalchemy_database_uri,
                                                     echo=True)
@@ -109,26 +140,31 @@ class MaterializationManager(object):
         table_name = "%s_%s" % (self.dataset_name, self.annotation_type)
         Base.metadata.tables[table_name].drop(self.sqlalchemy_engine)
 
-    def get_schema(self, sv_id_to_root_id_dict):
+    def get_schema(self, cg, cv, pixel_ratios = (1.0, 1.0, 1.0)):
         """ Loads schema with appropriate context
 
-        :param root_id_d:
+        :param cg: pychunkedgraph.ChunkedGraph
+            chunkedgraph instance to lookup root_ids from atomic_ids
+        :param cv: cloudvolume.CloudVolume
+            cloudvolue instanceto look_up atomic_ids
+        :param pixel_ratios: tuple 
+            ratio of position units to units of cv
         :return:
         """
         context = dict()
-        context['bsp_fn'] = functools.partial(materialize_bsp,
-                                              sv_id_to_root_id_dict)
+        context['bsp_fn'] = functools.partial(lookup_sv_and_cg_bsp,
+                                              cg, cv, pixel_ratios=pixel_ratios)
         context['postgis'] = self.is_sql
         return self.schema_init(context=context)
 
-    def deserialize_single_annotation(self, blob, sv_id_to_root_id_dict):
+    def deserialize_single_annotation(self, blob, cg, cv, pixel_ratios=(1.0, 1.0, 1.0)):
         """ Materializes single annotation object
 
         :param blob: binary
         :param sv_id_to_root_id_dict: dict
         :return: dict
         """
-        schema = self.get_schema(sv_id_to_root_id_dict)
+        schema = self.get_schema(cg, cv, pixel_ratios=pixel_ratios)
         data = schema.load(json.loads(blob)).data
 
         return flatten_dict(data)
