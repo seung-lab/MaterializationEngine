@@ -11,7 +11,7 @@ from pandas.io.json import json_normalize
 
 from pychunkedgraph.backend import chunkedgraph
 from multiwrapper import multiprocessing_utils as mu
-from dynamicannotationdb import annodb
+from dynamicannotationdb.annodb_meta import AnnotationMetaDB
 import cloudvolume
 from . import materializationmanager
 
@@ -21,7 +21,7 @@ def _process_all_annotations_thread(args):
     anno_id_start, anno_id_end, dataset_name, table_name, schema_name, version, cg_table_id, \
         serialized_amdb_info, serialized_cg_info, serialized_mm_info, serialized_cv_info, pixel_ratios = args
 
-    amdb = annodb.AnnotationMetaDB(**serialized_amdb_info)
+    amdb = AnnotationMetaDB(**serialized_amdb_info)
 
     cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id, **serialized_cg_info)
     cv = cloudvolume.CloudVolume(**serialized_cv_info)
@@ -74,9 +74,9 @@ def process_all_annotations(cg_table_id, dataset_name, annotation_type,
         annotation_id -> deserialized data
     """
     if amdb_client is None:
-        amdb = annodb.AnnotationMetaDB()
+        amdb = AnnotationMetaDB()
     elif amdb_instance_id is not None:
-        amdb = annodb.AnnotationMetaDB(client=amdb_client,
+        amdb = AnnotationMetaDB(client=amdb_client,
                                        instance_id=amdb_instance_id)
     else:
         raise Exception("Missing Instance ID for AnnotationMetaDB")
