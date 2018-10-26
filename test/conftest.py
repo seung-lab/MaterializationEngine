@@ -73,23 +73,6 @@ def test_annon_dataset(annodb):
     amdb = annodb
 
     dataset_name = 'test_dataset'
-    types = get_types()
-    for type_ in types:
-        amdb.create_table('test', dataset_name, type_, type_)
     yield amdb, dataset_name
 
 
-@pytest.fixture(scope='session')
-def chunkgraph_tuple(bigtable_client, fan_out=2, n_layers=4):
-    cg_table_id = "test_cg"
-    graph = chunkedgraph.ChunkedGraph(cg_table_id,
-                                      client=bigtable_client,
-                                      instance_id="test_instance",
-                                      is_new=True, fan_out=fan_out,
-                                      n_layers=n_layers, cv_path="",
-                                      chunk_size=(64, 64, 64))
-
-    yield graph, cg_table_id
-    graph.table.delete()
-
-    print("\n\nTABLE DELETED")
