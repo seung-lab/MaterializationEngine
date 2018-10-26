@@ -1,14 +1,14 @@
 import numpy as np
-from math import inf
-import json
 import pytest
 
 from pychunkedgraph.backend import chunkedgraph
 
 from materializationengine.materialize import materialize_all_annotations
+import materializationengine.materialize
 from annotationengine.annotation import collect_bound_spatial_points, import_annotation_func, get_schema_from_service
 from emannotationschemas.blueprint_app import get_type_schema
 from mock import patch, Mock, MagicMock
+import requests_mock
 
 
 @pytest.fixture(scope="session")
@@ -69,7 +69,10 @@ def simple_get_root(self, atomic_id):
         return "1345813419234993222"
 
 
-def test_simple_test(test_annon_dataset, monkeypatch):
+
+
+
+def test_simple_test(cv, test_annon_dataset, monkeypatch, requests_mock):
 
     amdb, dataset_name = test_annon_dataset
 
@@ -80,10 +83,18 @@ def test_simple_test(test_annon_dataset, monkeypatch):
     monkeypatch.setattr(
         'pychunkedgraph.backend.chunkedgraph.ChunkedGraph.get_root', simple_get_root)
 
+    def mocked_info(dataset, endpoint):
+        return cv, (1.0,1.0,1.0)
+
+    monkeypatch.setattr(materializationengine.materialize,
+                        'get_segmentation_and_scales_from_infoservice',
+                        mocked_info)
+
+
     df = materialize_all_annotations('cgtable',
                                      dataset_name=dataset_name,
-                                     annotation_type="synapse",
-                                     table_name = "synapse",
+                                     schema_name="synapse",
+                                     table_name="synapse",
                                      version='v1',
                                      amdb_client=amdb.client,
                                      amdb_instance_id=amdb.instance_id,
