@@ -78,7 +78,7 @@ def lookup_sv_and_cg_bsp(cg,
 
 class MaterializationManager(object):
     def __init__(self, dataset_name, schema_name,
-                 table_name, version='v1',
+                 table_name, version:  int=1,
                  annotation_model=None,
                  sqlalchemy_database_uri=None):
         self._dataset_name = dataset_name
