@@ -6,6 +6,8 @@ import sqlalchemy
 import argschema
 import os
 import marshmallow as mm
+import datetime
+
 
 
 class BatchMaterializationSchema(argschema.ArgSchema):
