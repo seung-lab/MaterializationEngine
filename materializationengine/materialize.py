@@ -34,8 +34,11 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
 
 def _process_all_annotations_thread(args):
     """ Helper for process_all_annotations """
-    anno_id_start, anno_id_end, dataset_name, table_name, schema_name, version, time_stamp, cg_table_id, \
-        serialized_amdb_info, serialized_cg_info, serialized_mm_info, serialized_cv_info, pixel_ratios = args
+    anno_id_start, anno_id_end, dataset_name, \
+        table_name, schema_name, version, \
+        time_stamp, cg_table_id, serialized_amdb_info, \
+        serialized_cg_info, serialized_mm_info, \
+        serialized_cv_info, pixel_ratios = args
 
     amdb = AnnotationMetaDB(**serialized_amdb_info)
 
@@ -57,7 +60,7 @@ def _process_all_annotations_thread(args):
 
         deserialized_annotation = mm.deserialize_single_annotation(annotation_data_b,
                                                                    cg,
-                                                                   cg.cv,
+                                                                   cv,
                                                                    pixel_ratios=pixel_ratios,
                                                                    time_stamp=None)
 
