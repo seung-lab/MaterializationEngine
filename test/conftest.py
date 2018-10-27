@@ -62,8 +62,11 @@ def bigtable_client(request):
     # setup Emulator-Finalizer
 
     def fin():
-        os.killpg(os.getpgid(bigtables_emulator.pid), SIGTERM)
-        bigtables_emulator.wait()
+        try:
+            os.killpg(os.getpgid(bigtables_emulator.pid), SIGTERM)
+            bigtables_emulator.wait()
+        except Exception as e:
+            pass
 
     request.addfinalizer(fin)
 

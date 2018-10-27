@@ -131,6 +131,8 @@ def test_simple_test(cv, test_data, test_annon_dataset, monkeypatch, requests_mo
                                      sqlalchemy_database_uri='postgres://postgres:synapsedb@localhost:5432/testing',
                                      cg_instance_id='cgraph_instance',
                                      n_threads=1)
+    
+    # TODO do real tests of results
     # df_bs = materialize_all_annotations(table_id,
     #                                     dataset_name=dataset_name,
     #                                     annotation_type="bouton_shape",
