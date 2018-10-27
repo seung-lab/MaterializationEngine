@@ -9,7 +9,7 @@ from annotationengine.annotation import collect_bound_spatial_points, import_ann
 from emannotationschemas.blueprint_app import get_type_schema
 from mock import patch, Mock, MagicMock
 import requests_mock
-
+import numpy as np
 
 @pytest.fixture(scope="session")
 def test_data(test_annon_dataset):
@@ -29,18 +29,20 @@ def test_data(test_annon_dataset):
     table_name = 'synapse'
     user_id = 'test_user'
     amdb, dataset_name = test_annon_dataset
+    # success= amdb._delete_table(dataset_name, table_name)
+    # assert(success)
     amdb.create_table(user_id, dataset_name, annotation_type, table_name)
 
     synapse_d = {
         "type": annotation_type,
         "pre_pt": {
-            "position": [1000, 256, 8],
+            "position": [31, 0, 0],
         },
         "post_pt": {
-            "position": [1010, 256, 8],
+            "position": [33, 0, 0],
         },
         "ctr_pt": {
-            "position": [1005, 256, 8]
+            "position": [32, 0, 0]
         }
     }
     schema = get_type_schema(annotation_type)
@@ -62,22 +64,27 @@ def test_data(test_annon_dataset):
     yield test_annon_dataset
 
 
-def simple_get_root(self, atomic_id):
-    if (atomic_id <= 3):
-        return "12341324131851234"
-    else:
-        return "1345813419234993222"
-
 def test_simple_test(cv, test_data, test_annon_dataset, monkeypatch, requests_mock):
 
     amdb, dataset_name = test_annon_dataset
 
     print(amdb.get_existing_tables())
+    class MyChunkedGraph(object):
+        def __init__(a, **kwargs):
+            pass
 
-    monkeypatch.setattr('pychunkedgraph.backend.chunkedgraph.ChunkedGraph',
-                         simple_get_root)
-    monkeypatch.setattr(
-        'pychunkedgraph.backend.chunkedgraph.ChunkedGraph.get_root', simple_get_root)
+        def get_serialized_info(self):
+            return {}
+
+        def get_root(self, atomic_id, time_stamp=None):
+            root_id = np.unravel_index(np.array(atomic_id),
+                                       (4,4,4))[0]
+            return root_id + 1000
+
+    monkeypatch.setattr(materializationengine.materialize.chunkedgraph,
+                        'ChunkedGraph',
+                        MyChunkedGraph)
+  
 
     def mocked_info(dataset):
         return cv, (1.0, 1.0, 1.0)
@@ -92,6 +99,7 @@ def test_simple_test(cv, test_data, test_annon_dataset, monkeypatch, requests_mo
                                      schema_name="synapse",
                                      table_name="synapse",
                                      version='v1',
+                                     sqlalchemy_database_uri='postgres://postgres:synapsedb@localhost:5432/testing',
                                      amdb_client=amdb.client,
                                      amdb_instance_id=amdb.instance_id,
                                      cg_instance_id='cgraph_instance',
