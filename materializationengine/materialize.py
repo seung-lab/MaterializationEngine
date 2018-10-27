@@ -141,12 +141,12 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
         del amdb_info["credentials"]
 
     n_parts = int(max(1, max_annotation_id / block_size))
-
+    n_parts += 1
     # Annotation ids start at 1
     id_chunks = np.linspace(1, max_annotation_id + 1, n_parts).astype(np.uint64)
 
     multi_args = []
-    for i_id_chunk in range(len(id_chunks)):
+    for i_id_chunk in range(len(id_chunks) - 1):
         multi_args.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1],
                            dataset_name, table_name, schema_name, version,
                            time_stamp,
