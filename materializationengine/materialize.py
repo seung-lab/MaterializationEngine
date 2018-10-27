@@ -1,5 +1,5 @@
 import pandas as pd
-# from emannotationschemas.models import make_all_models, Base, make_annotation_model_from_schema
+from emannotationschemas.models import make_annotation_model_from_schema, root_model_name
 # from emannotationschemas.base import flatten_dict
 # from emannotationschemas import get_schema
 # from functools import partial
@@ -128,7 +128,6 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     else:
         raise Exception("Missing Instance ID")
 
-    #TODO: call to infoservice asking for pixelratios and cv path
     cv_path, pixel_ratios = get_segmentation_and_scales_from_infoservice(dataset_name)
 
     mm = materializationmanager.MaterializationManager(dataset_name=dataset_name,
