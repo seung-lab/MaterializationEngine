@@ -3,13 +3,14 @@ import pytest
 
 from pychunkedgraph.backend import chunkedgraph
 
-from materializationengine.materialize import materialize_all_annotations
+from materializationengine.materialize import materialize_all_annotations, materialize_root_ids
 import materializationengine.materialize
 from annotationengine.annotation import collect_bound_spatial_points, import_annotation_func, get_schema_from_service
 from emannotationschemas.blueprint_app import get_type_schema
 from mock import patch, Mock, MagicMock
 import requests_mock
 import numpy as np
+import datetime
 
 @pytest.fixture(scope="session")
 def test_data(test_annon_dataset):
@@ -68,7 +69,6 @@ def test_simple_test(cv, test_data, test_annon_dataset, monkeypatch, requests_mo
 
     amdb, dataset_name = test_annon_dataset
 
-    print(amdb.get_existing_tables())
     class MyChunkedGraph(object):
         def __init__(a, **kwargs):
             pass
@@ -76,15 +76,20 @@ def test_simple_test(cv, test_data, test_annon_dataset, monkeypatch, requests_mo
         def get_serialized_info(self):
             return {}
 
+        def get_latest_roots(self, n_threads=1, time_stamp=None):
+            return [k+1000 for k in range(2*2*2)]
+
         def get_root(self, atomic_id, time_stamp=None):
-            root_id = np.unravel_index(np.array(atomic_id),
-                                       (4,4,4))[0]
+            supvox_coords = np.unravel_index(np.array(atomic_id),
+                                             (4, 4, 4))
+            root_coords = np.int64(np.array(supvox_coords)/2)
+            root_id = np.ravel_multi_index(root_coords,
+                                           (2, 2, 2))
             return root_id + 1000
 
     monkeypatch.setattr(materializationengine.materialize.chunkedgraph,
                         'ChunkedGraph',
                         MyChunkedGraph)
-  
 
     def mocked_info(dataset):
         return cv, (1.0, 1.0, 1.0)
@@ -93,19 +98,39 @@ def test_simple_test(cv, test_data, test_annon_dataset, monkeypatch, requests_mo
                         'get_segmentation_and_scales_from_infoservice',
                         mocked_info)
 
-
+    time_stamp = datetime.datetime.utcnow()
     df = materialize_all_annotations('cgtable',
                                      dataset_name=dataset_name,
                                      schema_name="synapse",
                                      table_name="synapse",
-                                     version='v1',
-                                     sqlalchemy_database_uri='postgres://postgres:synapsedb@localhost:5432/testing',
+                                     version='v0',
+                                     time_stamp=time_stamp,
                                      amdb_client=amdb.client,
                                      amdb_instance_id=amdb.instance_id,
                                      cg_instance_id='cgraph_instance',
                                      n_threads=1)
     df.to_csv('test.csv')
-    assert(False)
+    
+
+    df = materialize_root_ids('cgtable',
+                              dataset_name=dataset_name,
+                              time_stamp=time_stamp,
+                              version='v0',
+                              sqlalchemy_database_uri='postgres://postgres:synapsedb@localhost:5432/testing',
+                              cg_instance_id='cgraph_instance',
+                              n_threads=1)
+
+
+    df = materialize_all_annotations('cgtable',
+                                     dataset_name=dataset_name,
+                                     schema_name="synapse",
+                                     table_name="synapse",
+                                     version='v0',
+                                     amdb_client=amdb.client,
+                                     amdb_instance_id=amdb.instance_id,
+                                     sqlalchemy_database_uri='postgres://postgres:synapsedb@localhost:5432/testing',
+                                     cg_instance_id='cgraph_instance',
+                                     n_threads=1)
     # df_bs = materialize_all_annotations(table_id,
     #                                     dataset_name=dataset_name,
     #                                     annotation_type="bouton_shape",
