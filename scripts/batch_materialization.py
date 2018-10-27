@@ -48,7 +48,7 @@ if __name__ == '__main__':
                                             schema_name,
                                             table_name,
                                             version='v1',
-                                            timestamp=mod.args['timestamp'],
+                                            time_stamp=mod.args['time_stamp'],
                                             amdb_instance_id=mod.args["amdb_instance_id"],
                                             cg_instance_id=mod.args["cg_instance_id"],
                                             sqlalchemy_database_uri=sql_uri,
