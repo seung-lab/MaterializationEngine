@@ -160,7 +160,7 @@ class MaterializationManager(object):
             chunkedgraph instance to lookup root_ids from atomic_ids
         :param cv: cloudvolume.CloudVolume
             cloudvolue instanceto look_up atomic_ids
-        :param pixel_ratios: tuple 
+        :param pixel_ratios: tuple
             ratio of position units to units of cv
         :return:
         """
