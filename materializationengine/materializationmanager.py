@@ -1,7 +1,7 @@
 import json
 import functools
 
-from emannotationschemas.models import make_annotation_model, Base
+from emannotationschemas.models import make_annotation_model, Base, format_table_name
 from emannotationschemas.base import flatten_dict
 from emannotationschemas import get_schema
 from sqlalchemy import create_engine
@@ -84,6 +84,7 @@ class MaterializationManager(object):
         self._dataset_name = dataset_name
         self._schema_name = schema_name
         self._table_name = table_name
+        self._version = version
         self._sqlalchemy_database_uri = sqlalchemy_database_uri
         if annotation_model is not None:
             self._annotation_model = annotation_model
@@ -104,7 +105,11 @@ class MaterializationManager(object):
             self._sqlalchemy_engine = None
             self._sqlalchemy_session = None
 
-        self._schema_init = get_schema(self.schema_name)
+        try:
+            self._schema_init = get_schema(self.schema_name)
+        except:
+            self._schema_init = None
+
         self._this_sqlalchemy_session = None
 
     @property
@@ -118,6 +123,10 @@ class MaterializationManager(object):
     @property
     def dataset_name(self):
         return self._dataset_name
+
+    @property
+    def version(self):
+        return self._version
 
     @property
     def sqlalchemy_database_uri(self):
@@ -157,14 +166,18 @@ class MaterializationManager(object):
         info = {"dataset_name": self.dataset_name,
                 "schema_name": self.schema_name,
                 "table_name": self.table_name,
+                "version": self.version,
                 "sqlalchemy_database_uri": self.sqlalchemy_database_uri}
-
+        print(info)
         return info
 
     def _drop_table(self):
         """ Deletes the table in the database """
-        table_name = "%s_%s" % (self.dataset_name, self.schema_name)
-        Base.metadata.tables[table_name].drop(self.sqlalchemy_engine)
+        table_name = format_table_name(self._dataset_name, self._table_name, self._version)
+        if table_name in Base.metadata.tables:
+            Base.metadata.tables[table_name].drop(self.sqlalchemy_engine)
+        else:
+            print('could not drop {}'.format(table_name))
 
     def get_schema(self, cg, cv, pixel_ratios=(1.0, 1.0, 1.0), time_stamp=None):
         """ Loads schema with appropriate context
