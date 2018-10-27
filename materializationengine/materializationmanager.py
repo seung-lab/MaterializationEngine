@@ -20,15 +20,22 @@ class AnnotationParseFailure(MaterializeAnnotationException):
     pass
 
 
-def lookup_sv_and_cg_bsp(cg, cv, item, pixel_ratios = (1.0, 1.0, 1.0)):
+def lookup_sv_and_cg_bsp(cg,
+                         cv,
+                         item,
+                         pixel_ratios=(1.0, 1.0, 1.0),
+                         time_stamp=None):
     """ function to fill in the supervoxel_id and root_id
 
     :param cg: pychunkedgraph.ChunkedGraph
         chunkedgraph instance to use to lookup supervoxel and root_ids
     :param item: dict
         deserialized boundspatialpoint to process
-    :parm pixel_ratios: tuple
-        ratios to multiple position coordinates to get cg.cv segmentation coordinates
+    :param pixel_ratios: tuple
+        ratios to multiple position coordinates 
+        to get cg.cv segmentation coordinates
+    :param time_stamp: datetime.datetime
+        time_stamp to lock to (optional None)
     :return: None
         will edit item in place
     """
@@ -40,7 +47,7 @@ def lookup_sv_and_cg_bsp(cg, cv, item, pixel_ratios = (1.0, 1.0, 1.0)):
         raise AnnotationParseFailure(msg)
 
     try:
-        root_id = cg.get_root(sv_id)
+        root_id = cg.get_root(sv_id, time_stamp=time_stamp)
     except:
         msg = "failed to lookup root_id of sv_id {}", sv_id
         raise AnnotationParseFailure(msg)
@@ -146,7 +153,7 @@ class MaterializationManager(object):
         table_name = "%s_%s" % (self.dataset_name, self.schema_name)
         Base.metadata.tables[table_name].drop(self.sqlalchemy_engine)
 
-    def get_schema(self, cg, cv, pixel_ratios = (1.0, 1.0, 1.0)):
+    def get_schema(self, cg, cv, pixel_ratios = (1.0, 1.0, 1.0), time_stamp=None):
         """ Loads schema with appropriate context
 
         :param cg: pychunkedgraph.ChunkedGraph
@@ -159,19 +166,26 @@ class MaterializationManager(object):
         """
         context = dict()
         context['bsp_fn'] = functools.partial(lookup_sv_and_cg_bsp,
-                                              cg, cv, pixel_ratios=pixel_ratios)
+                                              cg, cv, pixel_ratios=pixel_ratios,
+                                              time_stamp=time_stamp)
         context['postgis'] = self.is_sql
         return self.schema_init(context=context)
 
-    def deserialize_single_annotation(self, blob, cg, cv, pixel_ratios=(1.0, 1.0, 1.0)):
+    def deserialize_single_annotation(self, blob, cg, cv, pixel_ratios=(1.0, 1.0, 1.0),
+                                      time_stamp=None):
         """ Materializes single annotation object
 
         :param blob: binary
         :param sv_id_to_root_id_dict: dict
+        :param pixel_ratios: tuple
+            length 3 tuple of ratios to multiple position
+            coordinates to get to segmentation coordinates
+        :param time_stamp: datetime.datetime
+            time_stamp to lock database to
         :return: dict
         """
         print(self.schema_name)
-        schema = self.get_schema(cg, cv, pixel_ratios=pixel_ratios)
+        schema = self.get_schema(cg, cv, pixel_ratios=pixel_ratios, time_stamp=time_stamp)
         data = schema.load(json.loads(blob)).data
 
         return flatten_dict(data)
