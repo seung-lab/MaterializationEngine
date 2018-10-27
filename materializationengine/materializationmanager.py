@@ -42,10 +42,9 @@ def lookup_sv_and_cg_bsp(cg,
     """
     try:
         voxel = np.array(item['position'])*np.array(pixel_ratios)
-        sv_id = cv[int(voxel[0]), int(voxel[1]), int(voxel[2])]
-        sv_id = int(sv_id[0,0,0,0])
-    except Exception as e:
-        msg = "failed to lookup sv_id of voxel {}: {}".format(voxel, e)
+        sv_id = cv[int(voxel[0]), int(voxel[1]), int(voxel[2])].flatten()[0]
+    except:
+        msg = "failed to lookup sv_id of voxel {}", voxel
         raise AnnotationParseFailure(msg)
 
     try:
@@ -54,7 +53,7 @@ def lookup_sv_and_cg_bsp(cg,
         msg = "failed to lookup root_id of sv_id {} {}".format(sv_id, e)
         raise AnnotationParseFailure(msg)
 
-    item['supervoxel_id'] = sv_id
+    item['supervoxel_id'] = int(sv_id)
     item['root_id'] = int(root_id)
 
 # DEPRECATED
@@ -106,6 +105,7 @@ class MaterializationManager(object):
             self._sqlalchemy_session = None
 
         self._schema_init = get_schema(self.schema_name)
+        self._this_sqlalchemy_session = None
 
     @property
     def schema_name(self):
@@ -130,6 +130,12 @@ class MaterializationManager(object):
     @property
     def sqlalchemy_session(self):
         return self._sqlalchemy_session
+
+    @property
+    def this_sqlalchemy_session(self):
+        if self._this_sqlalchemy_session is None:
+            self._this_sqlalchemy_session = self.sqlalchemy_session()
+        return self._this_sqlalchemy_session
 
     @property
     def annotation_model(self):
@@ -212,11 +218,11 @@ class MaterializationManager(object):
         # # create a new model instance with data
         annotation = self.annotation_model(**deserialized_annotation)
 
-        # create a new db session
-        this_session = self.sqlalchemy_session()
-
         # add this annotation object to database
-        this_session.add(annotation)
+        self.this_sqlalchemy_session.add(annotation)
 
+    def commit_session(self):
         # commit this transaction to database
-        this_session.commit()
+        self.this_sqlalchemy_session.commit()
+
+        self._this_sqlalchemy_session = None
