@@ -6,8 +6,6 @@ from emannotationschemas.models import root_model_name, make_cell_segment_model
 # import json
 import requests
 import numpy as np
-
-
 from pychunkedgraph.backend import chunkedgraph
 from multiwrapper import multiprocessing_utils as mu
 from dynamicannotationdb.annodb_meta import AnnotationMetaDB
@@ -138,7 +136,6 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     if n_threads > 1:
         del cg_info["credentials"]
         del amdb_info["credentials"]
-
     # Annotation ids start at 1
     id_chunks = np.linspace(1, max_annotation_id + 1,
                             min([n_threads * 3, max_annotation_id]) + 1).astype(np.uint64)
