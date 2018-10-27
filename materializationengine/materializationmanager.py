@@ -32,7 +32,7 @@ def lookup_sv_and_cg_bsp(cg,
     :param item: dict
         deserialized boundspatialpoint to process
     :param pixel_ratios: tuple
-        ratios to multiple position coordinates 
+        ratios to multiple position coordinates
         to get cg.cv segmentation coordinates
     :param time_stamp: datetime.datetime
         time_stamp to lock to (optional None)

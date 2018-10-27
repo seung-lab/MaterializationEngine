@@ -171,9 +171,9 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
 
 def _materialize_root_ids_thread(args):
     root_ids, serialized_mm_info = args
-
+    model = make_cell_segment_model(serialized_mm_info["dataset_name"])
     mm = materializationmanager.MaterializationManager(**serialized_mm_info,
-                                                       annotation_model=make_cell_segment_model(serialized_mm_info["dataset_name"]),)
+                                                       annotation_model=model)
 
     batch_size = 100
     annotations = []
