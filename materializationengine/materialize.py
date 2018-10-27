@@ -202,7 +202,7 @@ def _materialize_root_ids_thread(args):
 
 
 def materialize_root_ids(cg_table_id, dataset_name,
-                         schema_name, table_name, version,
+                         version,
                          time_stamp,
                          sqlalchemy_database_uri=None, cg_client=None,
                          cg_instance_id=None, n_threads=1):
@@ -220,6 +220,7 @@ def materialize_root_ids(cg_table_id, dataset_name,
     model = make_cell_segment_model(dataset_name, version=version)
     mm = materializationmanager.MaterializationManager(
         dataset_name=dataset_name, schema_name=root_model_name.lower(),
+        table_name=root_model_name.lower(),
         version=version,
         annotation_model=model,
         sqlalchemy_database_uri=sqlalchemy_database_uri)
