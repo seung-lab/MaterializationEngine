@@ -213,21 +213,16 @@ def materialize_root_ids(cg_table_id, dataset_name,
         raise Exception("Missing Instance ID")
 
     root_ids = cg.get_latest_roots(time_stamp=time_stamp, n_threads=n_threads)
-
+    model = make_cell_segment_model(dataset_name, version=version)
     mm = materializationmanager.MaterializationManager(
         dataset_name=dataset_name, schema_name=root_model_name.lower(),
-        annotation_model=make_cell_segment_model(dataset_name),
+        version=version,
+        annotation_model=model,
         sqlalchemy_database_uri=sqlalchemy_database_uri)
 
     if mm.is_sql:
         mm._drop_table()
         print("Dropped table")
-
-        mm = materializationmanager.MaterializationManager(
-            dataset_name=dataset_name,
-            schema_name=root_model_name.lower(),
-            annotation_model=make_cell_segment_model(dataset_name),
-            sqlalchemy_database_uri=sqlalchemy_database_uri)
 
     root_id_blocks = np.array_split(root_ids, n_threads*3)
     multi_args = []
