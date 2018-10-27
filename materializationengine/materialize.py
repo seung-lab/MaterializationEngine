@@ -146,7 +146,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     id_chunks = np.linspace(1, max_annotation_id + 1, n_parts).astype(np.uint64)
 
     multi_args = []
-    for i_id_chunk in range(len(id_chunks) - 1):
+    for i_id_chunk in range(len(id_chunks)):
         multi_args.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1],
                            dataset_name, table_name, schema_name, version,
                            time_stamp,
@@ -165,6 +165,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
 
     if not mm.is_sql:
         # Collect the results
+        print(results)
         anno_dict = {}
         for result in results:
             anno_dict.update(result)
