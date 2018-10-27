@@ -85,11 +85,14 @@ class MaterializationManager(object):
         self._schema_name = schema_name
         self._table_name = table_name
         self._sqlalchemy_database_uri = sqlalchemy_database_uri
+        if annotation_model is not None:
+            self._annotation_model = annotation_model
+        else:
+            self._annotation_model = make_annotation_model(dataset_name,
+                                                           schema_name,
+                                                           table_name,
+                                                           version=version)
 
-        self._annotation_model = make_annotation_model(dataset_name,
-                                                       schema_name,
-                                                       table_name,
-                                                       version=version)
         if sqlalchemy_database_uri is not None:
             self._sqlalchemy_engine = create_engine(sqlalchemy_database_uri,
                                                     echo=True)
