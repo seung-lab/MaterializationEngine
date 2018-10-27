@@ -197,7 +197,6 @@ class MaterializationManager(object):
             time_stamp to lock database to
         :return: dict
         """
-        print(self.schema_name)
         schema = self.get_schema(
             cg, cv, pixel_ratios=pixel_ratios, time_stamp=time_stamp)
         data = schema.load(json.loads(blob)).data
