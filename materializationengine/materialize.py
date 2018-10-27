@@ -104,7 +104,7 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
 
 
 def process_all_annotations(cg_table_id, dataset_name, schema_name,
-                            table_name, time_stamp=None, version='v1',
+                            table_name, time_stamp=None, version:  int=1,
                             sqlalchemy_database_uri=None,
                             amdb_client=None, amdb_instance_id=None,
                             cg_client=None, cg_instance_id=None,
@@ -254,7 +254,7 @@ def materialize_all_annotations(cg_table_id,
                                 dataset_name,
                                 schema_name,
                                 table_name,
-                                version='v1',
+                                version:  int=1,
                                 time_stamp=None,
                                 sqlalchemy_database_uri=None,
                                 amdb_client=None,

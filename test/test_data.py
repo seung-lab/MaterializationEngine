@@ -7,10 +7,12 @@ from materializationengine.materialize import materialize_all_annotations, mater
 import materializationengine.materialize
 from annotationengine.annotation import collect_bound_spatial_points, import_annotation_func, get_schema_from_service
 from emannotationschemas.blueprint_app import get_type_schema
+from emannotationschemas.models import root_model_name, get_next_version
 from mock import patch, Mock, MagicMock
 import requests_mock
 import numpy as np
 import datetime
+import sqlalchemy
 
 @pytest.fixture(scope="session")
 def test_data(test_annon_dataset):
@@ -97,41 +99,41 @@ def test_simple_test(cv, test_data, test_annon_dataset, monkeypatch, requests_mo
     monkeypatch.setattr(materializationengine.materialize,
                         'get_segmentation_and_scales_from_infoservice',
                         mocked_info)
+    sql_uri = 'postgres://postgres:synapsedb@localhost:5432/testing'
+    new_version = get_next_version(sql_uri, dataset_name)
 
     time_stamp = datetime.datetime.utcnow()
     df = materialize_all_annotations('cgtable',
                                      dataset_name=dataset_name,
                                      schema_name="synapse",
                                      table_name="synapse",
-                                     version='v0',
+                                     version=new_version,
                                      time_stamp=time_stamp,
                                      amdb_client=amdb.client,
                                      amdb_instance_id=amdb.instance_id,
                                      cg_instance_id='cgraph_instance',
                                      n_threads=1)
     df.to_csv('test.csv')
-    
 
-    df = materialize_root_ids('cgtable',
-                              dataset_name=dataset_name,
-                              time_stamp=time_stamp,
-                              version='v0',
-                              sqlalchemy_database_uri='postgres://postgres:synapsedb@localhost:5432/testing',
-                              cg_instance_id='cgraph_instance',
-                              n_threads=1)
+    materialize_root_ids('cgtable',
+                         dataset_name=dataset_name,
+                         time_stamp=time_stamp,
+                         version=new_version,
+                         sqlalchemy_database_uri=sql_uri,
+                         cg_instance_id='cgraph_instance',
+                         n_threads=1)
 
+    materialize_all_annotations('cgtable',
+                                dataset_name=dataset_name,
+                                schema_name="synapse",
+                                table_name="synapse",
+                                version=new_version,
+                                amdb_client=amdb.client,
+                                amdb_instance_id=amdb.instance_id,
+                                sqlalchemy_database_uri=sql_uri,
+                                cg_instance_id='cgraph_instance',
+                                n_threads=1)
 
-    df = materialize_all_annotations('cgtable',
-                                     dataset_name=dataset_name,
-                                     schema_name="synapse",
-                                     table_name="synapse",
-                                     version='v0',
-                                     amdb_client=amdb.client,
-                                     amdb_instance_id=amdb.instance_id,
-                                     sqlalchemy_database_uri='postgres://postgres:synapsedb@localhost:5432/testing',
-                                     cg_instance_id='cgraph_instance',
-                                     n_threads=1)
-    
     # TODO do real tests of results
     # df_bs = materialize_all_annotations(table_id,
     #                                     dataset_name=dataset_name,
