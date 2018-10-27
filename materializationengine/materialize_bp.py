@@ -1,9 +1,6 @@
 from flask import Blueprint, jsonify, abort, current_app
 from materializationengine import materialize
 from emannotationschemas import get_types, get_schema
-import sqlalchemy
-import requests
-import os
 
 __version__ = "0.0.1"
 bp = Blueprint("materialize", __name__, url_prefix="/materialize")

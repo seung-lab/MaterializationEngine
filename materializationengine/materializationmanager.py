@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import numpy as np
 
+
 class MaterializeAnnotationException(Exception):
     pass
 
@@ -77,7 +78,7 @@ def lookup_sv_and_cg_bsp(cg,
 
 class MaterializationManager(object):
     def __init__(self, dataset_name, schema_name,
-                 table_name, version = 'v1',
+                 table_name, version='v1',
                  sqlalchemy_database_uri=None):
         self._dataset_name = dataset_name
         self._schema_name = schema_name
@@ -93,7 +94,8 @@ class MaterializationManager(object):
                                                     echo=True)
             Base.metadata.create_all(self.sqlalchemy_engine)
 
-            self._sqlalchemy_session = sessionmaker(bind=self.sqlalchemy_engine)
+            self._sqlalchemy_session = sessionmaker(
+                bind=self.sqlalchemy_engine)
         else:
             self._sqlalchemy_engine = None
             self._sqlalchemy_session = None
@@ -153,7 +155,7 @@ class MaterializationManager(object):
         table_name = "%s_%s" % (self.dataset_name, self.schema_name)
         Base.metadata.tables[table_name].drop(self.sqlalchemy_engine)
 
-    def get_schema(self, cg, cv, pixel_ratios = (1.0, 1.0, 1.0), time_stamp=None):
+    def get_schema(self, cg, cv, pixel_ratios=(1.0, 1.0, 1.0), time_stamp=None):
         """ Loads schema with appropriate context
 
         :param cg: pychunkedgraph.ChunkedGraph
@@ -185,7 +187,8 @@ class MaterializationManager(object):
         :return: dict
         """
         print(self.schema_name)
-        schema = self.get_schema(cg, cv, pixel_ratios=pixel_ratios, time_stamp=time_stamp)
+        schema = self.get_schema(
+            cg, cv, pixel_ratios=pixel_ratios, time_stamp=time_stamp)
         data = schema.load(json.loads(blob)).data
 
         return flatten_dict(data)

@@ -215,7 +215,7 @@ def materialize_root_ids(cg_table_id, dataset_name,
     root_ids = cg.get_latest_roots(time_stamp=time_stamp, n_threads=n_threads)
 
     mm = materializationmanager.MaterializationManager(
-        dataset_name=dataset_name, annotation_type=root_model_name.lower(),
+        dataset_name=dataset_name, schema_name=root_model_name.lower(),
         annotation_model=make_cell_segment_model(dataset_name),
         sqlalchemy_database_uri=sqlalchemy_database_uri)
 
@@ -303,11 +303,3 @@ def materialize_all_annotations(cg_table_id,
     if anno_dict is not None:
         df = pd.DataFrame.from_dict(anno_dict, orient="index")
         return df
-
-        #   img_cv = MyCloudVolume(vol_path, mip=0)
-
-        #         self.cvd[dataset] = MyCloudVolume(path, mip=0,
-        #                                           fill_missing=True,
-        #                                           cache=True)
-        #         scale_factor = img_cv.resolution / self.cvd[dataset].resolution
-        #         self.scale_factors[dataset] = scale_factor
