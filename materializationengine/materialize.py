@@ -34,7 +34,7 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
 
 def _process_all_annotations_thread(args):
     """ Helper for process_all_annotations """
-    anno_id_start, anno_id_end, dataset_name, table_name, schema_name, version, cg_table_id, \
+    anno_id_start, anno_id_end, dataset_name, table_name, schema_name, version, time_stamp, cg_table_id, \
         serialized_amdb_info, serialized_cg_info, serialized_mm_info, serialized_cv_info, pixel_ratios = args
 
     amdb = AnnotationMetaDB(**serialized_amdb_info)
@@ -58,7 +58,8 @@ def _process_all_annotations_thread(args):
         deserialized_annotation = mm.deserialize_single_annotation(annotation_data_b,
                                                                    cg,
                                                                    cg.cv,
-                                                                   pixel_ratios=pixel_ratios)
+                                                                   pixel_ratios=pixel_ratios,
+                                                                   time_stamp=None)
 
         print(deserialized_annotation)
 
@@ -93,7 +94,7 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint = 'https://ww
     return info['pychunkgraph_segmentation_source'], pixel_ratios
 
 def process_all_annotations(cg_table_id, dataset_name, schema_name,
-                            table_name, timestamp, version='v1',
+                            table_name, time_stamp=None, version='v1',
                             sqlalchemy_database_uri=None,
                             amdb_client=None, amdb_instance_id=None,
                             cg_client=None, cg_instance_id=None, n_threads=1):
@@ -158,6 +159,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     for i_id_chunk in range(len(id_chunks) - 1):
         multi_args.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1],
                            dataset_name, table_name, schema_name, version,
+                           time_stamp,
                            cg_table_id, amdb_info, cg_info,
                            mm.get_serialized_info(), cv_info, pixel_ratios])
 
@@ -240,7 +242,7 @@ def materialize_all_annotations(cg_table_id,
                                 schema_name,
                                 table_name,
                                 version='v1',
-                                timestamp=None,
+                                time_stamp=None,
                                 sqlalchemy_database_uri=None,
                                 amdb_client=None,
                                 amdb_instance_id=None,
@@ -260,8 +262,8 @@ def materialize_all_annotations(cg_table_id,
         name of annotation table
     :param version: str
         version of table (i.e. v1)
-    :param timestamp: time.utctime
-        timestamp to lock databases to
+    :param time_stamp: time.utctime
+        time_stamp to lock databases to
     :param sqlalchemy_database_uri:
         database connect uri (leave blank for dataframe)
     :param n_threads: int
@@ -273,7 +275,7 @@ def materialize_all_annotations(cg_table_id,
                                         schema_name=schema_name,
                                         table_name=table_name,
                                         version=version,
-                                        timestamp=timestamp,
+                                        time_stamp=time_stamp,
                                         sqlalchemy_database_uri=sqlalchemy_database_uri,
                                         amdb_client=amdb_client,
                                         amdb_instance_id=amdb_instance_id,
