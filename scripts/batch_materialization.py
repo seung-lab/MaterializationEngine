@@ -19,6 +19,8 @@ class BatchMaterializationSchema(argschema.ArgSchema):
                                    description="name of google instance for PyChunkedGraph")
     n_threads = mm.fields.Int(default=16,
                               description="number of threads to use in parallelization")
+    time_stamp = mm.fields.DateTime(default=str(datetime.datetime.utcnow()),
+                                    description="time to use for materialization")
     sql_uri = mm.fields.Str(
         description="connection uri string to postgres database"
         "(default to MATERIALIZATION_POSTGRES_URI environment variable")
@@ -46,6 +48,7 @@ if __name__ == '__main__':
                                             schema_name,
                                             table_name,
                                             version='v1',
+                                            timestamp=mod.args['timestamp'],
                                             amdb_instance_id=mod.args["amdb_instance_id"],
                                             cg_instance_id=mod.args["cg_instance_id"],
                                             sqlalchemy_database_uri=sql_uri,

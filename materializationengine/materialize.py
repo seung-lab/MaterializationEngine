@@ -93,7 +93,7 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint = 'https://ww
     return info['pychunkgraph_segmentation_source'], pixel_ratios
 
 def process_all_annotations(cg_table_id, dataset_name, schema_name,
-                            table_name, version='v1',
+                            table_name, timestamp, version='v1',
                             sqlalchemy_database_uri=None,
                             amdb_client=None, amdb_instance_id=None,
                             cg_client=None, cg_instance_id=None, n_threads=1):
@@ -111,7 +111,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
         amdb = AnnotationMetaDB()
     elif amdb_instance_id is not None:
         amdb = AnnotationMetaDB(client=amdb_client,
-                                       instance_id=amdb_instance_id)
+                                instance_id=amdb_instance_id)
     else:
         raise Exception("Missing Instance ID for AnnotationMetaDB")
 
@@ -179,12 +179,68 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
 
         return anno_dict
 
+def materialize_root_ids(cg_table_id, dataset_name,
+                         schema_name, table_name, version,
+                         time_stamp,
+                         sqlalchemy_database_uri=None, cg_client=None,
+                         cg_instance_id=None, n_threads=1):
+
+    if cg_client is None:
+        cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id)
+    elif cg_instance_id is not None:
+        cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id,
+                                       client=cg_client,
+                                       instance_id=cg_instance_id)
+    else:
+        raise Exception("Missing Instance ID")
+
+    root_ids = cg.get_latest_roots(time_stamp=time_stamp, n_threads=n_threads)
+
+    mm = materializationmanager.MaterializationManager(
+        dataset_name=dataset_name, annotation_type=root_model_name.lower(),
+        annotation_model=make_cell_segment_model(dataset_name),
+        sqlalchemy_database_uri=sqlalchemy_database_uri)
+
+    if mm.is_sql:
+        mm._drop_table()
+        print("Dropped table")
+
+        mm = materializationmanager.MaterializationManager(
+            dataset_name=dataset_name,
+            annotation_type=root_model_name.lower(),
+            annotation_model=make_cell_segment_model(dataset_name),
+            sqlalchemy_database_uri=sqlalchemy_database_uri)
+
+    root_id_blocks = np.array_split(root_ids, n_threads*3)
+    multi_args = []
+
+    for root_id_block in root_id_blocks:
+        multi_args.append([root_id_block, mm.get_serialized_info()])
+
+    if n_threads == 1:
+        results = mu.multiprocess_func(
+            _materialize_root_ids_thread, multi_args,
+            n_threads=n_threads,
+            verbose=True, debug=n_threads == 1)
+    else:
+        results = mu.multisubprocess_func(
+            _materialize_root_ids_thread, multi_args,
+            n_threads=n_threads, package_name="materializationengine")
+
+    if not mm.is_sql:
+        # Collect the results
+        anno_dict = {}
+        for result in results:
+            anno_dict.update(result)
+
+        return anno_dict
 
 def materialize_all_annotations(cg_table_id,
                                 dataset_name,
                                 schema_name,
                                 table_name,
                                 version='v1',
+                                timestamp=None,
                                 sqlalchemy_database_uri=None,
                                 amdb_client=None,
                                 amdb_instance_id=None,
@@ -200,6 +256,14 @@ def materialize_all_annotations(cg_table_id,
         type of annotation
     :param cg_table_id: str
         chunk graph table
+    :param table_name: str
+        name of annotation table
+    :param version: str
+        version of table (i.e. v1)
+    :param timestamp: time.utctime
+        timestamp to lock databases to
+    :param sqlalchemy_database_uri:
+        database connect uri (leave blank for dataframe)
     :param n_threads: int
          number of threads to use to materialize
     """
@@ -209,6 +273,7 @@ def materialize_all_annotations(cg_table_id,
                                         schema_name=schema_name,
                                         table_name=table_name,
                                         version=version,
+                                        timestamp=timestamp,
                                         sqlalchemy_database_uri=sqlalchemy_database_uri,
                                         amdb_client=amdb_client,
                                         amdb_instance_id=amdb_instance_id,
