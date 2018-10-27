@@ -58,9 +58,11 @@ def _process_all_annotations_thread(args):
             mm.add_annotation_to_sql_database(deserialized_annotation)
         else:
             annos_dict[annotation_id] = deserialized_annotation
+
     if not mm.is_sql:
         return annos_dict
-
+    else:
+        mm.commit_session()
 
 def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.dynamicannotationframework.com/info'):
     url = endpoint + '/api/dataset/{}'.format(dataset)
@@ -82,7 +84,8 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
                             table_name, time_stamp=None, version='v1',
                             sqlalchemy_database_uri=None,
                             amdb_client=None, amdb_instance_id=None,
-                            cg_client=None, cg_instance_id=None, n_threads=1):
+                            cg_client=None, cg_instance_id=None,
+                            block_size=10, n_threads=1):
     """ Reads data from all annotations and acquires their mapping to root_ids
 
     :param dataset_name: str
@@ -136,9 +139,12 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     if n_threads > 1:
         del cg_info["credentials"]
         del amdb_info["credentials"]
+
+    n_parts = int(max(1, max_annotation_id / block_size))
+
     # Annotation ids start at 1
-    id_chunks = np.linspace(1, max_annotation_id + 1,
-                            min([n_threads * 3, max_annotation_id]) + 1).astype(np.uint64)
+    id_chunks = np.linspace(1, max_annotation_id + 1, n_parts).astype(np.uint64)
+
     multi_args = []
     for i_id_chunk in range(len(id_chunks) - 1):
         multi_args.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1],
