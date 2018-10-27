@@ -43,19 +43,19 @@ def lookup_sv_and_cg_bsp(cg,
     try:
         voxel = np.array(item['position'])*np.array(pixel_ratios)
         sv_id = cv[int(voxel[0]), int(voxel[1]), int(voxel[2])]
-        sv_id = sv_id[0,0,0,0]
-    except:
-        msg = "failed to lookup sv_id of voxel {}", voxel
+        sv_id = int(sv_id[0,0,0,0])
+    except Exception as e:
+        msg = "failed to lookup sv_id of voxel {}: {}".format(voxel, e)
         raise AnnotationParseFailure(msg)
 
     try:
         root_id = cg.get_root(sv_id, time_stamp=time_stamp)
-    except:
-        msg = "failed to lookup root_id of sv_id {}", sv_id
+    except Exception as e:
+        msg = "failed to lookup root_id of sv_id {} {}".format(sv_id, e)
         raise AnnotationParseFailure(msg)
 
     item['supervoxel_id'] = sv_id
-    item['root_id'] = root_id
+    item['root_id'] = int(root_id)
 
 # DEPRECATED
 # def materialize_bsp(sv_id_to_root_id_dict, item):
