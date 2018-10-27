@@ -43,6 +43,7 @@ def lookup_sv_and_cg_bsp(cg,
     try:
         voxel = np.array(item['position'])*np.array(pixel_ratios)
         sv_id = cv[int(voxel[0]), int(voxel[1]), int(voxel[2])]
+        sv_id = sv_id[0,0,0,0]
     except:
         msg = "failed to lookup sv_id of voxel {}", voxel
         raise AnnotationParseFailure(msg)

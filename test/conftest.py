@@ -10,6 +10,10 @@ from time import sleep
 from signal import SIGTERM
 import grpc
 import tempfile
+import cloudvolume
+import numpy as np
+import shutil
+
 
 tempdir = tempfile.mkdtemp()
 TEST_PATH = "file:/{}".format(tempdir)

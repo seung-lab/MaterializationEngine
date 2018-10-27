@@ -68,23 +68,19 @@ def simple_get_root(self, atomic_id):
     else:
         return "1345813419234993222"
 
-
-
-
-
-def test_simple_test(cv, test_annon_dataset, monkeypatch, requests_mock):
+def test_simple_test(cv, test_data, test_annon_dataset, monkeypatch, requests_mock):
 
     amdb, dataset_name = test_annon_dataset
 
     print(amdb.get_existing_tables())
 
     monkeypatch.setattr('pychunkedgraph.backend.chunkedgraph.ChunkedGraph',
-                        MagicMock(chunkedgraph.ChunkedGraph))
+                         simple_get_root)
     monkeypatch.setattr(
         'pychunkedgraph.backend.chunkedgraph.ChunkedGraph.get_root', simple_get_root)
 
-    def mocked_info(dataset, endpoint):
-        return cv, (1.0,1.0,1.0)
+    def mocked_info(dataset):
+        return cv, (1.0, 1.0, 1.0)
 
     monkeypatch.setattr(materializationengine.materialize,
                         'get_segmentation_and_scales_from_infoservice',
@@ -100,8 +96,8 @@ def test_simple_test(cv, test_annon_dataset, monkeypatch, requests_mock):
                                      amdb_instance_id=amdb.instance_id,
                                      cg_instance_id='cgraph_instance',
                                      n_threads=1)
-    print(df)
-
+    df.to_csv('test.csv')
+    assert(False)
     # df_bs = materialize_all_annotations(table_id,
     #                                     dataset_name=dataset_name,
     #                                     annotation_type="bouton_shape",
