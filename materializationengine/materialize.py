@@ -53,7 +53,7 @@ def _process_all_annotations_thread(args):
     for annotation_id in range(anno_id_start, anno_id_end):
         # Read annoation data from dynamicannotationdb
         annotation_data_b, bsps = amdb.get_annotation(
-            dataset_name, table_name, annotation_id)
+            dataset_name, table_name, annotation_id, time_stamp=time_stamp)
 
         if annotation_data_b is None:
             continue
