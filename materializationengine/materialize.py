@@ -1,13 +1,11 @@
 import pandas as pd
-from emannotationschemas.models import make_annotation_model_from_schema, root_model_name
+from emannotationschemas.models import root_model_name, make_cell_segment_model
 # from emannotationschemas.base import flatten_dict
 # from emannotationschemas import get_schema
 # from functools import partial
 # import json
 import requests
 import numpy as np
-import requests
-from pandas.io.json import json_normalize
 
 
 from pychunkedgraph.backend import chunkedgraph
@@ -15,21 +13,6 @@ from multiwrapper import multiprocessing_utils as mu
 from dynamicannotationdb.annodb_meta import AnnotationMetaDB
 import cloudvolume
 from . import materializationmanager
-
-
-def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.dynamicannotationframework.com/info'):
-    url = endpoint + '/api/dataset/{}'.format(dataset)
-    print(url)
-    r = requests.get(url)
-    assert (r.status_code == 200)
-    info = r.json()
-
-    img_cv = cloudvolume.CloudVolume(info['image_source'], mip=0)
-    pcg_seg_cv = cloudvolume.CloudVolume(info['pychunkgraph_segmentation_source'], mip=0)
-    scale_factor = img_cv.resolution / pcg_seg_cv.resolution
-    pixel_ratios = tuple(scale_factor)
-
-    return info['pychunkgraph_segmentation_source'], pixel_ratios
 
 
 def _process_all_annotations_thread(args):
@@ -64,8 +47,6 @@ def _process_all_annotations_thread(args):
                                                                    pixel_ratios=pixel_ratios,
                                                                    time_stamp=None)
 
-        print(deserialized_annotation)
-
         # this is now done in deserialization
         # sv_id_to_root_id_dict = {}
         # if sv_ids is not None:
@@ -75,14 +56,15 @@ def _process_all_annotations_thread(args):
         #         # Read root_id from pychunkedgraph
         #         sv_id_to_root_id_dict[sv_id] = cg.get_root(sv_id)
 
-    #     if mm.is_sql:
-    #         mm.add_annotation_to_sql_database(deserialized_annotation)
-    #     else:
-    #         annos_dict[annotation_id] = deserialized_annotation
-    # if not mm.is_sql:
-    #     return annos_dict
+        if mm.is_sql:
+            mm.add_annotation_to_sql_database(deserialized_annotation)
+        else:
+            annos_dict[annotation_id] = deserialized_annotation
+    if not mm.is_sql:
+        return annos_dict
 
-def get_segmentation_and_scales_from_infoservice(dataset, endpoint = 'https://www.dynamicannotationframework.com/info'):
+
+def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.dynamicannotationframework.com/info'):
     url = endpoint + '/api/dataset/{}'.format(dataset)
     print(url)
     r = requests.get(url)
@@ -90,11 +72,13 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint = 'https://ww
     info = r.json()
 
     img_cv = cloudvolume.CloudVolume(info['image_source'], mip=0)
-    pcg_seg_cv = cloudvolume.CloudVolume(info['pychunkgraph_segmentation_source'], mip=0)
+    pcg_seg_cv = cloudvolume.CloudVolume(
+        info['pychunkgraph_segmentation_source'], mip=0)
     scale_factor = img_cv.resolution / pcg_seg_cv.resolution
     pixel_ratios = tuple(scale_factor)
 
     return info['pychunkgraph_segmentation_source'], pixel_ratios
+
 
 def process_all_annotations(cg_table_id, dataset_name, schema_name,
                             table_name, time_stamp=None, version='v1',
@@ -128,7 +112,8 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     else:
         raise Exception("Missing Instance ID")
 
-    cv_path, pixel_ratios = get_segmentation_and_scales_from_infoservice(dataset_name)
+    cv_path, pixel_ratios = get_segmentation_and_scales_from_infoservice(
+        dataset_name)
 
     mm = materializationmanager.MaterializationManager(dataset_name=dataset_name,
                                                        schema_name=schema_name,
@@ -183,6 +168,35 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
 
         return anno_dict
 
+
+def _materialize_root_ids_thread(args):
+    root_ids, serialized_mm_info = args
+
+    mm = materializationmanager.MaterializationManager(**serialized_mm_info,
+                                                       annotation_model=make_cell_segment_model(serialized_mm_info["dataset_name"]),)
+
+    batch_size = 100
+    annotations = []
+
+    annos_dict = {}
+    for root_id in root_ids:
+
+        if mm.is_sql:
+            annotations.append({"root_id": int(root_id)})
+
+            if len(annotations) >= batch_size:
+                mm.add_annotations_to_sql_database(annotations)
+                annotations = []
+        else:
+            annos_dict[root_id] = {"root_id": root_id}
+
+    if len(annotations) > 0:
+        mm.add_annotations_to_sql_database(annotations)
+
+    if not mm.is_sql:
+        return annos_dict
+
+
 def materialize_root_ids(cg_table_id, dataset_name,
                          schema_name, table_name, version,
                          time_stamp,
@@ -211,7 +225,7 @@ def materialize_root_ids(cg_table_id, dataset_name,
 
         mm = materializationmanager.MaterializationManager(
             dataset_name=dataset_name,
-            annotation_type=root_model_name.lower(),
+            schema_name=root_model_name.lower(),
             annotation_model=make_cell_segment_model(dataset_name),
             sqlalchemy_database_uri=sqlalchemy_database_uri)
 
@@ -238,6 +252,7 @@ def materialize_root_ids(cg_table_id, dataset_name,
             anno_dict.update(result)
 
         return anno_dict
+
 
 def materialize_all_annotations(cg_table_id,
                                 dataset_name,
@@ -288,7 +303,6 @@ def materialize_all_annotations(cg_table_id,
     if anno_dict is not None:
         df = pd.DataFrame.from_dict(anno_dict, orient="index")
         return df
-
 
         #   img_cv = MyCloudVolume(vol_path, mip=0)
 
