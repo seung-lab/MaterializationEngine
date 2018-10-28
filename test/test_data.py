@@ -128,6 +128,7 @@ def test_simple_test(cv, test_data, test_annon_dataset, monkeypatch, requests_mo
                                 schema_name="synapse",
                                 table_name="synapse",
                                 version=new_version,
+                                time_stamp=time_stamp,
                                 amdb_client=amdb.client,
                                 amdb_instance_id=amdb.instance_id,
                                 sqlalchemy_database_uri=sql_uri,
