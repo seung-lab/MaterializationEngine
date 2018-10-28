@@ -5,6 +5,9 @@ import os
 import marshmallow as mm
 import datetime
 import time
+import pickle as pkl
+
+HOME = os.path.expanduser("~")
 
 
 class BatchMaterializationSchema(argschema.ArgSchema):
@@ -51,6 +54,10 @@ if __name__ == '__main__':
 
     print("INFO:", mod.args, new_version)
     print("sql_uri:", sql_uri)
+
+    with open("{}/materialization_log.pkl".format(HOME), "wb") as f:
+        pkl.dump(mod.args, f)
+        pkl.dump(sql_uri, f)
 
     timings = {}
 
