@@ -29,7 +29,7 @@ def _process_all_annotations_thread(args):
     mm = materializationmanager.MaterializationManager(**serialized_mm_info)
 
     annos_dict = {}
-
+    annos_list = []
     for annotation_id in range(anno_id_start, anno_id_end):
         # Read annoation data from dynamicannotationdb
         annotation_data_b, bsps = amdb.get_annotation(
@@ -54,7 +54,8 @@ def _process_all_annotations_thread(args):
         #         sv_id_to_root_id_dict[sv_id] = cg.get_root(sv_id)
 
         if mm.is_sql:
-            mm.add_annotation_to_sql_database(deserialized_annotation)
+            # mm.add_annotation_to_sql_database(deserialized_annotation)
+            annos_list.append(deserialized_annotation)
         # else:
         annos_dict[annotation_id] = deserialized_annotation
 
@@ -62,6 +63,7 @@ def _process_all_annotations_thread(args):
         return annos_dict
     else:
         try:
+            mm.bulk_insert_annotations(annos_list)
             mm.commit_session()
         except Exception as e:
             print("Timestamp:", time_stamp)
@@ -76,16 +78,19 @@ def _materialize_root_ids_thread(args):
                                                        annotation_model=model)
 
     annos_dict = {}
+    annos_list = []
     for root_id in root_ids:
         ann = {"id": int(root_id)}
         if mm.is_sql:
-            mm.add_annotation_to_sql_database(ann)
+            # mm.add_annotation_to_sql_database(ann)
+            annos_list.append(ann)
         else:
             annos_dict[root_id] = ann
 
     if not mm.is_sql:
         return annos_dict
     else:
+        mm.bulk_insert_annotations(annos_list)
         mm.commit_session()
         
 
