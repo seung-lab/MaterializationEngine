@@ -40,11 +40,14 @@ def lookup_sv_and_cg_bsp(cg,
     :return: None
         will edit item in place
     """
+    if time_stamp is None:
+        raise AnnotationParseFailure('passing no timestamp')
+
     try:
         voxel = np.array(item['position'])*np.array(pixel_ratios)
         sv_id = cv[int(voxel[0]), int(voxel[1]), int(voxel[2])].flatten()[0]
-    except:
-        msg = "failed to lookup sv_id of voxel {}", voxel
+    except Exception as e:
+        msg = "failed to lookup sv_id of voxel {}. reason {}".format(voxel, e)
         raise AnnotationParseFailure(msg)
 
     try:
