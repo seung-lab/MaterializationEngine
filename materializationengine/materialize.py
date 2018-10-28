@@ -25,9 +25,7 @@ def _process_all_annotations_thread(args):
 
     cg = chunkedgraph.ChunkedGraph(**serialized_cg_info)
 
-    print(serialized_cv_info)
     cv = cloudvolume.CloudVolume(**serialized_cv_info)
-    print(serialized_mm_info)
     mm = materializationmanager.MaterializationManager(**serialized_mm_info)
 
     annos_dict = {}
@@ -45,7 +43,7 @@ def _process_all_annotations_thread(args):
                                                                    cv,
                                                                    pixel_ratios=pixel_ratios,
                                                                    time_stamp=None)
-
+        deserialized_annotation['id'] = int(annotation_id)
         # this is now done in deserialization
         # sv_id_to_root_id_dict = {}
         # if sv_ids is not None:
@@ -75,7 +73,7 @@ def _materialize_root_ids_thread(args):
 
     annos_dict = {}
     for root_id in root_ids:
-        ann = {"root_id": int(root_id)}
+        ann = {"id": int(root_id)}
         if mm.is_sql:
             mm.add_annotation_to_sql_database(ann)
         else:
