@@ -251,7 +251,8 @@ def materialize_root_ids(cg_table_id, dataset_name,
         for result in results:
             anno_dict.update(result)
 
-        return anno_dict
+        df = pd.DataFrame.from_dict(anno_dict, orient="index")
+        return df
 
 
 def materialize_all_annotations(cg_table_id,
