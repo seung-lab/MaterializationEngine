@@ -20,7 +20,7 @@ class BatchMaterializationSchema(argschema.ArgSchema):
                                      description="name of google instance for DynamicAnnotationDb")
     cg_instance_id = mm.fields.Str(default="pychunkedgraph",
                                    description="name of google instance for PyChunkedGraph")
-    n_threads = mm.fields.Int(default=16,
+    n_threads = mm.fields.Int(default=200,
                               description="number of threads to use in parallelization")
     time_stamp = mm.fields.DateTime(default=str(datetime.datetime.utcnow()),
                                     description="time to use for materialization")
@@ -51,15 +51,15 @@ if __name__ == '__main__':
     new_version = get_next_version(sql_uri, mod.args['dataset_name'])
 
     schema_name = "synapse"
-    table_name = "synapse"
+    table_name = "pni_synapses"
 
     materialize.materialize_root_ids(mod.args["cg_table_id"],
-                                        dataset_name=mod.args["dataset_name"],
-                                        time_stamp=mod.args['time_stamp'],
-                                        version=new_version,
-                                        sqlalchemy_database_uri=sql_uri,
-                                        cg_instance_id=mod.args["cg_instance_id"],
-                                        n_threads=1)
+                                     dataset_name=mod.args["dataset_name"],
+                                     time_stamp=mod.args['time_stamp'],
+                                     version=new_version,
+                                     sqlalchemy_database_uri=sql_uri,
+                                     cg_instance_id=mod.args["cg_instance_id"],
+                                     n_threads=mod.args["n_threads"])
 
     materialize.materialize_all_annotations(mod.args["cg_table_id"],
                                             mod.args["dataset_name"],
