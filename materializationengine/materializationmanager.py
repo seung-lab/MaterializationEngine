@@ -223,6 +223,12 @@ class MaterializationManager(object):
 
         return flatten_dict(data)
 
+    def bulk_insert_annotations(self, annotations):
+        assert self.is_sql
+
+        self.this_sqlalchemy_session.bulk_insert_mappings(self.annotation_model, annotations)
+        
+
     def add_annotation_to_sql_database(self, deserialized_annotation):
         """ Transforms annotation object into postgis format and commits to the
             database
