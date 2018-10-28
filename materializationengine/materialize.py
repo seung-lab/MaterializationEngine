@@ -106,7 +106,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
                             sqlalchemy_database_uri=None,
                             amdb_client=None, amdb_instance_id=None,
                             cg_client=None, cg_instance_id=None,
-                            block_size=10, n_threads=1):
+                            block_size=500, n_threads=1):
     """ Reads data from all annotations and acquires their mapping to root_ids
 
     :param dataset_name: str
@@ -222,6 +222,8 @@ def materialize_root_ids(cg_table_id, dataset_name,
     # if mm.is_sql:
     #     mm._drop_table()
     #     print("Dropped table")
+
+    print("len(root_ids)", len(root_ids))
 
     root_id_blocks = np.array_split(root_ids, n_threads*3)
     multi_args = []

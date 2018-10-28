@@ -1,7 +1,7 @@
 import json
 import functools
 
-from emannotationschemas.models import make_annotation_model, Base, format_table_name
+from emannotationschemas.models import make_annotation_model, make_dataset_models, Base, format_table_name
 from emannotationschemas.base import flatten_dict
 from emannotationschemas import get_schema
 from sqlalchemy import create_engine
@@ -86,6 +86,9 @@ class MaterializationManager(object):
         self._table_name = table_name
         self._version = version
         self._sqlalchemy_database_uri = sqlalchemy_database_uri
+
+        make_dataset_models(dataset_name, [], version=version)
+
         if annotation_model is not None:
             self._annotation_model = annotation_model
         else:
