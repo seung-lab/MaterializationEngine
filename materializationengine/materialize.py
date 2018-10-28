@@ -55,14 +55,18 @@ def _process_all_annotations_thread(args):
 
         if mm.is_sql:
             mm.add_annotation_to_sql_database(deserialized_annotation)
-        else:
-            annos_dict[annotation_id] = deserialized_annotation
+        # else:
+        annos_dict[annotation_id] = deserialized_annotation
 
     if not mm.is_sql:
         return annos_dict
     else:
-        mm.commit_session()
-
+        try:
+            mm.commit_session()
+        except Exception as e:
+            print("Timestamp:", time_stamp)
+            print(annos_dict)
+            raise Exception(e)
 
 def _materialize_root_ids_thread(args):
     root_ids, serialized_mm_info = args
