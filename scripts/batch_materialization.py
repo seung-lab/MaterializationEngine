@@ -12,7 +12,7 @@ import mock
 
 
 class BatchMaterializationSchema(argschema.ArgSchema):
-    cg_table_id = mm.fields.Str(default="pinky100_sv11",
+    cg_table_id = mm.fields.Str(default="pinky100_sv16",
                                 description="PyChunkedGraph table id")
     dataset_name = mm.fields.Str(default="pinky100",
                                  description="name of dataset in DynamicAnnotationDb")
