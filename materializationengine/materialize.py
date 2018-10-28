@@ -42,7 +42,7 @@ def _process_all_annotations_thread(args):
                                                                    cg,
                                                                    cv,
                                                                    pixel_ratios=pixel_ratios,
-                                                                   time_stamp=None)
+                                                                   time_stamp=time_stamp)
         deserialized_annotation['id'] = int(annotation_id)
         # this is now done in deserialization
         # sv_id_to_root_id_dict = {}
