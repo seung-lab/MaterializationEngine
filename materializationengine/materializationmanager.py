@@ -84,7 +84,9 @@ class MaterializationManager(object):
     def __init__(self, dataset_name, schema_name,
                  table_name, version:  int=1,
                  annotation_model=None,
-                 sqlalchemy_database_uri=None):
+                 sqlalchemy_database_uri=None,
+                 bsp_deserialize_func=lookup_sv_and_cg_bsp):
+        self.bsp_deserialize_func=bsp_deserialize_func
         self._dataset_name = dataset_name
         self._schema_name = schema_name
         self._table_name = table_name
@@ -198,7 +200,7 @@ class MaterializationManager(object):
         :return:
         """
         context = dict()
-        context['bsp_fn'] = functools.partial(lookup_sv_and_cg_bsp,
+        context['bsp_fn'] = functools.partial(self.bsp_deserialize_func,
                                               cg, cv, pixel_ratios=pixel_ratios,
                                               time_stamp=time_stamp)
         context['postgis'] = self.is_sql

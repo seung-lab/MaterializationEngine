@@ -1,7 +1,8 @@
 # Define the application directory
 import os
-from annotationengine.utils import get_app_base_path
 import logging
+from materializationengine.models import Base
+from flask_sqlalchemy import SQLAlchemy
 
 
 class BaseConfig(object):
@@ -9,7 +10,6 @@ class BaseConfig(object):
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
     # Statement for enabling the development environment
     DEBUG = True
-    proj_dir = os.path.split(get_app_base_path())[0]
 
     INFOSERVICE_ENDPOINT = "http://35.196.170.230/info"
     BIGTABLE_CONFIG = {
@@ -22,13 +22,14 @@ class BaseConfig(object):
     LOGGING_LOCATION = HOME + '/.materializationengine/bookshelf.log'
     LOGGING_LEVEL = logging.DEBUG
     CHUNKGRAPH_TABLE_ID = "pinky40_fanout2_v7"
-    MATERIALIZATION_POSTGRES_URI = "postgres:postgres@localhost:5432/postgres"
-
+    SQLALCHEMY_DATABASE_URI = "postgres://postgres:synapsedb@localhost:5432/testing"
+    DATABASE_CONNECT_OPTIONS = {}
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
 
 config = {
-    "development": "annotationengine.config.BaseConfig",
-    "testing": "annotationengine.config.BaseConfig",
-    "default": "annotationengine.config.BaseConfig"
+    "development": "materializationengine.config.BaseConfig",
+    "testing": "materializationengine.config.BaseConfig",
+    "default": "materializationengine.config.BaseConfig"
 }
 
 
@@ -40,5 +41,9 @@ def configure_app(app):
         app.config.from_envvar('MATERIALIZATION_ENGINE_SETTINGS')
     # instance-folders configuration
     app.config.from_pyfile('config.cfg', silent=True)
+    print(app.config)
+    db = SQLAlchemy(model_class=Base)
+    db.init_app(app)
+
 
     return app
