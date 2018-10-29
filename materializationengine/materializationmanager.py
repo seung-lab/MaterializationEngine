@@ -187,6 +187,7 @@ class MaterializationManager(object):
             Base.metadata.tables[table_name].drop(self.sqlalchemy_engine)
         else:
             print('could not drop {}'.format(table_name))
+    
 
     def get_schema(self, cg, cv, pixel_ratios=(1.0, 1.0, 1.0), time_stamp=None):
         """ Loads schema with appropriate context
@@ -228,8 +229,7 @@ class MaterializationManager(object):
     def bulk_insert_annotations(self, annotations):
         assert self.is_sql
 
-        self.this_sqlalchemy_session.bulk_insert_mappings(self.annotation_model,
-                                                          annotations)
+        self.this_sqlalchemy_session.bulk_insert_mappings(self.annotation_model, annotations)
         
 
     def add_annotation_to_sql_database(self, deserialized_annotation):
