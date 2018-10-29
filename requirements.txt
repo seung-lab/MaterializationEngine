@@ -2,3 +2,11 @@ dynamicannotationdb
 pychunkedgraph
 emannotationschemas>=1.0.6
 argschema
+numpy
+pandas
+Flask
+sqlalchemy
+flask-sqlalchemy
+marshmallow-sqlalchemy
+flask-marshmallow
+flask-admin

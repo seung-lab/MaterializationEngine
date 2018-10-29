@@ -50,14 +50,12 @@ def lookup_sv_and_cg_bsp(cg,
         msg = "failed to lookup sv_id of voxel {}. reason {}".format(voxel, e)
         raise AnnotationParseFailure(msg)
 
-    if sv_id == 0:
+    try:
+        root_id = cg.get_root(sv_id, time_stamp=time_stamp)
+    except Exception as e:
         root_id = 0
-    else:
-        try:
-            root_id = cg.get_root(sv_id, time_stamp=time_stamp)
-        except Exception as e:
-            msg = "failed to lookup root_id of sv_id {} {}".format(sv_id, e)
-            raise AnnotationParseFailure(msg)
+        # msg = "failed to lookup root_id of sv_id {} {}".format(sv_id, e)
+        # raise AnnotationParseFailure(msg)
 
     item['supervoxel_id'] = int(sv_id)
     item['root_id'] = int(root_id)
@@ -86,9 +84,7 @@ class MaterializationManager(object):
     def __init__(self, dataset_name, schema_name,
                  table_name, version:  int=1,
                  annotation_model=None,
-                 sqlalchemy_database_uri=None,
-                 bsp_deserialize_func=lookup_sv_and_cg_bsp):
-        self.bsp_deserialize_func=bsp_deserialize_func
+                 sqlalchemy_database_uri=None):
         self._dataset_name = dataset_name
         self._schema_name = schema_name
         self._table_name = table_name
@@ -189,6 +185,7 @@ class MaterializationManager(object):
             Base.metadata.tables[table_name].drop(self.sqlalchemy_engine)
         else:
             print('could not drop {}'.format(table_name))
+    
 
     def get_schema(self, cg, cv, pixel_ratios=(1.0, 1.0, 1.0), time_stamp=None):
         """ Loads schema with appropriate context
@@ -202,7 +199,7 @@ class MaterializationManager(object):
         :return:
         """
         context = dict()
-        context['bsp_fn'] = functools.partial(self.bsp_deserialize_func,
+        context['bsp_fn'] = functools.partial(lookup_sv_and_cg_bsp,
                                               cg, cv, pixel_ratios=pixel_ratios,
                                               time_stamp=time_stamp)
         context['postgis'] = self.is_sql
@@ -230,8 +227,7 @@ class MaterializationManager(object):
     def bulk_insert_annotations(self, annotations):
         assert self.is_sql
 
-        self.this_sqlalchemy_session.bulk_insert_mappings(self.annotation_model,
-                                                          annotations)
+        self.this_sqlalchemy_session.bulk_insert_mappings(self.annotation_model, annotations)
         
 
     def add_annotation_to_sql_database(self, deserialized_annotation):
