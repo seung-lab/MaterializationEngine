@@ -50,12 +50,14 @@ def lookup_sv_and_cg_bsp(cg,
         msg = "failed to lookup sv_id of voxel {}. reason {}".format(voxel, e)
         raise AnnotationParseFailure(msg)
 
-    try:
-        root_id = cg.get_root(sv_id, time_stamp=time_stamp)
-    except Exception as e:
+    if sv_id == 0:
         root_id = 0
-        # msg = "failed to lookup root_id of sv_id {} {}".format(sv_id, e)
-        # raise AnnotationParseFailure(msg)
+    else:
+        try:
+            root_id = cg.get_root(sv_id, time_stamp=time_stamp)
+        except Exception as e:
+            msg = "failed to lookup root_id of sv_id {} {}".format(sv_id, e)
+            raise AnnotationParseFailure(msg)
 
     item['supervoxel_id'] = int(sv_id)
     item['root_id'] = int(root_id)
