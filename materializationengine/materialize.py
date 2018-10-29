@@ -1,5 +1,5 @@
 import pandas as pd
-from emannotationschemas.models import root_model_name, make_cell_segment_model
+from emannotationschemas.models import root_model_name, make_cell_segment_model, make_annotation_model
 # from emannotationschemas.base import flatten_dict
 # from emannotationschemas import get_schema
 # from functools import partial
@@ -109,7 +109,26 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
 
     return info['pychunkgraph_segmentation_source'], pixel_ratios
 
+def update_root_id_all_annotations(cg_table_id, dataset_name, schema_name,
+                            table_name, old_version:int, new_version:int,
+                            time_stamp=None, 
+                            sqlalchemy_database_uri=None,
+                            amdb_client=None, amdb_instance_id=None,
+                            cg_client=None, cg_instance_id=None,
+                            block_size=500, n_threads=1):
 
+    OldModel = make_annotation_model(dataset_name,
+                                     schema_name,
+                                     table_name,
+                                     version=old_version)
+    
+    NewModel = make_annotation_model(dataset_name,
+                                     schema_name,
+                                     table_name,
+                                     version=new_version)
+    
+
+    
 def process_all_annotations(cg_table_id, dataset_name, schema_name,
                             table_name, time_stamp=None, version:  int=1,
                             sqlalchemy_database_uri=None,
