@@ -48,14 +48,14 @@ if __name__ == '__main__':
     # engine = sqlalchemy.create_engine(sql_uri)
     #new_version = get_next_version(sql_uri, mod.args['dataset_name'])
     new_version = 14
-    schema_name = "synapse"
-    table_name = "synapse_ai_manual"
+    schema_name = "cell_type_local"
+    table_name = "cell_type_ai_manual"
     # sql_uri = None
 
     print("INFO:", mod.args, new_version)
     print("sql_uri:", sql_uri)
 
-    with open("{}/materialization_log.pkl".format(HOME), "wb") as f:
+    with open("{}/materialization_log_v{}.pkl".format(HOME, new_version), "wb") as f:
         pkl.dump(mod.args, f)
         pkl.dump(sql_uri, f)
 

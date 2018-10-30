@@ -57,7 +57,7 @@ if __name__ == '__main__':
     print("INFO:", mod.args, new_version)
     print("sql_uri:", sql_uri)
 
-    with open("{}/materialization_log.pkl".format(HOME), "wb") as f:
+    with open("{}/materialization_log_v{}.pkl".format(HOME, new_version), "wb") as f:
         pkl.dump(mod.args, f)
         pkl.dump(sql_uri, f)
 
@@ -83,6 +83,7 @@ if __name__ == '__main__':
     schema_tables = [(t['schema_name'], t['table_name']) for t in tables]
 
     for schema_name, table_name in schema_tables:
+        print(schema_name, table_name)
         time_start = time.time()
         syn_df = materialize.materialize_all_annotations(mod.args["cg_table_id"],
                                                          mod.args["dataset_name"],
