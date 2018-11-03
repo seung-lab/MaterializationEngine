@@ -47,7 +47,7 @@ if __name__ == '__main__':
 
     # engine = sqlalchemy.create_engine(sql_uri)
     #new_version = get_next_version(sql_uri, mod.args['dataset_name'])
-    new_version = 17
+    new_version = 20
     schema_name = "cell_type_local"
     table_name = "soma_valence"
     # sql_uri = None

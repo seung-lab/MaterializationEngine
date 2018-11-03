@@ -1,7 +1,9 @@
-from flask import Blueprint, jsonify, abort, current_app
-from materializationengine import materialize
+from flask import Blueprint, jsonify, abort, current_app, request
+# from materializationengine import materialize
 from emannotationschemas import get_types, get_schema
 from materializationengine.models import AnalysisVersion
+from materializationengine.schemas import AnalysisVersionSchema
+from materializationengine.database import db
 
 __version__ = "0.0.1"
 bp = Blueprint("materialize", __name__, url_prefix="/materialize")
@@ -12,16 +14,37 @@ bp = Blueprint("materialize", __name__, url_prefix="/materialize")
 def index():
     return "Materialization Engine -- version " + __version__
 
+def get_datasets():
+    return ["pinky100"]
 
 @bp.route('/dataset')
 def datasets():
     # datasets = (AnalysisVersion.query.filter(AnalysisVersion.dataset = 'pinky100')
     #             .first_or_404())
     # print(datasets)
-    return "not yet"
+    # TODO wire to info service
+    return jsonify(get_datasets())
     
 
-@bp.route("/dataset/<dataset>/new_version", methods=["POST"])
+@bp.route("/dataset/<dataset_name>", methods=["GET"])
+def get_dataset_version(dataset_name):
+    # datasets = (AnalysisVersion.query.filter(AnalysisVersion.dataset = 'pinky100')
+    #             .first_or_404())
+    # print(datasets)
+    if (dataset_name not in get_datasets()):
+        abort(404, "dataset not valid")
+        
+    if (request.method == 'GET'):
+        versions = (db.session.query(AnalysisVersion).all())
+        schema = AnalysisVersionSchema(many=True)
+        print(versions)
+        results = schema.dump(versions)
+        print(results)
+        return jsonify(schema.dump(versions).data)
+
+    
+
+@bp.route("/dataset/<dataset_name>/new_version", methods=["POST"])
 def materialize_dataset(dataset):
 
     return "This should materialize a new version eventually"
