@@ -1,16 +1,20 @@
-from .materialize_bp import bp as materialize_bp
-from .utils import get_instance_folder_path
-from .database import Base
-from flask_sqlalchemy import SQLAlchemy
-from .admin import setup_admin
+
+
+
 
 __version__ = "0.0.1"
 
 
 def create_app(test_config=None):
+    from flask_sqlalchemy import SQLAlchemy
     from flask import Flask
+    from .database import Base
     from materializationengine.config import configure_app
-
+    from .admin import setup_admin
+    from .materialize_bp import bp as materialize_bp
+    from .utils import get_instance_folder_path
+    from .database import db
+    
     # Define the Flask Object
     app = Flask(__name__,
                 instance_path=get_instance_folder_path(),
@@ -21,13 +25,11 @@ def create_app(test_config=None):
     else:
         app.config.update(test_config)
     # register blueprints
-    app.register_blueprint(materialize_bp)
-
-    with app.app_context():
-        db = SQLAlchemy(model_class=Base)
-        db.init_app(app)
+    db.init_app(app)
+    with app.app_context(): 
         db.create_all()
         admin = setup_admin(app, db)
 
+    app.register_blueprint(materialize_bp)
 
     return app
