@@ -29,6 +29,34 @@ class BatchMaterializationSchema(argschema.ArgSchema):
         "(default to MATERIALIZATION_POSTGRES_URI environment variable")
 
 
+def create_new_version(sql_uri, dataset, time_stamp):
+    from materializationengine.models import AnalysisVersion
+    from materializationengine.database import Base
+    from materializationengine.models import AnalysisVersion
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine(sql_uri)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    top_version = (session.query(AnalysisVersion)
+                   .order_by(AnalysisVersion.version.desc())
+                   .first())
+
+    if top_version is None:
+        new_version_number = 1
+    else:
+        new_version_number = top_version.version+1
+
+    version = AnalysisVersion(dataset=dataset,
+                              time_stamp=time_stamp,
+                              version=new_version_number)
+    session.add(version)
+    session.commit()
+    return version.version
+
+
 if __name__ == '__main__':
     mod = argschema.ArgSchemaParser(schema_type=BatchMaterializationSchema)
     if 'sql_uri' not in mod.args:
@@ -47,12 +75,11 @@ if __name__ == '__main__':
     #                                                   ReferenceAnnotation))
 
     # engine = sqlalchemy.create_engine(sql_uri)
-    new_version = get_next_version(sql_uri, mod.args['dataset_name'])
+    new_version = create_new_version(
+        sql_uri, mod.args['dataset_name'], mod.args['time_stamp'])
+
     # new_version = 15
     annotation_endpoint = "https://www.dynamicannotationframework.com/annotation"
-    schema_name = "synapse"
-    table_name = "pni_synapses"
-    # sql_uri = None
 
     print("INFO:", mod.args, new_version)
     print("sql_uri:", sql_uri)
