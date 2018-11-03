@@ -127,6 +127,51 @@ def update_root_id_all_annotations(cg_table_id, dataset_name, schema_name,
                                      table_name,
                                      version=new_version)
     
+    max_annotation_id = OldModel.get_max_annotation_id(dataset_name,
+                                                   table_name)
+
+    # if max_annotation_id == 0:
+    #     return {}
+
+    # cv_info = {"cloudpath": cv_path}
+    # cg_info = cg.get_serialized_info()
+    # amdb_info = amdb.get_serialized_info()
+
+    # if n_threads > 1:
+    #     del cg_info["credentials"]
+    #     del amdb_info["credentials"]
+
+    # n_parts = int(max(1, max_annotation_id / block_size))
+    # n_parts += 1
+    # # Annotation ids start at 1
+    # id_chunks = np.linspace(1, max_annotation_id + 1, n_parts).astype(np.uint64)
+
+    # multi_args = []
+    # for i_id_chunk in range(len(id_chunks) - 1):
+    #     multi_args.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1],
+    #                        dataset_name, table_name, schema_name, version,
+    #                        time_stamp,
+    #                        cg_table_id, amdb_info, cg_info,
+    #                        mm.get_serialized_info(), cv_info, pixel_ratios])
+
+    # if n_threads == 1:
+    #     results = mu.multiprocess_func(
+    #         _process_all_annotations_thread, multi_args,
+    #         n_threads=n_threads,
+    #         verbose=True, debug=n_threads == 1)
+    # else:
+    #     results = mu.multisubprocess_func(
+    #         _process_all_annotations_thread, multi_args,
+    #         n_threads=n_threads, package_name="materializationengine")
+
+    # if not mm.is_sql:
+    #     # Collect the results
+    #     print(results)
+    #     anno_dict = {}
+    #     for result in results:
+    #         anno_dict.update(result)
+
+    #     return anno_dict
 
     
 def process_all_annotations(cg_table_id, dataset_name, schema_name,

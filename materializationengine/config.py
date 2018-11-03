@@ -9,7 +9,7 @@ class BaseConfig(object):
     HOME = os.path.expanduser("~")
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
     # Statement for enabling the development environment
-    DEBUG = True
+    DEBUG = False
 
     INFOSERVICE_ENDPOINT = "http://35.196.170.230/info"
     BIGTABLE_CONFIG = {
@@ -25,6 +25,7 @@ class BaseConfig(object):
     SQLALCHEMY_DATABASE_URI = "postgres://postgres:synapsedb@localhost:5432/testing"
     DATABASE_CONNECT_OPTIONS = {}
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SECRET_KEY = "MYSUPERSECRETTESTINGKEY"
 
 config = {
     "development": "materializationengine.config.BaseConfig",
