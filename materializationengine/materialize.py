@@ -226,7 +226,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     if max_annotation_id == 0:
         return {}
 
-    cv_info = {"cloudpath": cv_path}
+    cv_info = {"cloudpath": cv_path, "mip":1}
     cg_info = cg.get_serialized_info()
     amdb_info = amdb.get_serialized_info()
 
