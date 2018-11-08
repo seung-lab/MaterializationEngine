@@ -1,14 +1,18 @@
-from materializationengine import materialize
-from emannotationschemas.models import make_annotation_model, get_next_version
+# from materializationengine import materialize
+# from emannotationschemas.models import make_annotation_model, get_next_version
+from materializationengine.database import Base
+from materializationengine.models import AnalysisVersion
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 import argschema
 import os
 import marshmallow as mm
 import datetime
 import time
 import pickle as pkl
+import requests
 
 HOME = os.path.expanduser("~")
-
 
 class BatchMaterializationSchema(argschema.ArgSchema):
     cg_table_id = mm.fields.Str(default="pinky100_sv16",
@@ -34,10 +38,11 @@ if __name__ == '__main__':
         if 'MATERIALIZATION_POSTGRES_URI' in os.environ.keys():
             sql_uri = os.environ['MATERIALIZATION_POSTGRES_URI']
         else:
-            raise(
+            raise Exception(
                 'need to define a postgres uri via command line or MATERIALIZATION_POSTGRES_URI env')
     else:
         sql_uri = mod.args['sql_uri']
+    dataset = 'pinky100'
     # types = get_types()
 
     # sort so the Reference annotations are materialized after the regular ones
@@ -45,36 +50,21 @@ if __name__ == '__main__':
     # sorted_types = sorted(types, lambda x: issubclass(get_schema(x),
     #                                                   ReferenceAnnotation))
 
-    # engine = sqlalchemy.create_engine(sql_uri)
-    #new_version = get_next_version(sql_uri, mod.args['dataset_name'])
-    new_version = 20
-    schema_name = "cell_type_local"
-    table_name = "soma_valence"
-    # sql_uri = None
+    engine = create_engine(sql_uri)
+    Base.metadata.create_all(engine, checkfirst=True)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    top_version = session.query(AnalysisVersion).order_by(AnalysisVersion.version.desc()).first()
 
-    print("INFO:", mod.args, new_version)
-    print("sql_uri:", sql_uri)
-
-    with open("{}/materialization_log_v{}.pkl".format(HOME, new_version), "rb") as f:
-        mod.args = pkl.load(f)
-        # sql_uri = pkl.load(f)
-
-
-    timings = {}
-
-    time_start = time.time()
-    syn_df = materialize.materialize_all_annotations(mod.args["cg_table_id"],
-                                                     mod.args["dataset_name"],
-                                                     schema_name,
-                                                     table_name,
-                                                     version=new_version,
-                                                     time_stamp=mod.args['time_stamp'],
-                                                     amdb_instance_id=mod.args["amdb_instance_id"],
-                                                     cg_instance_id=mod.args["cg_instance_id"],
-                                                     sqlalchemy_database_uri=sql_uri,
-                                                     n_threads=mod.args["n_threads"])
-    # syn_df.to_csv("%s/syn_df_v%d.csv" % (HOME, new_version))
-    timings[table_name] = time.time() - time_start
-
-    for k in timings:
-        print("%s: %.2fs = %.2fmin" % (k, timings[k], timings[k] / 60))
+    if top_version is None:
+        new_version_number = 1
+    else:
+        new_version_number = top_version.version+1
+    
+    time_stamp = datetime.datetime.utcnow()
+    version = AnalysisVersion(dataset=dataset,
+                              time_stamp = time_stamp,
+                              version = new_version_number)
+    session.add(version)
+    session.commit()
+    print(version)
