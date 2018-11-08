@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+
+{% block header %}
+  <h1>{% block title %}{{dataset}}{% endblock %}</h1>
+{% endblock %}
+
+{% block content %}
+<h3> versions </h3>
+{{table|safe}}
+
+{% endblock %}
