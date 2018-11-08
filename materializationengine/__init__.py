@@ -13,6 +13,7 @@ def create_app(test_config=None):
     
     # Define the Flask Object
     app = Flask(__name__,
+                static_folder="../static",
                 instance_path=get_instance_folder_path(),
                 instance_relative_config=True)
     # load configuration (from test_config if passed)
