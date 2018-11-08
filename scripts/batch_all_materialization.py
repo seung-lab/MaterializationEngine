@@ -50,8 +50,8 @@ if __name__ == '__main__':
     new_version = get_next_version(sql_uri, mod.args['dataset_name'])
     # new_version = 15
     annotation_endpoint = "https://www.dynamicannotationframework.com/annotation"
-    schema_name = "synapse"
-    table_name = "pni_synapses"
+    # schema_name = "synapse"
+    # table_name = "pni_synapses"
     # sql_uri = None
 
     print("INFO:", mod.args, new_version)
