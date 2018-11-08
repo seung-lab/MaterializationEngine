@@ -11,7 +11,7 @@ class BaseConfig(object):
     # Statement for enabling the development environment
     DEBUG = False
 
-    INFOSERVICE_ENDPOINT = "http://35.196.170.230/info"
+    INFOSERVICE_ENDPOINT = "http://info-service/info"
     BIGTABLE_CONFIG = {
         'instance_id': 'pychunkedgraph',
         'amdb_instance_id': 'pychunkedgraph',
@@ -21,8 +21,9 @@ class BaseConfig(object):
     LOGGING_FORMAT = '%(asctime)s - %(levelname)s - %(message)s'
     LOGGING_LOCATION = HOME + '/.materializationengine/bookshelf.log'
     LOGGING_LEVEL = logging.DEBUG
-    CHUNKGRAPH_TABLE_ID = "pinky40_fanout2_v7"
-    SQLALCHEMY_DATABASE_URI = "postgres://postgres:synapsedb@localhost:5432/testing"
+    CHUNKGRAPH_TABLE_ID = "pinky100_sv16"
+    #SQLALCHEMY_DATABASE_URI = "postgres://postgres:synapsedb@localhost:5432/testing"
+    SQLALCHEMY_DATABASE_URI = "postgresql://postgres:welcometothematrix@35.196.105.34/postgres"
     DATABASE_CONNECT_OPTIONS = {}
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SECRET_KEY = "MYSUPERSECRETTESTINGKEY"
