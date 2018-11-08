@@ -7,6 +7,12 @@ import datetime
 import time
 import pickle as pkl
 import requests
+from materializationengine.models import AnalysisVersion, AnalysisTable
+from materializationengine.database import Base
+from materializationengine.models import AnalysisVersion
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
 
 HOME = os.path.expanduser("~")
 
@@ -29,17 +35,7 @@ class BatchMaterializationSchema(argschema.ArgSchema):
         "(default to MATERIALIZATION_POSTGRES_URI environment variable")
 
 
-def create_new_version(sql_uri, dataset, time_stamp):
-    from materializationengine.models import AnalysisVersion
-    from materializationengine.database import Base
-    from materializationengine.models import AnalysisVersion
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    engine = create_engine(sql_uri)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-
+def create_new_version(session, dataset, time_stamp):
     top_version = (session.query(AnalysisVersion)
                    .order_by(AnalysisVersion.version.desc())
                    .first())
@@ -54,7 +50,7 @@ def create_new_version(sql_uri, dataset, time_stamp):
                               version=new_version_number)
     session.add(version)
     session.commit()
-    return version.version
+    return version
 
 
 if __name__ == '__main__':
@@ -68,6 +64,9 @@ if __name__ == '__main__':
     else:
         sql_uri = mod.args['sql_uri']
     # types = get_types()
+    engine = create_engine(sql_uri)
+    Session = sessionmaker(bind=engine)
+    session = Session()
 
     # sort so the Reference annotations are materialized after the regular ones
     # TODO clarify if Reference of references are something we want to allow
@@ -94,10 +93,11 @@ if __name__ == '__main__':
     root_df = materialize.materialize_root_ids(mod.args["cg_table_id"],
                                                dataset_name=mod.args["dataset_name"],
                                                time_stamp=mod.args['time_stamp'],
-                                               version=new_version,
+                                               version=new_version.version,
                                                sqlalchemy_database_uri=sql_uri,
                                                cg_instance_id=mod.args["cg_instance_id"],
                                                n_threads=mod.args["n_threads"])
+
     # root_df.to_csv("%s/root_df_v%d.csv" % (HOME, new_version))
 
     timings["root_ids"] = time.time() - time_start
@@ -121,8 +121,12 @@ if __name__ == '__main__':
                                                          cg_instance_id=mod.args["cg_instance_id"],
                                                          sqlalchemy_database_uri=sql_uri,
                                                          n_threads=mod.args["n_threads"])
+        at= AnalysisTable(tablename=table_name,
+                          schema=schema_name,
+                          analysisversion=new_version)
+        session.add(at)
         # syn_df.to_csv("%s/syn_df_v%d.csv" % (HOME, new_version))
         timings[table_name] = time.time() - time_start
-
+        session.commit()
     for k in timings:
         print("%s: %.2fs = %.2fmin" % (k, timings[k], timings[k] / 60))
