@@ -31,6 +31,7 @@ def _process_all_annotations_thread(args):
     annos_dict = {}
     annos_list = []
     for annotation_id in range(anno_id_start, anno_id_end):
+        print(annotation_id)
         # Read annoation data from dynamicannotationdb
         annotation_data_b, bsps = amdb.get_annotation(
             dataset_name, table_name, annotation_id, time_stamp=time_stamp)
@@ -178,10 +179,20 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     max_annotation_id = amdb.get_max_annotation_id(dataset_name,
                                                    table_name)
 
+    print("Max annotation id: %d" % max_annotation_id)
+
     if max_annotation_id == 0:
         return {}
 
-    cv_info = {"cloudpath": cv_path}
+    if 'pni_synapses' in table_name:
+        cv_mip = 1
+        pixel_ratios = list(pixel_ratios)
+        pixel_ratios[0] /= 2
+        pixel_ratios[1] /= 2
+    else:
+        cv_mip = 0
+
+    cv_info = {"cloudpath": cv_path, 'mip': cv_mip}
     cg_info = cg.get_serialized_info()
     amdb_info = amdb.get_serialized_info()
 
@@ -201,6 +212,8 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
                            time_stamp,
                            cg_table_id, amdb_info, cg_info,
                            mm.get_serialized_info(), cv_info, pixel_ratios])
+
+    print(multi_args)
 
     if n_threads == 1:
         results = mu.multiprocess_func(
