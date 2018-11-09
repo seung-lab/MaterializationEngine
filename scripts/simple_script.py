@@ -1,32 +1,30 @@
-from materializationengine import materialize
-# from emannotationschemas.models import make_annotation_model, get_next_version
-# from materializationengine.database import Base
 from materializationengine.models import AnalysisVersion, AnalysisTable
-#from emannotationschemas.models import Base as EMSBase
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import os
 import requests
 
 sql_uri = "postgres://postgres:synapsedb@localhost:5432/testing"
-# sql_uri = 'postgres://postgres:welcometothematrix@35.196.105.34:5432/postgres'
-
 engine = create_engine(sql_uri)
 Session = sessionmaker(bind=engine)
 session = Session()
 
+# from emannotationschemas.models import make_annotation_model, get_next_version
+# from materializationengine.database import Base
+#from emannotationschemas.models import Base as EMSBase
+# sql_uri = 'postgres://postgres:welcometothematrix@35.196.105.34:5432/postgres'
 
 dataset = "test_dataset"
 version = 8
 
 # annotation_service_base = "https://www.dynamicannotationframework.com/annotation/"
-
 # url = annotation_service_base + "dataset/{}".format(dataset)
 # print(url)
 # tables = requests.get(url).json()
 # print(tables)
 
 version = session.query(AnalysisVersion).first()
+print(version)
 
 #version = (session.query(AnalysisVersion)
 #            .filter(AnalysisVersion.version == version)

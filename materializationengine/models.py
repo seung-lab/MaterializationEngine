@@ -1,10 +1,11 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
-from emannotationschemas.models import TSBase
+from emannotationschemas.models import Base
 
 
-class AnalysisVersion(TSBase):
+class AnalysisVersion(Base):
     __tablename__ = 'analysisversion'
+    id = Column(Integer, primary_key=True)
     dataset = Column(String(100), nullable=False)
     version = Column(Integer, nullable=False)
     time_stamp = Column(DateTime, nullable=False)
@@ -13,8 +14,9 @@ class AnalysisVersion(TSBase):
         return "{}_v{}".format(self.dataset, self.version)
 
 
-class AnalysisTable(TSBase):
+class AnalysisTable(Base):
     __tablename__ = 'analysistables'
+    id = Column(Integer, primary_key=True)
     schema = Column(String(100), nullable=False)
     tablename = Column(String(100), nullable=False)
     analysisversion_id = Column(Integer, ForeignKey('analysisversion.id'))
