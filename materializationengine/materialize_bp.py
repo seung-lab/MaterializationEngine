@@ -6,12 +6,11 @@ from materializationengine.models import AnalysisVersion, AnalysisTable
 from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
 from materializationengine.database import db
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy import func
 import pandas as pd
-
-from emannotationschemas.models import Base as EMSBase
-from emannotationschemas.models import make_annotation_model, make_dataset_models
+from materializationengine.materialize_database import db_session
+from emannotationschemas.models import make_annotation_model, make_dataset_models, declare_annotation_model
 
 __version__ = "0.0.1"
 bp = Blueprint("materialize", __name__, url_prefix="/materialize")
@@ -82,16 +81,13 @@ def table_view(id):
     if table.schema in mapping.keys():
         return redirect(mapping[table.schema])
     else:
-        schema = AnalysisTableSchema()
-        return jsonify(schema.dump(table).data)
-
+        return redirect(url_for('materialize.generic_report',id=id))
 
 @bp.route('/table/<int:id>/cell_type_local')
 def cell_type_local_report(id):
     table = AnalysisTable.query.filter(AnalysisTable.id == id).first_or_404()
     if (table.schema != 'cell_type_local'):
         abort(504, "this table is not a cell_type_local table")
-    engine = db.get_engine()
 
     make_dataset_models(table.analysisversion.dataset, [],
                         version=table.analysisversion.version)
@@ -99,21 +95,21 @@ def cell_type_local_report(id):
                                           table.schema,
                                           table.tablename,
                                           version=table.analysisversion.version)
-    session = sessionmaker(bind=engine)()
-    n_annotations = session.query(CellTypeModel).count()
 
-    cell_type_merge_query = (session.query(CellTypeModel.pt_root_id,
-                                           CellTypeModel.cell_type,
-                                           func.count(CellTypeModel.pt_root_id).label('num_cells'))
+    n_annotations = db_session.query(CellTypeModel).count()
+
+    cell_type_merge_query = (db_session.query(CellTypeModel.pt_root_id,
+                                              CellTypeModel.cell_type,
+                                              func.count(CellTypeModel.pt_root_id).label('num_cells'))
                              .group_by(CellTypeModel.pt_root_id, CellTypeModel.cell_type)
                              .order_by('num_cells DESC')).limit(100)
 
     df = pd.read_sql(cell_type_merge_query.statement,
-                     engine, coerce_float=False)
+                     db.get_engine(), coerce_float=False)
     return render_template('cell_type_local.html',
                            version=__version__,
-                           schema_name = table.schema,
-                           table_name = table.tablename,
+                           schema_name=table.schema,
+                           table_name=table.tablename,
                            dataset=table.analysisversion.dataset,
                            table=df.to_html())
 
@@ -123,7 +119,6 @@ def synapse_report(id):
     table = AnalysisTable.query.filter(AnalysisTable.id == id).first_or_404()
     if (table.schema != 'synapse'):
         abort(504, "this table is not a synapse table")
-    engine = db.get_engine()
     make_dataset_models(table.analysisversion.dataset, [],
                         version=table.analysisversion.version)
 
@@ -131,11 +126,8 @@ def synapse_report(id):
                                          'synapse',
                                          table.tablename,
                                          version=table.analysisversion.version)
-
-    session = sessionmaker(bind=engine)()
-
-    synapses = session.query(SynapseModel).count()
-    n_autapses = session.query(SynapseModel).filter(
+    synapses = db_session.query(SynapseModel).count()
+    n_autapses = db_session.query(SynapseModel).filter(
         SynapseModel.pre_pt_root_id == SynapseModel.post_pt_root_id).count()
 
     return render_template('synapses.html',
@@ -146,6 +138,29 @@ def synapse_report(id):
                            version=__version__,
                            table_name=table.tablename,
                            schema_name='synapses')
+
+
+@bp.route('/table/<int:id>/generic')
+def generic_report(id):
+    table = AnalysisTable.query.filter(AnalysisTable.id == id).first_or_404()
+
+    make_dataset_models(table.analysisversion.dataset, [],
+                        version=table.analysisversion.version)
+
+    Model = make_annotation_model(table.analysisversion.dataset,
+                                  table.schema,
+                                  table.tablename,
+                                  version=table.analysisversion.version)
+
+    n_annotations = db_session.query(Model).count()
+
+    return render_template('generic.html',
+                           n_annotations=n_annotations,
+                           dataset=table.analysisversion.dataset,
+                           analysisversion=table.analysisversion.version,
+                           version=__version__,
+                           table_name=table.tablename,
+                           schema_name=table.schema)
 
 
 @bp.route('api/dataset')

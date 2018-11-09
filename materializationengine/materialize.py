@@ -359,6 +359,7 @@ def materialize_all_annotations(cg_table_id,
     :param n_threads: int
          number of threads to use to materialize
     """
+    
 
     anno_dict = process_all_annotations(cg_table_id,
                                         dataset_name=dataset_name,

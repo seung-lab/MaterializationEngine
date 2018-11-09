@@ -1,13 +1,11 @@
 import json
 import functools
-
-from emannotationschemas.models import make_annotation_model, make_dataset_models, Base, format_table_name
+from emannotationschemas.models import make_annotation_model, make_dataset_models, format_table_name
 from emannotationschemas.base import flatten_dict
 from emannotationschemas import get_schema
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import numpy as np
-
 
 class MaterializeAnnotationException(Exception):
     pass
@@ -106,7 +104,7 @@ class MaterializationManager(object):
         if sqlalchemy_database_uri is not None:
             self._sqlalchemy_engine = create_engine(sqlalchemy_database_uri,
                                                     echo=True)
-            Base.metadata.create_all(self.sqlalchemy_engine)
+            # Base.metadata.create_all(self.sqlalchemy_engine)
 
             self._sqlalchemy_session = sessionmaker(
                 bind=self.sqlalchemy_engine)
