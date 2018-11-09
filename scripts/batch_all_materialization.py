@@ -1,5 +1,4 @@
-from materializationengine import materialize
-from emannotationschemas.models import make_annotation_model, get_next_version
+from materializationengine import materialize, materializationmanager
 import argschema
 import os
 import marshmallow as mm
@@ -7,15 +6,8 @@ import datetime
 import time
 import pickle as pkl
 import requests
-from materializationengine.models import AnalysisVersion, AnalysisTable
-from materializationengine.database import Base
-from materializationengine.models import AnalysisVersion
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
 
 HOME = os.path.expanduser("~")
-
 
 class BatchMaterializationSchema(argschema.ArgSchema):
     cg_table_id = mm.fields.Str(default="pinky100_sv16",
@@ -34,25 +26,6 @@ class BatchMaterializationSchema(argschema.ArgSchema):
         description="connection uri string to postgres database"
         "(default to MATERIALIZATION_POSTGRES_URI environment variable")
 
-
-def create_new_version(session, dataset, time_stamp):
-    top_version = (session.query(AnalysisVersion)
-                   .order_by(AnalysisVersion.version.desc())
-                   .first())
-
-    if top_version is None:
-        new_version_number = 1
-    else:
-        new_version_number = top_version.version+1
-
-    version = AnalysisVersion(dataset=dataset,
-                              time_stamp=time_stamp,
-                              version=new_version_number)
-    session.add(version)
-    session.commit()
-    return version
-
-
 if __name__ == '__main__':
     mod = argschema.ArgSchemaParser(schema_type=BatchMaterializationSchema)
     if 'sql_uri' not in mod.args:
@@ -63,27 +36,30 @@ if __name__ == '__main__':
                 'need to define a postgres uri via command line or MATERIALIZATION_POSTGRES_URI env')
     else:
         sql_uri = mod.args['sql_uri']
-    # types = get_types()
-    engine = create_engine(sql_uri)
-    Session = sessionmaker(bind=engine)
-    session = Session()
+
 
     # sort so the Reference annotations are materialized after the regular ones
     # TODO clarify if Reference of references are something we want to allow
     # sorted_types = sorted(types, lambda x: issubclass(get_schema(x),
     #                                                   ReferenceAnnotation))
 
-    # engine = sqlalchemy.create_engine(sql_uri)
-    new_version = create_new_version(
-        sql_uri, mod.args['dataset_name'], mod.args['time_stamp'])
+    print(sql_uri)
+    print(mod.args)
 
-    # new_version = 15
+    if sql_uri is not None:
+        analysisversion = materializationmanager.create_new_version(
+            sql_uri, mod.args['dataset_name'], mod.args['time_stamp'])
+    else:
+        analysisversion = None
+
+    print(analysisversion)
+
     annotation_endpoint = "https://www.dynamicannotationframework.com/annotation"
 
-    print("INFO:", mod.args, new_version)
+    print("INFO:", mod.args, analysisversion)
     print("sql_uri:", sql_uri)
 
-    with open("{}/materialization_log.pkl".format(HOME), "wb") as f:
+    with open("{}/materialization_log_v{}.pkl".format(HOME, analysisversion.version), "wb") as f:
         pkl.dump(mod.args, f)
         pkl.dump(sql_uri, f)
 
@@ -93,12 +69,10 @@ if __name__ == '__main__':
     root_df = materialize.materialize_root_ids(mod.args["cg_table_id"],
                                                dataset_name=mod.args["dataset_name"],
                                                time_stamp=mod.args['time_stamp'],
-                                               version=new_version.version,
+                                               analysisversion=analysisversion,
                                                sqlalchemy_database_uri=sql_uri,
                                                cg_instance_id=mod.args["cg_instance_id"],
                                                n_threads=mod.args["n_threads"])
-
-    # root_df.to_csv("%s/root_df_v%d.csv" % (HOME, new_version))
 
     timings["root_ids"] = time.time() - time_start
 
@@ -110,23 +84,20 @@ if __name__ == '__main__':
     schema_tables = [(t['schema_name'], t['table_name']) for t in tables]
 
     for schema_name, table_name in schema_tables:
+        print(schema_name, table_name)
         time_start = time.time()
         syn_df = materialize.materialize_all_annotations(mod.args["cg_table_id"],
                                                          mod.args["dataset_name"],
                                                          schema_name,
                                                          table_name,
-                                                         version=new_version,
+                                                         analysisversion=analysisversion,
                                                          time_stamp=mod.args['time_stamp'],
                                                          amdb_instance_id=mod.args["amdb_instance_id"],
                                                          cg_instance_id=mod.args["cg_instance_id"],
                                                          sqlalchemy_database_uri=sql_uri,
                                                          n_threads=mod.args["n_threads"])
-        at= AnalysisTable(tablename=table_name,
-                          schema=schema_name,
-                          analysisversion=new_version)
-        session.add(at)
-        # syn_df.to_csv("%s/syn_df_v%d.csv" % (HOME, new_version))
+
         timings[table_name] = time.time() - time_start
-        session.commit()
+
     for k in timings:
         print("%s: %.2fs = %.2fmin" % (k, timings[k], timings[k] / 60))

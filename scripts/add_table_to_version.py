@@ -55,9 +55,10 @@ if __name__ == '__main__':
     print("INFO:", mod.args, new_version)
     print("sql_uri:", sql_uri)
 
-    with open("{}/materialization_log.pkl".format(HOME), "wb") as f:
-        pkl.dump(mod.args, f)
-        pkl.dump(sql_uri, f)
+    with open("{}/materialization_log_v{}.pkl".format(HOME, new_version), "rb") as f:
+        mod.args = pkl.load(f)
+        # sql_uri = pkl.load(f)
+
 
     timings = {}
 
@@ -67,13 +68,13 @@ if __name__ == '__main__':
                                                      schema_name,
                                                      table_name,
                                                      version=new_version,
-                                                     time_stamp=datetime.datetime(2018, 10, 29, 4, 47, 52, 58295),
+                                                     time_stamp=mod.args['time_stamp'],
                                                      amdb_instance_id=mod.args["amdb_instance_id"],
                                                      cg_instance_id=mod.args["cg_instance_id"],
                                                      sqlalchemy_database_uri=sql_uri,
                                                      n_threads=mod.args["n_threads"])
     # syn_df.to_csv("%s/syn_df_v%d.csv" % (HOME, new_version))
-    timings["synapses"] = time.time() - time_start
+    timings[table_name] = time.time() - time_start
 
     for k in timings:
         print("%s: %.2fs = %.2fmin" % (k, timings[k], timings[k] / 60))

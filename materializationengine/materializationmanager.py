@@ -1,6 +1,7 @@
 import json
 import functools
-from emannotationschemas.models import make_annotation_model, make_dataset_models, format_table_name
+
+from emannotationschemas import models as em_models
 from emannotationschemas.base import flatten_dict
 from emannotationschemas import get_schema
 from sqlalchemy import create_engine
@@ -17,6 +18,27 @@ class RootIDNotFoundException(MaterializeAnnotationException):
 
 class AnnotationParseFailure(MaterializeAnnotationException):
     pass
+
+def create_new_version(sql_uri, dataset, time_stamp):
+    engine = create_engine(sql_uri)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    top_version = (session.query(em_models.AnalysisVersion)
+                   .order_by(em_models.AnalysisVersion.version.desc())
+                   .first())
+
+    if top_version is None:
+        new_version_number = 1
+    else:
+        new_version_number = top_version.version + 1
+
+    analysisversion = em_models.AnalysisVersion(dataset=dataset,
+                                                time_stamp=time_stamp,
+                                                version=new_version_number)
+    session.add(analysisversion)
+    session.commit()
+    return analysisversion
 
 
 def lookup_sv_and_cg_bsp(cg,
@@ -60,51 +82,31 @@ def lookup_sv_and_cg_bsp(cg,
     item['supervoxel_id'] = int(sv_id)
     item['root_id'] = int(root_id)
 
-# DEPRECATED
-# def materialize_bsp(sv_id_to_root_id_dict, item):
-#     """ Function to fill in root_id of BoundSpatialPoint fields
-#     using the dictionary provided. Will alter item in place.
-#     Meant to be passed to mm.Schema as a context variable ('bsp_fn')
-#     :param sv_id_to_root_id_dict: dict
-#         dictionary to look up root ids from supervoxel id
-#     :param item: dict
-#         deserialized boundspatialpoint to process
-#     :return: None
-#         will edit item in place
-#     """
-
-#     try:
-#         item['root_id'] = int(sv_id_to_root_id_dict[item['supervoxel_id']])
-#     except KeyError:
-#         msg = "cannot process {}, root_id not found in {}"
-#         raise RootIDNotFoundException(msg.format(item, sv_id_to_root_id_dict))
-
 
 class MaterializationManager(object):
     def __init__(self, dataset_name, schema_name,
-                 table_name, version:  int=1,
+                 table_name, version = 1, version_id = None,
                  annotation_model=None,
                  sqlalchemy_database_uri=None):
         self._dataset_name = dataset_name
         self._schema_name = schema_name
         self._table_name = table_name
         self._version = version
+        self._version_id = version_id
         self._sqlalchemy_database_uri = sqlalchemy_database_uri
 
-        make_dataset_models(dataset_name, [], version=version)
+        em_models.make_dataset_models(dataset_name, [], version=self.version)
 
         if annotation_model is not None:
             self._annotation_model = annotation_model
         else:
-            self._annotation_model = make_annotation_model(dataset_name,
-                                                           schema_name,
-                                                           table_name,
-                                                           version=version)
+            self._annotation_model = em_models.make_annotation_model(
+                dataset_name, schema_name, table_name, version=self.version)
 
         if sqlalchemy_database_uri is not None:
             self._sqlalchemy_engine = create_engine(sqlalchemy_database_uri,
                                                     echo=True)
-            # Base.metadata.create_all(self.sqlalchemy_engine)
+            em_models.Base.metadata.create_all(self.sqlalchemy_engine)
 
             self._sqlalchemy_session = sessionmaker(
                 bind=self.sqlalchemy_engine)
@@ -180,12 +182,24 @@ class MaterializationManager(object):
 
     def _drop_table(self):
         """ Deletes the table in the database """
-        table_name = format_table_name(self._dataset_name, self._table_name, self._version)
-        if table_name in Base.metadata.tables:
-            Base.metadata.tables[table_name].drop(self.sqlalchemy_engine)
+        table_name = em_models.format_table_name(self._dataset_name,
+                                                 self._table_name,
+                                                 self._version)
+        if table_name in em_models.Base.metadata.tables:
+            em_models.Base.metadata.tables[table_name].drop(self.sqlalchemy_engine)
         else:
             print('could not drop {}'.format(table_name))
-    
+
+    def add_to_analysis_table(self):
+        """ Adds annotation info to database """
+        assert self.is_sql
+        assert self._version_id is not None
+
+        at = em_models.AnalysisTable(tablename=self.table_name,
+                                     schema=self.schema_name,
+                                     analysisversion_id=self._version_id)
+        self.this_sqlalchemy_session.add(at)
+        self.commit_session()
 
     def get_schema(self, cg, cv, pixel_ratios=(1.0, 1.0, 1.0), time_stamp=None):
         """ Loads schema with appropriate context
@@ -205,7 +219,8 @@ class MaterializationManager(object):
         context['postgis'] = self.is_sql
         return self.schema_init(context=context)
 
-    def deserialize_single_annotation(self, blob, cg, cv, pixel_ratios=(1.0, 1.0, 1.0),
+    def deserialize_single_annotation(self, blob, cg, cv,
+                                      pixel_ratios=(1.0, 1.0, 1.0),
                                       time_stamp=None):
         """ Materializes single annotation object
 
@@ -227,7 +242,8 @@ class MaterializationManager(object):
     def bulk_insert_annotations(self, annotations):
         assert self.is_sql
 
-        self.this_sqlalchemy_session.bulk_insert_mappings(self.annotation_model, annotations)
+        self.this_sqlalchemy_session.bulk_insert_mappings(self.annotation_model,
+                                                          annotations)
         
 
     def add_annotation_to_sql_database(self, deserialized_annotation):
