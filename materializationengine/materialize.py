@@ -1,5 +1,5 @@
 import pandas as pd
-from emannotationschemas.models import root_model_name, make_cell_segment_model, make_annotation_model
+from emannotationschemas import models as em_models
 # from emannotationschemas.base import flatten_dict
 # from emannotationschemas import get_schema
 # from functools import partial
@@ -10,7 +10,7 @@ from pychunkedgraph.backend import chunkedgraph
 from multiwrapper import multiprocessing_utils as mu
 from dynamicannotationdb.annodb_meta import AnnotationMetaDB
 import cloudvolume
-from . import materializationmanager
+from materializationengine import materializationmanager
 
 
 def _process_all_annotations_thread(args):
@@ -31,7 +31,6 @@ def _process_all_annotations_thread(args):
     annos_dict = {}
     annos_list = []
     for annotation_id in range(anno_id_start, anno_id_end):
-        print(annotation_id)
         # Read annoation data from dynamicannotationdb
         annotation_data_b, bsps = amdb.get_annotation(
             dataset_name, table_name, annotation_id, time_stamp=time_stamp)
@@ -40,8 +39,7 @@ def _process_all_annotations_thread(args):
             continue
 
         deserialized_annotation = mm.deserialize_single_annotation(annotation_data_b,
-                                                                   cg,
-                                                                   cv,
+                                                                   cg, cv,
                                                                    pixel_ratios=pixel_ratios,
                                                                    time_stamp=time_stamp)
         deserialized_annotation['id'] = int(annotation_id)
@@ -73,8 +71,8 @@ def _process_all_annotations_thread(args):
 
 def _materialize_root_ids_thread(args):
     root_ids, serialized_mm_info = args
-    model = make_cell_segment_model(serialized_mm_info["dataset_name"],
-                                    serialized_mm_info["version"])
+    model = em_models.make_cell_segment_model(serialized_mm_info["dataset_name"],
+                                              serialized_mm_info["version"])
     mm = materializationmanager.MaterializationManager(**serialized_mm_info,
                                                        annotation_model=model)
 
@@ -93,7 +91,7 @@ def _materialize_root_ids_thread(args):
     else:
         mm.bulk_insert_annotations(annos_list)
         mm.commit_session()
-        
+
 
 def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.dynamicannotationframework.com/info'):
     url = endpoint + '/api/dataset/{}'.format(dataset)
@@ -110,26 +108,22 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
 
     return info['pychunkgraph_segmentation_source'], pixel_ratios
 
-def update_root_id_all_annotations(cg_table_id, dataset_name, schema_name,
-                            table_name, old_version:int, new_version:int,
-                            time_stamp=None, 
-                            sqlalchemy_database_uri=None,
-                            amdb_client=None, amdb_instance_id=None,
-                            cg_client=None, cg_instance_id=None,
-                            block_size=500, n_threads=1):
-
-    OldModel = make_annotation_model(dataset_name,
-                                     schema_name,
-                                     table_name,
-                                     version=old_version)
-    
-    NewModel = make_annotation_model(dataset_name,
-                                     schema_name,
-                                     table_name,
-                                     version=new_version)
-    
-    max_annotation_id = OldModel.get_max_annotation_id(dataset_name,
-                                                   table_name)
+# def update_root_id_all_annotations(cg_table_id, dataset_name, schema_name,
+#                             table_name, old_version:int, new_version:int,
+#                             time_stamp=None,
+#                             sqlalchemy_database_uri=None,
+#                             amdb_client=None, amdb_instance_id=None,
+#                             cg_client=None, cg_instance_id=None,
+#                             block_size=500, n_threads=1):
+#
+#     OldModel = em_models.make_annotation_model(dataset_name, schema_name,
+#                                                table_name, version=old_version)
+#
+#     NewModel = em_models.make_annotation_model(dataset_name, schema_name,
+#                                                table_name, version=new_version)
+#
+#     max_annotation_id = OldModel.get_max_annotation_id(dataset_name,
+#                                                    table_name)
 
     # if max_annotation_id == 0:
     #     return {}
@@ -174,9 +168,9 @@ def update_root_id_all_annotations(cg_table_id, dataset_name, schema_name,
 
     #     return anno_dict
 
-    
+
 def process_all_annotations(cg_table_id, dataset_name, schema_name,
-                            table_name, time_stamp=None, version:  int=1,
+                            table_name, time_stamp=None, analysisversion=None,
                             sqlalchemy_database_uri=None,
                             amdb_client=None, amdb_instance_id=None,
                             cg_client=None, cg_instance_id=None,
@@ -199,6 +193,13 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     else:
         raise Exception("Missing Instance ID for AnnotationMetaDB")
 
+    if analysisversion is None:
+        version = 0
+        version_id = None
+    else:
+        version = analysisversion.version
+        version_id = analysisversion.id
+
     if cg_client is None:
         cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id)
     elif cg_instance_id is not None:
@@ -215,6 +216,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
                                                        schema_name=schema_name,
                                                        table_name=table_name,
                                                        version=version,
+                                                       version_id=version_id,
                                                        sqlalchemy_database_uri=sqlalchemy_database_uri)
 
     # The `max_annotation_id` sets an upper limit and can be used to iterate
@@ -270,7 +272,9 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
             _process_all_annotations_thread, multi_args,
             n_threads=n_threads, package_name="materializationengine")
 
-    if not mm.is_sql:
+    if mm.is_sql:
+        mm.add_to_analysis_table()
+    else:
         # Collect the results
         print(results)
         anno_dict = {}
@@ -281,8 +285,8 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
 
 
 def materialize_root_ids(cg_table_id, dataset_name,
-                         version,
                          time_stamp,
+                         analysisversion=None,
                          sqlalchemy_database_uri=None, cg_client=None,
                          cg_instance_id=None, n_threads=1):
 
@@ -295,11 +299,20 @@ def materialize_root_ids(cg_table_id, dataset_name,
     else:
         raise Exception("Missing Instance ID")
 
-    model = make_cell_segment_model(dataset_name, version=version)
+
+    if analysisversion is None:
+        version = 0
+        version_id = None
+    else:
+        version = analysisversion.version
+        version_id = analysisversion.id
+
+    model = em_models.make_cell_segment_model(dataset_name, version=version)
     mm = materializationmanager.MaterializationManager(
-        dataset_name=dataset_name, schema_name=root_model_name.lower(),
-        table_name=root_model_name.lower(),
+        dataset_name=dataset_name, schema_name=em_models.root_model_name.lower(),
+        table_name=em_models.root_model_name.lower(),
         version=version,
+        version_id=version_id,
         annotation_model=model,
         sqlalchemy_database_uri=sqlalchemy_database_uri)
 
@@ -330,7 +343,9 @@ def materialize_root_ids(cg_table_id, dataset_name,
             _materialize_root_ids_thread, multi_args,
             n_threads=n_threads, package_name="materializationengine")
 
-    if not mm.is_sql:
+    if mm.is_sql:
+        mm.add_to_analysis_table()
+    else:
         # Collect the results
         anno_dict = {}
         for result in results:
@@ -344,7 +359,7 @@ def materialize_all_annotations(cg_table_id,
                                 dataset_name,
                                 schema_name,
                                 table_name,
-                                version:  int=1,
+                                analysisversion: None,
                                 time_stamp=None,
                                 sqlalchemy_database_uri=None,
                                 amdb_client=None,
@@ -377,7 +392,7 @@ def materialize_all_annotations(cg_table_id,
                                         dataset_name=dataset_name,
                                         schema_name=schema_name,
                                         table_name=table_name,
-                                        version=version,
+                                        analysisversion=analysisversion,
                                         time_stamp=time_stamp,
                                         sqlalchemy_database_uri=sqlalchemy_database_uri,
                                         amdb_client=amdb_client,
