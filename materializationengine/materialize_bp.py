@@ -9,7 +9,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy import func
 import pandas as pd
-from materializationengine.materialize_database import db_session
 from emannotationschemas.models import make_annotation_model, make_dataset_models, declare_annotation_model
 
 __version__ = "0.0.6"
@@ -96,9 +95,9 @@ def cell_type_local_report(id):
                                           table.tablename,
                                           version=table.analysisversion.version)
 
-    n_annotations = db_session.query(CellTypeModel).count()
-
-    cell_type_merge_query = (db_session.query(CellTypeModel.pt_root_id,
+    n_annotations =CellTypeModel.query.count()
+    
+    cell_type_merge_query = (db.session.query(CellTypeModel.pt_root_id,
                                               CellTypeModel.cell_type,
                                               func.count(CellTypeModel.pt_root_id).label('num_cells'))
                              .group_by(CellTypeModel.pt_root_id, CellTypeModel.cell_type)
@@ -126,8 +125,8 @@ def synapse_report(id):
                                          'synapse',
                                          table.tablename,
                                          version=table.analysisversion.version)
-    synapses = db_session.query(SynapseModel).count()
-    n_autapses = db_session.query(SynapseModel).filter(
+    synapses = SynapseModel.query.count()
+    n_autapses = SynapseModel.query.filter(
         SynapseModel.pre_pt_root_id == SynapseModel.post_pt_root_id).count()
 
     return render_template('synapses.html',
@@ -152,7 +151,7 @@ def generic_report(id):
                                   table.tablename,
                                   version=table.analysisversion.version)
 
-    n_annotations = db_session.query(Model).count()
+    n_annotations = Model.query.count()
 
     return render_template('generic.html',
                            n_annotations=n_annotations,
