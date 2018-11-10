@@ -12,7 +12,7 @@ import pandas as pd
 from materializationengine.materialize_database import db_session
 from emannotationschemas.models import make_annotation_model, make_dataset_models, declare_annotation_model
 
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 bp = Blueprint("materialize", __name__, url_prefix="/materialize")
 
 
