@@ -1,6 +1,6 @@
 dynamicannotationdb
 pychunkedgraph
-emannotationschemas>=1.0.6
+emannotationschemas>=1.0.10
 argschema
 numpy
 pandas
