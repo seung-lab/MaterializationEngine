@@ -1,4 +1,4 @@
-from materializationengine.models import AnalysisVersion, AnalysisTable
+from emannotationschemas.models import AnalysisVersion, AnalysisTable
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import os

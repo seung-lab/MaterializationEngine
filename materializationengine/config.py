@@ -1,7 +1,7 @@
 # Define the application directory
 import os
 import logging
-from materializationengine.models import Base
+from emannotationschemas.models import Base
 from flask_sqlalchemy import SQLAlchemy
 
 
