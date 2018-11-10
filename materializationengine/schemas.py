@@ -1,4 +1,4 @@
-import materializationengine.models as models
+import emannotationschemas.models as models
 from flask_marshmallow import Marshmallow
 
 ma = Marshmallow()
