@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, abort, current_app, request, render_templa
 # from materializationengine import materialize
 from emannotationschemas import get_types, get_schema
 
-from materializationengine.models import AnalysisVersion, AnalysisTable
+from emannotationschemas.models import AnalysisTable, AnalysisVersion
 from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
 from materializationengine.database import db
 from sqlalchemy import create_engine
