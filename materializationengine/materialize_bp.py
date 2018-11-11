@@ -7,9 +7,10 @@ from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSc
 from materializationengine.database import db
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
-from sqlalchemy import func
+from sqlalchemy import func, and_, or_
 import pandas as pd
 from emannotationschemas.models import make_annotation_model, make_dataset_models, declare_annotation_model
+import requests
 
 __version__ = "0.0.7"
 bp = Blueprint("materialize", __name__, url_prefix="/materialize")
@@ -26,7 +27,8 @@ def make_df_with_links_to_id(objects, schema, url, col):
 
 
 def get_datasets():
-    return ["pinky100", "test_dataset"]
+    url = current_app.config['INFOSERVICE_ENDPOINT'] + "/api/datasets"
+    return requests.get(url).json()
 
 
 @bp.route("/")
@@ -41,13 +43,18 @@ def index():
 def dataset_view(dataset_name):
     versions = AnalysisVersion.query.filter(
         AnalysisVersion.dataset == dataset_name).all()
-    schema = AnalysisVersionSchema(many=True)
-    df = make_df_with_links_to_id(
-        versions, schema, 'materialize.version_view', 'version')
+
+    if len(versions)>0:
+        schema = AnalysisVersionSchema(many=True)
+        df = make_df_with_links_to_id(
+            versions, schema, 'materialize.version_view', 'version')
+        df_html_table = df.to_html(escape=False)
+    else:
+        df_html_table = ""
 
     return render_template('dataset.html',
                            dataset=dataset_name,
-                           table=df.to_html(escape=False),
+                           table=df_html_table,
                            version=__version__)
 
 
@@ -80,7 +87,8 @@ def table_view(id):
     if table.schema in mapping.keys():
         return redirect(mapping[table.schema])
     else:
-        return redirect(url_for('materialize.generic_report',id=id))
+        return redirect(url_for('materialize.generic_report', id=id))
+
 
 @bp.route('/table/<int:id>/cell_type_local')
 def cell_type_local_report(id):
@@ -95,8 +103,8 @@ def cell_type_local_report(id):
                                           table.tablename,
                                           version=table.analysisversion.version)
 
-    n_annotations =CellTypeModel.query.count()
-    
+    n_annotations = CellTypeModel.query.count()
+
     cell_type_merge_query = (db.session.query(CellTypeModel.pt_root_id,
                                               CellTypeModel.cell_type,
                                               func.count(CellTypeModel.pt_root_id).label('num_cells'))
@@ -126,12 +134,18 @@ def synapse_report(id):
                                          table.tablename,
                                          version=table.analysisversion.version)
     synapses = SynapseModel.query.count()
-    n_autapses = SynapseModel.query.filter(
-        SynapseModel.pre_pt_root_id == SynapseModel.post_pt_root_id).count()
+    n_autapses = (SynapseModel.query.filter(
+        SynapseModel.pre_pt_root_id == SynapseModel.post_pt_root_id)
+        .filter(and_(SynapseModel.pre_pt_root_id != 0,
+                     SynapseModel.post_pt_root_id != 0)).count())
+    n_no_root = (SynapseModel.query
+                 .filter(or_(SynapseModel.pre_pt_root_id == 0,
+                              SynapseModel.post_pt_root_id == 0)).count())
 
     return render_template('synapses.html',
                            num_synapses=synapses,
                            num_autapses=n_autapses,
+                           num_no_root=n_no_root,
                            dataset=table.analysisversion.dataset,
                            analysisversion=table.analysisversion.version,
                            version=__version__,
