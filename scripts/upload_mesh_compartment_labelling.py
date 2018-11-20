@@ -13,6 +13,10 @@ from meshparty import trimesh_io
 import zlib
 import numpy as np
 from datajoint.blob import pack
+import os
+
+HOME = os.path.expanduser("~")
+
 
 # example of initializing mapping of database
 DATABASE_URI = "postgresql://postgres:welcometothematrix@35.196.105.34/postgres"
@@ -36,35 +40,40 @@ Session = sessionmaker(bind=engine)
 session = Session()
 
 
-mesh_class_dir = 'mesh_cls/pinky40_full_ae_750_local_nonorm_nobn_v12'
+mesh_class_dir = '{}/mesh_cls/pinky40_full_ae_750_local_nonorm_nobn_v12'.format(HOME)
 
-mesh_dir = './meshes'
+mesh_dir = '{}/meshes/'.format(HOME)
 files=[f for f in os.listdir(mesh_class_dir) if f.endswith('.h5')]
 seg_ids = [int(os.path.splitext(f)[0]) for f in files]
+meshmeta = trimesh_io.MeshMeta()
 
 for filename, seg_id in zip(files, seg_ids):
 
     filepath = os.path.join(mesh_class_dir, filename)
 
     f = h5py.File(filepath, 'r')
-    # mesh_endpoint = "https://www.dynamicannotationframework.com/meshing/"
-    # cv_path = "https://storage.googleapis.com/neuroglancer/nkem/pinky100_v0/ws/lost_no-random/bbox1_0"
+    mesh_endpoint = "https://www.dynamicannotationframework.com/meshing/"
+    cv_path = "https://storage.googleapis.com/neuroglancer/nkem/pinky100_v0/ws/lost_no-random/bbox1_0"
 
-    # print(seg_ids)
-    # trimesh_io.download_meshes(seg_ids=seg_ids,
+    print(seg_id, filename)
+    # trimesh_io.download_meshes(seg_ids=[seg_id],
     #                            target_dir=mesh_dir,
-    #                            cv_path=cv_path, 
+    #                            cv_path=cv_path,
     #                            fmt="obj",
     #                            mesh_endpoint=mesh_endpoint,
-    #                            n_threads=15,
+    #                            n_threads=1,
     #                            overwrite=False)
-    meshmeta = trimesh_io.MeshMeta()
+    #
+    # print("Mesh downloaded")
     meshpath = os.path.join(mesh_dir,'{}.h5'.format(seg_id))
+
+    print(meshpath)
     mesh = meshmeta.mesh(meshpath)
     pred = f['pred']
-    pred_subsample=pred[0::subsampling]
-    vertices_subsample=mesh.vertices[0::subsampling,:]
+    pred_subsample = pred[0::subsampling]
+    vertices_subsample = mesh.vertices[0::subsampling,:]
 
+    print("Mesh subsampled")
     cm = CompartmentModel(vertices=pack(vertices_subsample),
                           labels=pack(np.uint8(pred_subsample)),
                           root_id=seg_id)
@@ -72,3 +81,4 @@ for filename, seg_id in zip(files, seg_ids):
     session.add(cm)
     session.commit()
 
+    print("Mesh CLS committed")
