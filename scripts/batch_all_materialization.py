@@ -42,6 +42,7 @@ if __name__ == '__main__':
     # TODO clarify if Reference of references are something we want to allow
     # sorted_types = sorted(types, lambda x: issubclass(get_schema(x),
     #                                                   ReferenceAnnotation))
+    blacklist = ["pni_synapses", "pni_synapses_i2"]
 
     print(sql_uri)
     print(mod.args)
@@ -84,6 +85,9 @@ if __name__ == '__main__':
     schema_tables = [(t['schema_name'], t['table_name']) for t in tables]
 
     for schema_name, table_name in schema_tables:
+        if table_name in blacklist:
+            continue
+
         print(schema_name, table_name)
         time_start = time.time()
         syn_df = materialize.materialize_all_annotations(mod.args["cg_table_id"],
