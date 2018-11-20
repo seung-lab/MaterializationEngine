@@ -231,13 +231,14 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     if max_annotation_id == 0:
         return {}
 
-    if 'pni_synapses' in table_name:
-        cv_mip = 1
-        pixel_ratios = list(pixel_ratios)
-        pixel_ratios[0] /= 2
-        pixel_ratios[1] /= 2
-    else:
-        cv_mip = 0
+    cv_mip = 0
+    # if 'pni_synapses' in table_name:
+    #     cv_mip = 1
+    #     pixel_ratios = list(pixel_ratios)
+    #     pixel_ratios[0] /= 2
+    #     pixel_ratios[1] /= 2
+    # else:
+    #     cv_mip = 0
 
     cv_info = {"cloudpath": cv_path, 'mip': cv_mip}
     cg_info = cg.get_serialized_info()
