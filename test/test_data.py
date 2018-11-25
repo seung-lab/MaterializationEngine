@@ -5,9 +5,11 @@ from pychunkedgraph.backend import chunkedgraph
 
 from materializationengine.materialize import materialize_all_annotations, materialize_root_ids
 import materializationengine.materialize
+from materializationengine import materializationmanager
 from annotationengine.annotation import collect_bound_spatial_points, import_annotation_func, get_schema_from_service
 from emannotationschemas.blueprint_app import get_type_schema
-from emannotationschemas.models import root_model_name, get_next_version
+from sqlalchemy import create_engine
+from emannotationschemas.models import root_model_name, make_dataset_models, Base
 from mock import patch, Mock, MagicMock
 import requests_mock
 import numpy as np
@@ -28,16 +30,16 @@ def test_data(test_annon_dataset):
     +--------+--------+--------+
     """
 
-    annotation_type = 'synapse'
-    table_name = 'synapse'
+    schema_name = 'synapse'
+    table_name = 'mysynapse'
     user_id = 'test_user'
     amdb, dataset_name = test_annon_dataset
     # success= amdb._delete_table(dataset_name, table_name)
     # assert(success)
-    amdb.create_table(user_id, dataset_name, annotation_type, table_name)
+    amdb.create_table(user_id, dataset_name, table_name, schema_name)
 
     synapse_d = {
-        "type": annotation_type,
+        "type": schema_name,
         "pre_pt": {
             "position": [31, 0, 0],
         },
@@ -48,9 +50,9 @@ def test_data(test_annon_dataset):
             "position": [32, 0, 0]
         }
     }
-    schema = get_type_schema(annotation_type)
+    schema = get_type_schema(schema_name)
     oids = import_annotation_func(
-        synapse_d, user_id, dataset_name, table_name, schema, annotation_type, amdb)
+        synapse_d, user_id, dataset_name, table_name, schema, schema_name, amdb)
 
     # bouton_shape_annotation = {
     #     'target_id': int(oids[0]),
@@ -100,25 +102,32 @@ def test_simple_test(cv, test_data, test_annon_dataset, monkeypatch, requests_mo
                         'get_segmentation_and_scales_from_infoservice',
                         mocked_info)
     sql_uri = 'postgres://postgres:synapsedb@localhost:5432/testing'
-    new_version = get_next_version(sql_uri, dataset_name)
-
     time_stamp = datetime.datetime.utcnow()
-    df = materialize_all_annotations('cgtable',
-                                     dataset_name=dataset_name,
-                                     schema_name="synapse",
-                                     table_name="synapse",
-                                     version=new_version,
-                                     time_stamp=time_stamp,
-                                     amdb_client=amdb.client,
-                                     amdb_instance_id=amdb.instance_id,
-                                     cg_instance_id='cgraph_instance',
-                                     n_threads=1)
-    df.to_csv('test.csv')
+    engine = create_engine(sql_uri)
+    Base.metadata.create_all(engine)
+
+    
+    analysisversion = materializationmanager.create_new_version(
+            sql_uri, dataset_name, time_stamp)
+
+    
+
+    # df = materialize_all_annotations('cgtable',
+    #                                  dataset_name=dataset_name,
+    #                                  schema_name="synapse",
+    #                                  table_name="synapse",
+    #                                  analysisversion=analysisversion,
+    #                                  time_stamp=time_stamp,
+    #                                  amdb_client=amdb.client,
+    #                                  amdb_instance_id=amdb.instance_id,
+    #                                  cg_instance_id='cgraph_instance',
+    #                                  n_threads=1)
+    # df.to_csv('test.csv')
 
     materialize_root_ids('cgtable',
                          dataset_name=dataset_name,
                          time_stamp=time_stamp,
-                         version=new_version,
+                         analysisversion=analysisversion,
                          sqlalchemy_database_uri=sql_uri,
                          cg_instance_id='cgraph_instance',
                          n_threads=1)
@@ -126,8 +135,8 @@ def test_simple_test(cv, test_data, test_annon_dataset, monkeypatch, requests_mo
     materialize_all_annotations('cgtable',
                                 dataset_name=dataset_name,
                                 schema_name="synapse",
-                                table_name="synapse",
-                                version=new_version,
+                                table_name="mysynapse",
+                                analysisversion=analysisversion,
                                 time_stamp=time_stamp,
                                 amdb_client=amdb.client,
                                 amdb_instance_id=amdb.instance_id,

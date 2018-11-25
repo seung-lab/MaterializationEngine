@@ -1,12 +1,12 @@
 import json
 import functools
-
 from emannotationschemas import models as em_models
-from emannotationschemas.base import flatten_dict
 from emannotationschemas import get_schema
+from emannotationschemas.models import root_model_name
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import numpy as np
+
 
 class MaterializeAnnotationException(Exception):
     pass
@@ -18,6 +18,15 @@ class RootIDNotFoundException(MaterializeAnnotationException):
 
 class AnnotationParseFailure(MaterializeAnnotationException):
     pass
+
+def create_all_models(amdb, dataset):
+    metadata_list = amdb.get_existing_tables_metadata(dataset)
+    schema_tables = [(md['schema_name'], md['table_name']) for md in metadata_list]
+    mdict = {md['table_name']: md for md in metadata_list}
+    models = em_models.make_dataset_models(dataset,
+                                         schema_tables,
+                                         metadata_dict=mdict)
+    return models
 
 def create_new_version(sql_uri, dataset, time_stamp):
     engine = create_engine(sql_uri)
@@ -80,7 +89,7 @@ def lookup_sv_and_cg_bsp(cg,
             raise AnnotationParseFailure(msg)
 
     item['supervoxel_id'] = int(sv_id)
-    item['root_id'] = int(root_id)
+    item[root_model_name+"_id"] = int(root_id)
 
 
 class MaterializationManager(object):
@@ -95,13 +104,13 @@ class MaterializationManager(object):
         self._version_id = version_id
         self._sqlalchemy_database_uri = sqlalchemy_database_uri
 
-        em_models.make_dataset_models(dataset_name, [], version=self.version)
+        em_models.make_dataset_models(dataset_name, [])
 
         if annotation_model is not None:
-            self._annotation_model = annotation_model
+            self._annotation_model, self._annotation_submodel_d = annotation_model
         else:
-            self._annotation_model = em_models.make_annotation_model(
-                dataset_name, schema_name, table_name, version=self.version)
+            self._annotation_model, self._annotation_submodel_d = em_models.make_annotation_model(
+                dataset_name, schema_name, table_name)
 
         if sqlalchemy_database_uri is not None:
             self._sqlalchemy_engine = create_engine(sqlalchemy_database_uri,
@@ -195,8 +204,8 @@ class MaterializationManager(object):
         assert self.is_sql
         assert self._version_id is not None
 
-        at = em_models.AnalysisTable(tablename=self.table_name,
-                                     schema=self.schema_name,
+        at = em_models.AnalysisTable(table_name=self.table_name,
+                                     schema_name=self.schema_name,
                                      analysisversion_id=self._version_id)
         self.this_sqlalchemy_session.add(at)
         self.commit_session()
@@ -219,6 +228,15 @@ class MaterializationManager(object):
         context['postgis'] = self.is_sql
         return self.schema_init(context=context)
 
+    def flatten_annotation_into_submodels(self, data, id_, version):
+        data[self.table_name+'_id'] = id_
+        data['version'] = version
+        for key, value in data.items():
+            if type(value) == dict:
+                value['version'] = version
+                value[self.table_name+'_id'] = id_
+        return data
+
     def deserialize_single_annotation(self, blob, cg, cv,
                                       pixel_ratios=(1.0, 1.0, 1.0),
                                       time_stamp=None):
@@ -236,14 +254,23 @@ class MaterializationManager(object):
         schema = self.get_schema(
             cg, cv, pixel_ratios=pixel_ratios, time_stamp=time_stamp)
         data = schema.load(json.loads(blob)).data
-
-        return flatten_dict(data)
+ 
+        return data
 
     def bulk_insert_annotations(self, annotations):
         assert self.is_sql
 
+        insert_list = []
+        if self._annotation_submodel_d is not None:
+            for field, sub_model in self._annotation_submodel_d.items():
+                sub_annotations = [a.pop(field) for a in annotations]
+                insert_list.append((sub_model, sub_annotations))
         self.this_sqlalchemy_session.bulk_insert_mappings(self.annotation_model,
                                                           annotations)
+        for model, sub_annotations in insert_list:
+            self.this_sqlalchemy_session.bulk_insert_mappings(model, sub_annotations)
+                                                          
+
         
 
     def add_annotation_to_sql_database(self, deserialized_annotation):

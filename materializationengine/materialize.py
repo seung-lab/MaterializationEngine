@@ -7,6 +7,7 @@ from emannotationschemas import models as em_models
 import requests
 import numpy as np
 from pychunkedgraph.backend import chunkedgraph
+from emannotationschemas.base import flatten_dict
 from multiwrapper import multiprocessing_utils as mu
 from dynamicannotationdb.annodb_meta import AnnotationMetaDB
 import cloudvolume
@@ -42,21 +43,12 @@ def _process_all_annotations_thread(args):
                                                                    cg, cv,
                                                                    pixel_ratios=pixel_ratios,
                                                                    time_stamp=time_stamp)
-        deserialized_annotation['id'] = int(annotation_id)
-        # this is now done in deserialization
-        # sv_id_to_root_id_dict = {}
-        # if sv_ids is not None:
-        #     for i_sv_id, sv_id in enumerate(sv_ids):
-        #         print("%d / %d" % (i_sv_id + 1, len(sv_ids)), end='\r')
-
-        #         # Read root_id from pychunkedgraph
-        #         sv_id_to_root_id_dict[sv_id] = cg.get_root(sv_id)
-
         if mm.is_sql:
-            # mm.add_annotation_to_sql_database(deserialized_annotation)
-            annos_list.append(deserialized_annotation)
-        # else:
-        annos_dict[annotation_id] = deserialized_annotation
+            model=mm.flatten_annotation_into_submodels(deserialized_annotation,int(annotation_id), version)
+            annos_list.append(model)
+        else:
+            deserialized_annotation=flatten_dict(deserialized_annotation)
+            annos_dict[annotation_id] = deserialized_annotation
 
     if not mm.is_sql:
         return annos_dict
@@ -71,15 +63,14 @@ def _process_all_annotations_thread(args):
 
 def _materialize_root_ids_thread(args):
     root_ids, serialized_mm_info = args
-    model = em_models.make_cell_segment_model(serialized_mm_info["dataset_name"],
-                                              serialized_mm_info["version"])
+    model = em_models.make_cell_segment_model(serialized_mm_info["dataset_name"])
     mm = materializationmanager.MaterializationManager(**serialized_mm_info,
                                                        annotation_model=model)
 
     annos_dict = {}
     annos_list = []
     for root_id in root_ids:
-        ann = {"id": int(root_id)}
+        ann = {"root_id": int(root_id), "version": serialized_mm_info["version"]}
         if mm.is_sql:
             # mm.add_annotation_to_sql_database(ann)
             annos_list.append(ann)
@@ -198,7 +189,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
         version_id = None
     else:
         version = analysisversion.version
-        version_id = analysisversion.id
+        version_id = analysisversion.analysisversion_id
 
     if cg_client is None:
         cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id)
@@ -306,9 +297,9 @@ def materialize_root_ids(cg_table_id, dataset_name,
         version_id = None
     else:
         version = analysisversion.version
-        version_id = analysisversion.id
+        version_id = analysisversion.analysisversion_id
 
-    model = em_models.make_cell_segment_model(dataset_name, version=version)
+    model = em_models.make_cell_segment_model(dataset_name)
     mm = materializationmanager.MaterializationManager(
         dataset_name=dataset_name, schema_name=em_models.root_model_name.lower(),
         table_name=em_models.root_model_name.lower(),
@@ -316,8 +307,8 @@ def materialize_root_ids(cg_table_id, dataset_name,
         version_id=version_id,
         annotation_model=model,
         sqlalchemy_database_uri=sqlalchemy_database_uri)
-
-    mm.bulk_insert_annotations([{"id": 0}])
+    id_name = em_models.root_model_name.lower() + "_id"
+    mm.bulk_insert_annotations([{id_name: 0, 'version': version}])
     mm.commit_session()
     # if mm.is_sql:
     #     mm._drop_table()
