@@ -89,7 +89,7 @@ def lookup_sv_and_cg_bsp(cg,
             raise AnnotationParseFailure(msg)
 
     item['supervoxel_id'] = int(sv_id)
-    item[root_model_name+"_id"] = int(root_id)
+    item[root_model_name.lower()+"_id"] = int(root_id)
 
 
 class MaterializationManager(object):
