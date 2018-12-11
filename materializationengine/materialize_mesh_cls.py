@@ -1,6 +1,7 @@
 from emannotationschemas.models import make_dataset_models, Base, format_table_name
 from emannotationschemas.mesh_models import make_neuron_compartment_model
 from emannotationschemas.mesh_models import make_post_synaptic_compartment_model
+from emannotationschemas.mesh_models import make_pre_synaptic_compartment_model
 from geoalchemy2.shape import to_shape
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -43,19 +44,31 @@ def get_synapse_vertices(synapses, kdtree, voxel_size=[4, 4, 40]):
     _, near_vertex_ids = kdtree.query(poss, n_jobs=1)
     return near_vertex_ids
 
-def add_synapses_to_session(synapses, synapse_labels, session,
-                            PostSynapseCompartment):
+def add_synapses_to_session(synapses,
+                            post_synapse_labels,
+                            pre_synapse_labels,
+                            post_synapse_distances,
+                            pre_synapse_distances,
+                            session,
+                            PostSynapseCompartment,
+                            PreSynapseCompartment):
    
     # loop over synapses
-    for k, synapse in enumerate(synapses):
-        # if the closest mesh point is within 15 hops, use the found label
-        if min_d[k] < max_distance:
-            # need to index into the list of closest indices, and then into the labels
-            label = synapse_labels[k]
-            # initialize a new label
-            psc = PostSynapseCompartment(label=int(label), synapse_id=synapse.id)
-            # add it to database session
-            session.add(psc)
+    for post_label, pre_label, pre_d, post_d, synapse in zip(post_synapse_labels,
+                                                             pre_synapse_labels,
+                                                             pre_synpase_distances,
+                                                             post_synapse_distances,
+                                                             synapses):
+        # initialize a new label
+        post_sc = PostSynapseCompartment(label=int(post_label),
+                                         soma_distance=post_d,
+                                         synapse_id=synapse.id)
+        pre_sc = PreSynapseCompartment(label=int(pre_label),
+                                       soma_distance=pre_d,
+                                       synapse_id=synapse.id)
+        # add it to database session
+        session.add(post_sc)
+        session.add(pre_sc)
 
 def associate_synapses_single(args):
     # script parameters
@@ -86,6 +99,9 @@ def associate_synapses_single(args):
     PostSynapseCompartment = make_post_synaptic_compartment_model(dataset,
                                                                   synapse_table,
                                                                   version=version)
+    PreSynapseCompartment = make_pre_synaptic_compartment_model(dataset,
+                                                                synapse_table,
+                                                                version=version)
 
     time_start = time.time()
 
@@ -114,8 +130,12 @@ def associate_synapses_single(args):
     synapses = session.query(SynapseModel).filter(
         SynapseModel.post_pt_root_id == root_id).all()
 
+    pre_synapses = session.query(SynapseModel).filter(
+        SynapseModel.pre_pt_root_id == root_id).all()
     # find the index of the closest mesh vertex
     synapse_vertices = get_synapse_vertices(synapses, kdtree,
+                                            voxel_size=voxel_size)
+    pre_synapse_vertices = get_synapse_vertices(pre_synapses, kdtree,
                                             voxel_size=voxel_size)
 
     print("%d - spatial lookup = %.2fs" % (root_id, time.time() - time_start))
@@ -126,7 +146,12 @@ def associate_synapses_single(args):
 
         synapse_block = synapses[i_synapse_block: i_synapse_block + block_size]
         synapse_vertex_block = synapse_vertices[i_synapse_block: i_synapse_block + block_size]
+        pre_synapse_vertex_block = pre_synapse_vertices[i_synapse_block: i_synapse_block + block_size]
         synapse_labels = decompressed_labels[synapse_vertex_block,1]
+        pre_synapse_labels = decompressed_labels[pre_synapse_vertex_block,1]
+
+        pre_synapse_soma_distances = 
+        post_synapse_soma_distances = 
         # calculate the distance from the synapse vertices to mesh points within 15 edges
         # dm = sparse.csgraph.dijkstra(mesh.csgraph, indices=synapse_vertex_block,
         #                              directed=True, limit=15)
@@ -143,8 +168,17 @@ def associate_synapses_single(args):
         # min_d = np.min(dm_labelled, axis=1)
 
         # add the labels to the session
-        add_synapses_to_session(synapse_block, synapse_labels, session,
-                                PostSynapseCompartment)
+        add_synapses_to_session(synapse_block,
+                                post_synapse_labels,
+                                pre_synapse_labels,
+                                post_synapse_soma_distances,
+                                pre_synapse_soma_distances,
+                                session,
+                                PostSynapseCompartment,
+                                PreSynapseCompartment):
+
+        # add_synapses_to_session(synapse_block, synapse_labels, pre_synapse_labels, session,
+        #                         PostSynapseCompartment)
 
         print("%d - %d / %d - dijkstra and adding to session = %.2fs" % (root_id, i_synapse_block, len(synapse_vertices), time.time() - time_start))
 
