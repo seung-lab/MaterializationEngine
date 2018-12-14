@@ -41,10 +41,11 @@ def index():
 
 @bp.route('/dataset/<dataset_name>')
 def dataset_view(dataset_name):
-    versions = AnalysisVersion.query.filter(
-        AnalysisVersion.dataset == dataset_name).all()
+    versions = (AnalysisVersion.query.filter(
+        AnalysisVersion.dataset == dataset_name).
+        order_by(AnalysisVersion.version.desc()).all())
 
-    if len(versions)>0:
+    if len(versions) > 0:
         schema = AnalysisVersionSchema(many=True)
         df = make_df_with_links_to_id(
             versions, schema, 'materialize.version_view', 'version')
