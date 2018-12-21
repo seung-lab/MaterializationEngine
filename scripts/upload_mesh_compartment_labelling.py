@@ -14,6 +14,8 @@ import zlib
 import numpy as np
 from datajoint.blob import pack
 import os
+from labelops import LabelOps as op
+
 
 HOME = os.path.expanduser("~")
 
@@ -67,15 +69,17 @@ for filename, seg_id in zip(files, seg_ids):
     # print("Mesh downloaded")
     meshpath = os.path.join(mesh_dir,'{}.h5'.format(seg_id))
 
-    print(meshpath)
     mesh = meshmeta.mesh(meshpath)
-    pred = f['pred']
-    pred_subsample = pred[0::subsampling]
-    vertices_subsample = mesh.vertices[0::subsampling,:]
+    
+    labels = f['pred']
+    neighborhood = op.generate_neighborhood(mesh.faces)
+    compressed_labels = op.compress_labels(neighborhood, labels, as_dict=False)
+    compressed_vertices= mesh.vertices[compressed_labels.T[0]]
+    #pred_subsample = pred[0::subsampling]
+    #vertices_subsample = mesh.vertices[0::subsampling,:]
 
-    print("Mesh subsampled")
-    cm = CompartmentModel(vertices=pack(vertices_subsample),
-                          labels=pack(np.uint8(pred_subsample)),
+    cm = CompartmentModel(vertices=pack(compressed_vertices),
+                          labels=pack(compressed_labels),
                           root_id=seg_id)
 
     session.add(cm)
