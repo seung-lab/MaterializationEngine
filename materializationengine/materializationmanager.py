@@ -20,7 +20,7 @@ class AnnotationParseFailure(MaterializeAnnotationException):
     pass
 
 def create_new_version(sql_uri, dataset, time_stamp):
-    engine = create_engine(sql_uri)
+    engine = create_engine(sql_uri, pool_size=20, max_overflow=50)
     Session = sessionmaker(bind=engine)
     session = Session()
 
