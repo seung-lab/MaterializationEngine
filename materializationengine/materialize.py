@@ -284,6 +284,132 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
 
         return anno_dict
 
+def process_existing_annotations(cg_table_id,
+                                 dataset_name,
+                                 schema_name,
+                                 table_name,
+                                 time_stamp=None,
+                                 time_stamp_base=None,
+                                 analysisversion=None,
+                                 sqlalchemy_database_uri=None,
+                                 cg_client=None, cg_instance_id=None,
+                                 block_size=2500, n_threads=1):
+    """ update existing entries in a materialized database
+    filling in empty supervoxelID's and out of date rootIDs
+    for root IDs which have expired between a base timestamp
+    and another timestamp.
+
+    :param dataset_name: str
+        name of dataset
+    :param schema_name: str
+        type of annotation
+    :param cg_table_id: str
+        chunk graph table
+    :param table_name: str
+        name of annotation table
+    :param version: str
+        version of table (i.e. v1)
+    :param time_stamp: time.utctime
+        time_stamp to lock databases to
+    :param time_stamp_base: time.utctime
+        time_stamp of previous materialization   
+    :param sqlalchemy_database_uri:
+        database connect uri (leave blank for dataframe)
+    :param n_threads: int
+         number of threads to use to materialize
+    """
+
+    if analysisversion is None:
+        version = 0
+        version_id = None
+    else:
+        version = analysisversion.version
+        version_id = analysisversion.id
+
+    if cg_client is None:
+        cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id)
+    elif cg_instance_id is not None:
+        cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id,
+                                       client=cg_client,
+                                       instance_id=cg_instance_id)
+    else:
+        raise Exception("Missing Instance ID")
+
+    cv_path, pixel_ratios = get_segmentation_and_scales_from_infoservice(
+        dataset_name)
+
+    mm = materializationmanager.MaterializationManager(dataset_name=dataset_name,
+                                                       schema_name=schema_name,
+                                                       table_name=table_name,
+                                                       version=version,
+                                                       version_id=version_id,
+                                                       create_metadata=False,
+                                                       sqlalchemy_database_uri=sqlalchemy_database_uri)
+
+    # The `max_annotation_id` sets an upper limit and can be used to iterate
+    # through all smaller ids. However, there is no guarantee that any smaller
+    # id exists, it is only a guarantee that no larger id exists at the time
+    # the function is called.
+    max_annotation_id = amdb.get_max_annotation_id(dataset_name,
+                                                   table_name)
+
+    print("Max annotation id: %d" % max_annotation_id)
+
+    if max_annotation_id == 0:
+        return {}
+
+    cv_mip = 0
+    # if 'pni_synapses' in table_name:
+    #     cv_mip = 1
+    #     pixel_ratios = list(pixel_ratios)
+    #     pixel_ratios[0] /= 2
+    #     pixel_ratios[1] /= 2
+    # else:
+    #     cv_mip = 0
+
+    cv_info = {"cloudpath": cv_path, 'mip': cv_mip}
+    cg_info = cg.get_serialized_info()
+
+    if n_threads > 1:
+        del cg_info["credentials"]
+        del amdb_info["credentials"]
+
+    n_parts = int(max(1, max_annotation_id / block_size))
+    n_parts += 1
+    # Annotation ids start at 1
+    id_chunks = np.linspace(1, max_annotation_id + 1, n_parts).astype(np.uint64)
+
+    multi_args = []
+    for i_id_chunk in range(len(id_chunks) - 1):
+        multi_args.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1],
+                           dataset_name, table_name, schema_name, version,
+                           time_stamp,
+                           cg_table_id, amdb_info, cg_info,
+                           mm.get_serialized_info(), cv_info, pixel_ratios])
+
+    print(multi_args)
+
+    if n_threads == 1:
+        results = mu.multiprocess_func(
+            _process_all_annotations_thread, multi_args,
+            n_threads=n_threads,
+            verbose=True, debug=n_threads == 1)
+    else:
+        results = mu.multisubprocess_func(
+            _process_all_annotations_thread, multi_args,
+            n_threads=n_threads, package_name="materializationengine")
+
+    if mm.is_sql:
+        mm.add_to_analysis_table()
+    else:
+        # Collect the results
+        print(results)
+        anno_dict = {}
+        for result in results:
+            anno_dict.update(result)
+
+        return anno_dict
+
 
 def materialize_root_ids(cg_table_id, dataset_name,
                          time_stamp,
@@ -355,6 +481,8 @@ def materialize_root_ids(cg_table_id, dataset_name,
         df = pd.DataFrame.from_dict(anno_dict, orient="index")
         return df
 
+
+       
 
 def materialize_all_annotations(cg_table_id,
                                 dataset_name,

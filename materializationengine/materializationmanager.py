@@ -7,6 +7,8 @@ from emannotationschemas import get_schema
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import numpy as np
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 
 class MaterializeAnnotationException(Exception):
     pass
@@ -18,6 +20,7 @@ class RootIDNotFoundException(MaterializeAnnotationException):
 
 class AnnotationParseFailure(MaterializeAnnotationException):
     pass
+
 
 def create_new_version(sql_uri, dataset, time_stamp):
     engine = create_engine(sql_uri, pool_size=20, max_overflow=50)
@@ -35,7 +38,8 @@ def create_new_version(sql_uri, dataset, time_stamp):
 
     analysisversion = em_models.AnalysisVersion(dataset=dataset,
                                                 time_stamp=time_stamp,
-                                                version=new_version_number)
+                                                version=new_version_number,
+                                                valid=False)
     session.add(analysisversion)
     session.commit()
     return analysisversion
@@ -87,6 +91,7 @@ class MaterializationManager(object):
     def __init__(self, dataset_name, schema_name,
                  table_name, version = 1, version_id = None,
                  annotation_model=None,
+                 create_metadata = True, 
                  sqlalchemy_database_uri=None):
         self._dataset_name = dataset_name
         self._schema_name = schema_name
@@ -106,7 +111,8 @@ class MaterializationManager(object):
         if sqlalchemy_database_uri is not None:
             self._sqlalchemy_engine = create_engine(sqlalchemy_database_uri,
                                                     echo=True)
-            em_models.Base.metadata.create_all(self.sqlalchemy_engine)
+            if create_metadata:
+                em_models.Base.metadata.create_all(self.sqlalchemy_engine)
 
             self._sqlalchemy_session = sessionmaker(
                 bind=self.sqlalchemy_engine)
@@ -166,6 +172,17 @@ class MaterializationManager(object):
     @property
     def schema_init(self):
         return self._schema_init
+
+    def copy_table(self, old_model, include_relationships=False):
+        if include_relationships:
+            columns = self.annotation_model.__table__.columns
+            stmt = self.annotation_model.__table__.insert().from_select(columns, old_model.__table__)
+        else:
+            t_old = old_model.__table__
+            t_new = self.annotation_model.__table__
+            stmt = f"CREATE TABLE {t_new} AS TABLE {t_old}"
+        self.this_sqlalchemy_session.execute(stmt)
+        self.this_sqlalchemy_session.commit()
 
     def get_serialized_info(self):
         """ Puts all initialization parameters into a dict
