@@ -41,8 +41,12 @@ def index():
 
 @bp.route('/dataset/<dataset_name>')
 def dataset_view(dataset_name):
-    versions = AnalysisVersion.query.filter(
-        AnalysisVersion.dataset == dataset_name).all()
+    version_query = AnalysisVersion.query.filter(
+        AnalysisVersion.dataset == dataset_name)
+    show_all = request.args.get('all', False) is not False
+    if not show_all:
+        version_query = version_query.filter(AnalysisVersion.valid == True)
+    versions = version_query.order_by(AnalysisVersion.version.desc()).all()
 
     if len(versions)>0:
         schema = AnalysisVersionSchema(many=True)
@@ -63,8 +67,9 @@ def version_view(id):
     version = AnalysisVersion.query.filter(
         AnalysisVersion.id == id).first_or_404()
 
-    tables = AnalysisTable.query.filter(
-        AnalysisTable.analysisversion == version).all()
+    table_query = AnalysisTable.query.filter(
+        AnalysisTable.analysisversion == version)
+    tables = table_query.all()
 
     df = make_df_with_links_to_id(tables, AnalysisTableSchema(
         many=True), 'materialize.table_view', 'id')
@@ -79,7 +84,6 @@ def version_view(id):
 @bp.route('/table/<int:id>')
 def table_view(id):
     table = AnalysisTable.query.filter(AnalysisTable.id == id).first_or_404()
-
     mapping = {
         "synapse": url_for('materialize.synapse_report', id=id),
         "cell_type_local": url_for('materialize.cell_type_local_report', id=id)
