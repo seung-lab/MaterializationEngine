@@ -12,7 +12,7 @@ import pandas as pd
 from emannotationschemas.models import make_annotation_model, make_dataset_models, declare_annotation_model
 import requests
 
-__version__ = "0.0.9"
+__version__ = "0.1.1"
 bp = Blueprint("materialize", __name__, url_prefix="/materialize")
 
 
@@ -48,7 +48,7 @@ def dataset_view(dataset_name):
         version_query = version_query.filter(AnalysisVersion.valid == True)
     versions = version_query.order_by(AnalysisVersion.version.desc()).all()
 
-    if len(versions)>0:
+    if len(versions) > 0:
         schema = AnalysisVersionSchema(many=True)
         df = make_df_with_links_to_id(
             versions, schema, 'materialize.version_view', 'version')

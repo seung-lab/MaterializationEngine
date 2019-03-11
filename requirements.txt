@@ -9,3 +9,4 @@ flask-sqlalchemy
 marshmallow-sqlalchemy
 flask-marshmallow
 flask-admin
+labelops

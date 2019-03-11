@@ -174,7 +174,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
                             sqlalchemy_database_uri=None,
                             amdb_client=None, amdb_instance_id=None,
                             cg_client=None, cg_instance_id=None,
-                            block_size=500, n_threads=1):
+                            block_size=2500, n_threads=1):
     """ Reads data from all annotations and acquires their mapping to root_ids
 
     :param dataset_name: str
