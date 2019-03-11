@@ -1,4 +1,4 @@
-from emannotationschemas.models import make_dataset_models, Base, format_table_name
+from emannotationschemas.models import make_dataset_models, Base, format_table_name, make_annotation_model
 from emannotationschemas.mesh_models import make_neuron_compartment_model
 from emannotationschemas.mesh_models import make_post_synaptic_compartment_model
 from geoalchemy2.shape import to_shape
@@ -22,16 +22,23 @@ if __name__ == '__main__':
     # script parameters
     DATABASE_URI = "postgresql://postgres:welcometothematrix@35.196.105.34/postgres"
     dataset = 'pinky100'
-    synapse_table = 'pni_synapses_i2'
-    version = 36
-    mesh_dir = '{}/meshes/'.format(HOME)
-    voxel_size = [4,4,40] # how to convert from synpase voxel index to mesh units (nm)
+    synapse_table = 'pni_synapses_i3'
+    version = 52
+    mesh_dir = '{}/pinky100_meshes/'.format(HOME)
+    voxel_size = [4, 4, 40] # how to convert from synpase voxel index to mesh units (nm)
     engine = create_engine(DATABASE_URI, echo=False)
 
 
     # build the compartment models and post synaptic compartment models
     CompartmentModel = make_neuron_compartment_model(dataset,
                                                      version=version)
+
+    SynapseModel = make_annotation_model(dataset, "synapse",
+                                         synapse_table, version=version)
+
+    PostSynapseCompartment = make_post_synaptic_compartment_model(dataset,
+                                                                  synapse_table,
+                                                                  version=version)
     # assures that all the tables are created
     # would be done as a db management task in general
     Base.metadata.create_all(engine)
@@ -48,8 +55,9 @@ if __name__ == '__main__':
     for cm in cms:
         multi_args.append([cm.root_id, cm.labels, cm.vertices])
 
+
     mu.multisubprocess_func(materialize_mesh_cls.associate_synapses_single,
-                            multi_args, n_threads=64,
+                            multi_args, n_threads=64, kill_tol_factor=100,
                             package_name="materializationengine")
 
     # for cm in cms:

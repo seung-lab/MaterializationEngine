@@ -21,9 +21,9 @@ HOME = os.path.expanduser("~")
 # example of initializing mapping of database
 DATABASE_URI = "postgresql://postgres:welcometothematrix@35.196.105.34/postgres"
 dataset = 'pinky100'
-version = 36
+version = 52
 subsampling = 10
-synapse_table = 'pni_synapses_i2'
+synapse_table = 'pni_synapses_i3'
 engine = create_engine(DATABASE_URI, echo=False)
 model_dict = make_dataset_models(dataset,
                                  [('synapse', synapse_table)],
@@ -40,15 +40,14 @@ Session = sessionmaker(bind=engine)
 session = Session()
 
 
-mesh_class_dir = '{}/mesh_cls/pinky40_full_ae_750_local_nonorm_nobn_v12'.format(HOME)
+mesh_class_dir = '{}/pinky100_comp_pred/pinky100_pycs_ae_750_3000_local_nonorm_nobn_oversample_v1/'.format(HOME)
 
-mesh_dir = '{}/meshes/'.format(HOME)
+mesh_dir = '{}/pinky100_meshes/'.format(HOME)
 files=[f for f in os.listdir(mesh_class_dir) if f.endswith('.h5')]
 seg_ids = [int(os.path.splitext(f)[0]) for f in files]
 meshmeta = trimesh_io.MeshMeta()
 
 for filename, seg_id in zip(files, seg_ids):
-
     filepath = os.path.join(mesh_class_dir, filename)
 
     f = h5py.File(filepath, 'r')

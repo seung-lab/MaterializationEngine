@@ -18,7 +18,7 @@ class BatchMaterializationSchema(argschema.ArgSchema):
                                      description="name of google instance for DynamicAnnotationDb")
     cg_instance_id = mm.fields.Str(default="pychunkedgraph",
                                    description="name of google instance for PyChunkedGraph")
-    n_threads = mm.fields.Int(default=200,
+    n_threads = mm.fields.Int(default=150,
                               description="number of threads to use in parallelization")
     time_stamp = mm.fields.DateTime(default=str(datetime.datetime.utcnow()),
                                     description="time to use for materialization")
@@ -42,7 +42,7 @@ if __name__ == '__main__':
     # TODO clarify if Reference of references are something we want to allow
     # sorted_types = sorted(types, lambda x: issubclass(get_schema(x),
     #                                                   ReferenceAnnotation))
-    blacklist = ["pni_synapses", "pni_synapses_i2"]
+    blacklist = ["pni_synapses", "pni_synapses_i2", "interneurons_putative_ai"]
 
     print(sql_uri)
     print(mod.args)
