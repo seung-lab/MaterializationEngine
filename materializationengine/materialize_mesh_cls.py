@@ -43,13 +43,14 @@ def get_synapse_vertices(synapses, kdtree, voxel_size=[4, 4, 40]):
     return near_vertex_ids
 
 def add_synapses_to_session(synapses, dm_labelled, cm_labels, session,
-                            PostSynapseCompartment, max_distance =15):
+                            PostSynapseCompartment, max_distance=15):
      # for each of the synapse vertices, find the closest labeled vertex
     closest_dm_labelled = np.argmin(dm_labelled, axis=1)
 
     # find what the minimum distance is
     min_d = np.min(dm_labelled, axis=1)
 
+    c = 0
     # loop over synapses
     for k, synapse in enumerate(synapses):
         # if the closest mesh point is within 15 hops, use the found label
@@ -61,15 +62,21 @@ def add_synapses_to_session(synapses, dm_labelled, cm_labels, session,
             # add it to database session
             session.add(psc)
 
+            c += 1
+
+    print("%d / %d" % (c, len(synapses)))
+
 def associate_synapses_single(args):
     # script parameters
     DATABASE_URI = "postgresql://postgres:welcometothematrix@35.196.105.34/postgres"
     dataset = 'pinky100'
-    synapse_table = 'pni_synapses_i2'
-    version = 36
-    mesh_dir = '{}/meshes/'.format(HOME)
-    voxel_size = [4,4,40] # how to convert from synpase voxel index to mesh units (nm)
+    synapse_table = 'pni_synapses_i3'
+    version = 50
+    mesh_dir = '{}/pinky100_meshes/'.format(HOME)
+    voxel_size = [4, 4, 40] # how to convert from synpase voxel index to mesh units (nm)
+
     engine = create_engine(DATABASE_URI, echo=False)
+    max_distance = 15*100
 
     # assures that all the tables are created
     # would be done as a db management task in general
@@ -130,13 +137,14 @@ def associate_synapses_single(args):
 
     block_size = 100
     for i_synapse_block in range(0, len(synapse_vertices), block_size):
+        this_session = Session()
 
         synapse_block = synapses[i_synapse_block: i_synapse_block + block_size]
         synapse_vertex_block = synapse_vertices[i_synapse_block: i_synapse_block + block_size]
 
         # calculate the distance from the synapse vertices to mesh points within 15 edges
         dm = sparse.csgraph.dijkstra(mesh.csgraph, indices=synapse_vertex_block,
-                                     directed=True, limit=15)
+                                     directed=True, limit=max_distance)
         time_start = time.time()
 
 
@@ -150,11 +158,9 @@ def associate_synapses_single(args):
         # min_d = np.min(dm_labelled, axis=1)
 
         # add the labels to the session
-        add_synapses_to_session(synapse_block, dm_labelled, cm_labels, session,
-                                PostSynapseCompartment)
+        add_synapses_to_session(synapse_block, dm_labelled, cm_labels, this_session,
+                                PostSynapseCompartment, max_distance=max_distance)
 
-        print("%d - %d / %d - dijkstra and adding to session = %.2fs" % (root_id, i_synapse_block, len(synapse_vertices), time.time() - time_start))
-
-    # commit all synapse labels to database
-    session.commit()
-    print("%d - commit = %.2fs" % (root_id, time.time() - time_start))
+        # commit all synapse labels to database
+        this_session.commit()
+        print("%d - %d / %d - dijkstra and commiting = %.2fs" % (root_id, i_synapse_block, len(synapse_vertices), time.time() - time_start))
