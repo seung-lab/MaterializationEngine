@@ -183,6 +183,10 @@ class MaterializationManager(object):
             stmt = f"CREATE TABLE {t_new} AS TABLE {t_old}"
         self.this_sqlalchemy_session.execute(stmt)
         self.this_sqlalchemy_session.commit()
+        conn = self.sqlalchemy_engine.connect()
+        ctx = MigrationContext.configure(conn)
+        op = Operations(ctx)
+        
 
     def get_serialized_info(self):
         """ Puts all initialization parameters into a dict
