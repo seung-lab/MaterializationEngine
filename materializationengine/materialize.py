@@ -11,7 +11,7 @@ from multiwrapper import multiprocessing_utils as mu
 from dynamicannotationdb.annodb_meta import AnnotationMetaDB
 import cloudvolume
 from materializationengine import materializationmanager
-
+import numpy as np
 
 def _process_all_annotations_thread(args):
     """ Helper for process_all_annotations """
@@ -91,6 +91,29 @@ def _materialize_root_ids_thread(args):
     else:
         mm.bulk_insert_annotations(annos_list)
         mm.commit_session()
+
+
+def _materialize_root_ids_inc_thread(args):
+    root_ids, serialized_mm_info = args
+    CellSegment = em_models.make_cell_segment_model(serialized_mm_info["dataset_name"],
+                                                    serialized_mm_info["version"])
+    mm = materializationmanager.MaterializationManager(**serialized_mm_info,
+                                                       annotation_model=model)
+
+    annos_list = []
+
+    root_ids = np.array(root_ids)
+    old_segments= mm.this_sqlalchemy_session.query(CellSegment).filter(CellSegment.id.in_(root_ids)).all()
+    old_ids = np.array([s.id for s in old_segments])
+    new_ids = root_ids[~np.isin(root_ids, old_ids)]
+
+    #for root_id in new_ids:
+    #    ann = {"id": int(root_id)}
+    #    annos_list.append(ann)
+
+    #mm.bulk_insert_annotations(annos_list)
+    #mm.commit_session()
+    return old_ids, new_ids
 
 
 def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.dynamicannotationframework.com/info'):
@@ -411,6 +434,60 @@ def process_existing_annotations(cg_table_id,
         return anno_dict
 
 
+def materialize_root_ids_incremental(cg_table_id, dataset_name,
+                                     time_stamp,
+                                     analysisversion=None,
+                                     sqlalchemy_database_uri=None, cg_client=None,
+                                     cg_instance_id=None, n_threads=1):
+
+    if cg_client is None:
+        cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id)
+    elif cg_instance_id is not None:
+        cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id,
+                                       client=cg_client,
+                                       instance_id=cg_instance_id)
+    else:
+        raise Exception("Missing Instance ID")
+
+
+    if analysisversion is None:
+        version = 0
+        version_id = None
+    else:
+        version = analysisversion.version
+        version_id = analysisversion.id
+
+    model = em_models.make_cell_segment_model(dataset_name, version=version)
+    mm = materializationmanager.MaterializationManager(
+        dataset_name=dataset_name, schema_name=em_models.root_model_name.lower(),
+        table_name=em_models.root_model_name.lower(),
+        version=version,
+        version_id=version_id,
+        annotation_model=model,
+        sqlalchemy_database_uri=sqlalchemy_database_uri)
+
+    root_ids = cg.get_latest_roots(time_stamp=time_stamp,
+                                   n_threads=n_threads)
+
+    print("len(root_ids)", len(root_ids))
+
+    root_id_blocks = np.array_split(root_ids, n_threads*3)
+    multi_args = []
+
+    for root_id_block in root_id_blocks:
+        multi_args.append([root_id_block, mm.get_serialized_info()])
+
+    if n_threads == 1:
+        results = mu.multiprocess_func(
+            _materialize_root_ids_inc_thread, multi_args,
+            n_threads=n_threads,
+            verbose=True, debug=n_threads == 1)
+    else:
+        results = mu.multisubprocess_func(
+            _materialize_root_ids_inc_thread, multi_args,
+            n_threads=n_threads, package_name="materializationengine")
+
+
 def materialize_root_ids(cg_table_id, dataset_name,
                          time_stamp,
                          analysisversion=None,
@@ -470,19 +547,8 @@ def materialize_root_ids(cg_table_id, dataset_name,
             _materialize_root_ids_thread, multi_args,
             n_threads=n_threads, package_name="materializationengine")
 
-    if mm.is_sql:
-        mm.add_to_analysis_table()
-    else:
-        # Collect the results
-        anno_dict = {}
-        for result in results:
-            anno_dict.update(result)
-
-        df = pd.DataFrame.from_dict(anno_dict, orient="index")
-        return df
-
-
-       
+    # mm.add_to_analysis_table()
+   
 
 def materialize_all_annotations(cg_table_id,
                                 dataset_name,
