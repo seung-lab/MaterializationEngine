@@ -73,11 +73,15 @@ def version_view(id):
 
     df = make_df_with_links_to_id(tables, AnalysisTableSchema(
         many=True), 'materialize.table_view', 'id')
+    df['schema']=df.schema.map(lambda x: 
+                               "<a href='/schema/type/{}/view'>{}</a>".format(x,x))
+    with pd.option_context('display.max_colwidth', -1):
+        output_html = df.to_html(escape=False)
 
     return render_template('version.html',
                            dataset=version.dataset,
                            analysisversion=version.version,
-                           table=df.to_html(escape=False),
+                           table=output_html,
                            version=__version__)
 
 
