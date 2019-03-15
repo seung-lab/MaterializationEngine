@@ -110,7 +110,7 @@ class MaterializationManager(object):
 
         if sqlalchemy_database_uri is not None:
             self._sqlalchemy_engine = create_engine(sqlalchemy_database_uri,
-                                                    echo=True)
+                                                    echo=False)
             if create_metadata:
                 em_models.Base.metadata.create_all(self.sqlalchemy_engine)
 
@@ -198,7 +198,7 @@ class MaterializationManager(object):
                 "table_name": self.table_name,
                 "version": self.version,
                 "sqlalchemy_database_uri": self.sqlalchemy_database_uri}
-        print(info)
+        #print(info)
         return info
 
     def _drop_table(self):
@@ -266,6 +266,11 @@ class MaterializationManager(object):
         self.this_sqlalchemy_session.bulk_insert_mappings(self.annotation_model,
                                                           annotations)
         
+    def bulk_update_annotations(self, annotations):
+        assert self.is_sql
+
+        self.this_sqlalchemy_session.bulk_update_mappings(self.annotation_model,
+                                                          annotations)
 
     def add_annotation_to_sql_database(self, deserialized_annotation):
         """ Transforms annotation object into postgis format and commits to the
