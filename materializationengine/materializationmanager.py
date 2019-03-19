@@ -245,7 +245,7 @@ class MaterializationManager(object):
                                       time_stamp=None):
         """ Materializes single annotation object
 
-        :param blob: binary
+        :param blob: binary or dict
         :param sv_id_to_root_id_dict: dict
         :param pixel_ratios: tuple
             length 3 tuple of ratios to multiple position
@@ -256,8 +256,10 @@ class MaterializationManager(object):
         """
         schema = self.get_schema(
             cg, cv, pixel_ratios=pixel_ratios, time_stamp=time_stamp)
-        data = schema.load(json.loads(blob)).data
-
+        if (type(blob) == str):
+            data = schema.load(json.loads(blob)).data
+        elif (type(blob) == dict):
+            data = schema.load(blob).data
         return flatten_dict(data)
 
     def bulk_insert_annotations(self, annotations):
