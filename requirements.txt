@@ -1,5 +1,5 @@
-dynamicannotationdb
-emannotationschemas>=1.1.3
+pychunkedgraph>=0.1.105
+emannotationschemas>=2.0.0
 argschema
 numpy
 pandas
