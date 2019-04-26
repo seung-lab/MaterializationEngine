@@ -17,7 +17,7 @@ incremental_materialize_stage3.py is a script that will create a new analysisver
 To run this materialization at a minimum supply the following arguments (assuming you have set the MATERIALIZATION_POSTGRES_URI environment variable) to the database that contains the analysisversion and analysistable tables (/postgres) with a username and password that has administrative rights.  The code will use this as a base to reformat the uri for other databases on the same server. It also assumes that there is a user 'analysis_user' that already exists on the postgres server.
 
 ```
-    python scripts/incremental_materialize_stage3.py --version 113 --base_version BASE_VERSION --n_threads N_THREADS
+    python scripts/incremental_materialize_stage3.py --base_version BASE_VERSION --n_threads N_THREADS
 ```
 for a full set of arguments use the help functionality of the script.
 

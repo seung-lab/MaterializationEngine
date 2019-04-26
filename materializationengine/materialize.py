@@ -308,7 +308,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     if n_threads > 1:
         del cg_info["credentials"]
 
-    n_parts = int(max(1, max_annotation_id / block_size))
+    n_parts = int(max(1, np.ceil(max_annotation_id / block_size)))
     n_parts += 1
     # Annotation ids start at 1
     id_chunks = np.linspace(1, max_annotation_id + 1, n_parts).astype(np.uint64)
