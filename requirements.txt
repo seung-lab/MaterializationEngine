@@ -1,3 +1,4 @@
+-e git+https://github.com/seung-lab/igneous.git#egg=igneous
 pychunkedgraph>=0.1.105
 emannotationschemas>=2.0.0
 argschema
@@ -10,3 +11,5 @@ marshmallow-sqlalchemy
 flask-marshmallow
 flask-admin
 labelops
+alembic
+annotationframeworkclient
