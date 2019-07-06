@@ -8,7 +8,6 @@ import requests
 import numpy as np
 from pychunkedgraph.backend import chunkedgraph
 from multiwrapper import multiprocessing_utils as mu
-from dynamicannotationdb.annodb_meta import AnnotationMetaDB
 import cloudvolume
 from materializationengine import materializationmanager
 from pytz import UTC
@@ -152,7 +151,7 @@ def find_max_root_id_before(cg,
         if (dt > datetime.timedelta(0)):
             return start_id
     seg_id = cg.get_segment_id(np.uint64(start_id))
-    seg_id -= delta_id
+    seg_id -= np.uint64(delta_id)
     new_id = cg.get_node_id(seg_id, cg.root_chunk_id)
     return find_max_root_id_before(cg,
                                    time_stamp,
@@ -543,7 +542,7 @@ def materialize_annotations_delta(
     old_roots,
     analysisversion,
     sqlalchemy_database_uri=None, cg_client=None,
-    cg_instance_id=None, n_threads=1):
+    cg_instance_id=None, n_threads=1, max_per_block = 200):
 
     if cg_client is None:
         cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id)
@@ -585,7 +584,8 @@ def materialize_annotations_delta(
                 id_sup_ids.append((int(obj.id), int(sup_id)))
                 # new_root_id = cg.get_root(sup_id, analysisversion.time_stamp)
                 # obj.__dict__[col]=new_root_id
-            n_blocks = np.min((len(id_sup_ids), n_threads))
+            n_blocks = np.min((len(id_sup_ids), int(np.ceil(len(id_sup_ids)/max_per_block))))
+            print('n_sup_ids', len(id_sup_ids), 'n_blocks', n_blocks)
             blocks = np.array_split(np.array(id_sup_ids, dtype=np.uint64), n_blocks)
             multi_args = []
             for block in blocks:
