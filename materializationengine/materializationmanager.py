@@ -1,12 +1,13 @@
 import json
 import functools
 
-from emannotationschemas import models as em_models
+from emannotationschemas import models as em_models, mesh_models
 from emannotationschemas.base import flatten_dict
 from emannotationschemas import get_schema
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import numpy as np
+
 
 class MaterializeAnnotationException(Exception):
     pass
@@ -18,6 +19,7 @@ class RootIDNotFoundException(MaterializeAnnotationException):
 
 class AnnotationParseFailure(MaterializeAnnotationException):
     pass
+
 
 def create_new_version(sql_uri, dataset, time_stamp):
     engine = create_engine(sql_uri, pool_size=20, max_overflow=50)
@@ -84,12 +86,13 @@ def lookup_sv_and_cg_bsp(cg,
 
 
 class MaterializationManager(object):
-    def __init__(self, dataset_name, schema_name,
-                 table_name, version = 1, version_id = None,
-                 annotation_model=None,
-                 sqlalchemy_database_uri=None):
+    def __init__(self, dataset_name, table_name, schema_name=None,
+                 version=1, version_id=None,
+                 annotation_model=None, sqlalchemy_database_uri=None,
+                 is_mesh_annotation=False, columns=None):
         self._dataset_name = dataset_name
         self._schema_name = schema_name
+        self._is_mesh_annotation = is_mesh_annotation
         self._table_name = table_name
         self._version = version
         self._version_id = version_id
@@ -99,7 +102,14 @@ class MaterializationManager(object):
 
         if annotation_model is not None:
             self._annotation_model = annotation_model
+        elif is_mesh_annotation:
+            assert columns is not None
+
+            self._annotation_model = mesh_models.make_mesh_label_model(
+                dataset_name, table_name, columns=columns, version=self.version)
         else:
+            assert schema_name is not None
+
             self._annotation_model = em_models.make_annotation_model(
                 dataset_name, schema_name, table_name, version=self.version)
 
@@ -128,6 +138,10 @@ class MaterializationManager(object):
     @property
     def table_name(self):
         return self._table_name
+
+    @property
+    def is_mesh_annotation(self):
+        return self._is_mesh_annotation
 
     @property
     def dataset_name(self):
@@ -167,6 +181,17 @@ class MaterializationManager(object):
     def schema_init(self):
         return self._schema_init
 
+    def _drop_table(self):
+        """ Deletes the table in the database """
+        table_name = em_models.format_table_name(self._dataset_name,
+                                                 self._table_name,
+                                                 self._version)
+
+        if table_name in em_models.Base.metadata.tables:
+            em_models.Base.metadata.tables[table_name].drop(self.sqlalchemy_engine)
+        else:
+            print('could not drop {}'.format(table_name))
+
     def get_serialized_info(self):
         """ Puts all initialization parameters into a dict
 
@@ -179,16 +204,6 @@ class MaterializationManager(object):
                 "sqlalchemy_database_uri": self.sqlalchemy_database_uri}
         print(info)
         return info
-
-    def _drop_table(self):
-        """ Deletes the table in the database """
-        table_name = em_models.format_table_name(self._dataset_name,
-                                                 self._table_name,
-                                                 self._version)
-        if table_name in em_models.Base.metadata.tables:
-            em_models.Base.metadata.tables[table_name].drop(self.sqlalchemy_engine)
-        else:
-            print('could not drop {}'.format(table_name))
 
     def add_to_analysis_table(self):
         """ Adds annotation info to database """
@@ -240,11 +255,14 @@ class MaterializationManager(object):
         return flatten_dict(data)
 
     def bulk_insert_annotations(self, annotations):
+        """ Bulk insert
+
+        :param annotations: list
+        """
         assert self.is_sql
 
         self.this_sqlalchemy_session.bulk_insert_mappings(self.annotation_model,
                                                           annotations)
-        
 
     def add_annotation_to_sql_database(self, deserialized_annotation):
         """ Transforms annotation object into postgis format and commits to the
@@ -264,6 +282,7 @@ class MaterializationManager(object):
         self.this_sqlalchemy_session.add(annotation)
 
     def commit_session(self):
+        """ Commits session and removes active session """
         # commit this transaction to database
         self.this_sqlalchemy_session.commit()
 

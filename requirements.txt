@@ -10,3 +10,8 @@ marshmallow-sqlalchemy
 flask-marshmallow
 flask-admin
 labelops
+shapely
+meshparty
+google-api-core
+google-cloud-iam
+datajoint

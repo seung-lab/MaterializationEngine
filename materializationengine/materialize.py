@@ -32,8 +32,7 @@ def _process_all_annotations_thread(args):
     annos_list = []
     for annotation_id in range(anno_id_start, anno_id_end):
         # Read annoation data from dynamicannotationdb
-        annotation_data_b, bsps = amdb.get_annotation(
-            dataset_name, table_name, annotation_id, time_stamp=time_stamp)
+        annotation_data_b, bsps = amdb.get_annotation(dataset_name, table_name, annotation_id, time_stamp=time_stamp)
 
         if annotation_data_b is None:
             continue
@@ -68,6 +67,7 @@ def _process_all_annotations_thread(args):
             print("Timestamp:", time_stamp)
             print(annos_dict)
             raise Exception(e)
+
 
 def _materialize_root_ids_thread(args):
     root_ids, serialized_mm_info = args
@@ -300,7 +300,6 @@ def materialize_root_ids(cg_table_id, dataset_name,
     else:
         raise Exception("Missing Instance ID")
 
-
     if analysisversion is None:
         version = 0
         version_id = None
@@ -310,7 +309,8 @@ def materialize_root_ids(cg_table_id, dataset_name,
 
     model = em_models.make_cell_segment_model(dataset_name, version=version)
     mm = materializationmanager.MaterializationManager(
-        dataset_name=dataset_name, schema_name=em_models.root_model_name.lower(),
+        dataset_name=dataset_name,
+        schema_name=em_models.root_model_name.lower(),
         table_name=em_models.root_model_name.lower(),
         version=version,
         version_id=version_id,
@@ -388,7 +388,6 @@ def materialize_all_annotations(cg_table_id,
     :param n_threads: int
          number of threads to use to materialize
     """
-    
 
     anno_dict = process_all_annotations(cg_table_id,
                                         dataset_name=dataset_name,
