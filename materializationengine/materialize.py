@@ -12,33 +12,35 @@ import cloudvolume
 from materializationengine import materializationmanager
 from pytz import UTC
 import datetime
-from annotationframeworkclient.annotationengine import AnnotationClient
+from dynamicannotationdb.annodb_meta import AnnotationMetaDB
 
 
 def _process_all_annotations_thread(args):
     """ Helper for process_all_annotations """
     anno_id_start, anno_id_end, dataset_name, \
         table_name, schema_name, version, \
-        time_stamp, cg_table_id, \
+        time_stamp, cg_table_id, serialized_amdb_info, \
         serialized_cg_info, serialized_mm_info, \
         serialized_cv_info, pixel_ratios = args
 
-    anno_client = AnnotationClient(dataset_name=dataset_name)
+    amdb = AnnotationMetaDB(**serialized_amdb_info)
+
     cg = chunkedgraph.ChunkedGraph(**serialized_cg_info)
 
     cv = cloudvolume.CloudVolume(**serialized_cv_info)
     mm = materializationmanager.MaterializationManager(**serialized_mm_info)
 
+    annos_dict = {}
     annos_list = []
     for annotation_id in range(anno_id_start, anno_id_end):
         # Read annoation data from dynamicannotationdb
-        annotation_data = anno_client.get_annotation(table_name,
-                                                     annotation_id)
+        annotation_data_b, bsps = amdb.get_annotation(
+            dataset_name, table_name, annotation_id, time_stamp=time_stamp)
 
-        if annotation_data is None:
+        if annotation_data_b is None:
             continue
 
-        deserialized_annotation = mm.deserialize_single_annotation(annotation_data,
+        deserialized_annotation = mm.deserialize_single_annotation(annotation_data_b,
                                                                    cg, cv,
                                                                    pixel_ratios=pixel_ratios,
                                                                    time_stamp=time_stamp)
@@ -53,8 +55,11 @@ def _process_all_annotations_thread(args):
         #         sv_id_to_root_id_dict[sv_id] = cg.get_root(sv_id)
 
 
-        annos_list.append(deserialized_annotation)
+        if mm.is_sql:
+            # mm.add_annotation_to_sql_database(deserialized_annotation)
+            annos_list.append(deserialized_annotation)
         # else:
+        annos_dict[annotation_id] = deserialized_annotation
 
     try:
         mm.bulk_insert_annotations(annos_list)
@@ -239,6 +244,7 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
 def process_all_annotations(cg_table_id, dataset_name, schema_name,
                             table_name, time_stamp=None, analysisversion=None,
                             sqlalchemy_database_uri=None,
+                            amdb_client=None, amdb_instance_id=None,
                             cg_client=None, cg_instance_id=None,
                             block_size=2500, n_threads=1):
     """ Reads data from all annotations and acquires their mapping to root_ids
@@ -251,7 +257,13 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     :return: dict
         annotation_id -> deserialized data
     """
-    anno_client = AnnotationClient(dataset_name=dataset_name)
+    if amdb_client is None:
+        amdb = AnnotationMetaDB()
+    elif amdb_instance_id is not None:
+        amdb = AnnotationMetaDB(client=amdb_client,
+                                instance_id=amdb_instance_id)
+    else:
+        raise Exception("Missing Instance ID for AnnotationMetaDB")
 
     if analysisversion is None:
         version = 0
@@ -283,9 +295,8 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     # through all smaller ids. However, there is no guarantee that any smaller
     # id exists, it is only a guarantee that no larger id exists at the time
     # the function is called.
-    table_info = next(t for t in anno_client.get_tables() if t['table_name']==table_name)
-
-    max_annotation_id = table_info['max_annotation_id']
+    max_annotation_id = amdb.get_max_annotation_id(dataset_name,
+                                                   table_name)
 
     print("Max annotation id: %d" % max_annotation_id)
 
@@ -303,9 +314,11 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
 
     cv_info = {"cloudpath": cv_path, 'mip': cv_mip}
     cg_info = cg.get_serialized_info()
+    amdb_info = amdb.get_serialized_info()
 
     if n_threads > 1:
         del cg_info["credentials"]
+        del amdb_info["credentials"]
 
     n_parts = int(max(1, np.ceil(max_annotation_id / block_size)))
     n_parts += 1
@@ -317,7 +330,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
         multi_args.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1],
                            dataset_name, table_name, schema_name, version,
                            time_stamp,
-                           cg_table_id, cg_info,
+                           cg_table_id, amdb_info, cg_info,
                            mm.get_serialized_info(), cv_info, pixel_ratios])
 
     if n_threads == 1:
