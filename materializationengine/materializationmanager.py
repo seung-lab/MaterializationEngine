@@ -22,7 +22,7 @@ class AnnotationParseFailure(MaterializeAnnotationException):
     pass
 
 
-def create_new_version(sql_uri, dataset, time_stamp):
+def create_new_version(sql_uri, dataset, time_stamp, version=None):
     engine = create_engine(sql_uri, pool_size=20, max_overflow=50)
     Session = sessionmaker(bind=engine)
     session = Session()
@@ -35,7 +35,8 @@ def create_new_version(sql_uri, dataset, time_stamp):
         new_version_number = 1
     else:
         new_version_number = top_version.version + 1
-
+    if version is not None:
+        new_version_number = version
     analysisversion = em_models.AnalysisVersion(dataset=dataset,
                                                 time_stamp=time_stamp,
                                                 version=new_version_number,
