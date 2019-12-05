@@ -1,19 +1,12 @@
 import celery
-from schemas import IncrementalMaterializationSchema
-from flask import Blueprint, jsonify, abort, current_app, request, render_template, url_for, redirect
+from flask import current_app
 from materializationengine import materialize
-from emannotationschemas import get_types, get_schema
 from emannotationschemas.models import AnalysisTable, AnalysisVersion
-from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema, IncrementalMaterializationSchema
-from materializationengine.database import db
+from materializationengine.schemas import IncrementalMaterializationSchema
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy import func, and_, or_
-import pandas as pd
-from emannotationschemas.models import make_annotation_model, make_dataset_models, declare_annotation_model
-import requests
 import logging
-from .tasks import incremental_materialization_task
 
 @celery.task(bind=True)    
 def incremental_materialization_task(self):
