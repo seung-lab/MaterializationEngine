@@ -5,7 +5,7 @@ from emannotationschemas.models import Base
 from flask_sqlalchemy import SQLAlchemy
 
 
-class BaseConfig(object):
+class BaseConfig:
     HOME = os.path.expanduser("~")
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
     # Statement for enabling the development environment
@@ -27,10 +27,24 @@ class BaseConfig(object):
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SECRET_KEY = "MYSUPERSECRETTESTINGKEY"
 
+
+class DevConfig(BaseConfig):
+    DEBUG = True
+
+
+class TestConfig(BaseConfig):
+    TESTING = True
+
+
+class ProductionConfig(BaseConfig):
+    LOGGING_LEVEL = logging.INFO
+
+
 config = {
-    "development": "materializationengine.config.BaseConfig",
-    "testing": "materializationengine.config.BaseConfig",
-    "default": "materializationengine.config.BaseConfig"
+    "default": "materializationengine.config.BaseConfig",
+    "development": "materializationengine.config.DevConfig",
+    "testing": "materializationengine.config.TestConfig",
+    "production": "materializationengine.config.ProductionConfig",
 }
 
 
