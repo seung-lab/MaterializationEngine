@@ -1,7 +1,8 @@
-dynamicannotationdb
-emannotationschemas>=1.1.3
-argschema
 numpy
+pychunkedgraph>=0.1.105
+emannotationschemas>=2.0.0
+DynamicAnnotationDB
+argschema
 pandas
 Flask
 sqlalchemy
@@ -10,3 +11,7 @@ marshmallow-sqlalchemy
 flask-marshmallow
 flask-admin
 labelops
+alembic
+annotationframeworkclient
+# -e git+https://github.com/seung-lab/igneous.git#egg=igneous
+
