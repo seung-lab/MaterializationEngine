@@ -27,7 +27,12 @@ class BaseConfig:
     DATABASE_CONNECT_OPTIONS = {}
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SECRET_KEY = "MYSUPERSECRETTESTINGKEY"
-
+    CELERY_BROKER = 'redis://localhost:6379:0'
+    CELERY_RESULT_BACKEND = 'redis://localhost:6379:0'
+    REDIS_HOST = 'localhost'
+    REDIS_PASSWORD = ''
+    REDIS_PORT = 6379
+    REDIS_URL = 'redis://localhost:6379:0'
 
 class DevConfig(BaseConfig):
     DEBUG = True
@@ -39,6 +44,9 @@ class TestConfig(BaseConfig):
 
 class ProductionConfig(BaseConfig):
     LOGGING_LEVEL = logging.INFO
+    CELERY_BROKER = os.environ.get('REDIS_URL')
+    CELERY_RESULT_BACKEND = os.environ.get('REDIS_URL')
+    REDIS_URL = os.environ.get('REDIS_URL')
 
 
 config = {
@@ -60,6 +68,5 @@ def configure_app(app):
     app.logger.debug(app.config)
     db = SQLAlchemy(model_class=Base)
     db.init_app(app)
-
-
+    app.app_context().push()
     return app
