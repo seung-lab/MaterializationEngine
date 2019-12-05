@@ -5,6 +5,7 @@ from emannotationschemas.models import Base
 from flask_sqlalchemy import SQLAlchemy
 
 
+
 class BaseConfig:
     HOME = os.path.expanduser("~")
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -56,7 +57,7 @@ def configure_app(app):
         app.config.from_envvar('MATERIALIZATION_ENGINE_SETTINGS')
     # instance-folders configuration
     app.config.from_pyfile('config.cfg', silent=True)
-    print(app.config)
+    app.logger.debug(app.config)
     db = SQLAlchemy(model_class=Base)
     db.init_app(app)
 

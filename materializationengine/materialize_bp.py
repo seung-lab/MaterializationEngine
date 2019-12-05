@@ -235,9 +235,8 @@ def materialize_dataset(dataset_name):
 
     version_db_uri = format_version_db_uri(sql_uri, dataset_name, version)
     base_version_db_uri = format_version_db_uri(sql_uri, dataset_name,  base_version_number)
-
-    logging.info(version_db_uri)
-    logging.info(f'making new version {analysisversion.version} with timestamp {analysisversion.time_stamp}')
+    current_app.logger.info(version_db_uri)
+    current_app.logger.info(f'making new version {analysisversion.version} with timestamp {analysisversion.time_stamp}')
     start = time.time()
     conn = engine.connect()
     conn.execute("commit")
@@ -261,10 +260,10 @@ def materialize_dataset(dataset_name):
             session.add(new_analysistable)
             session.commit()
             timings[table.tablename] = time.time() - time_start
-            logging.info(table.tablename)
+            current_app.logger.info(table.tablename)
 
     for k in timings:
-        logging.info("%s: %.2fs = %.2fmin" % (k, timings[k], timings[k] / 60))
+        current_app.logger.info("%s: %.2fs = %.2fmin" % (k, timings[k], timings[k] / 60))
 
     assert(base_version is not None)
     timings = {}
@@ -351,7 +350,7 @@ def materialize_dataset(dataset_name):
     session.commit()
 
     for k in timings:
-        logging.info("%s: %.2fs = %.2fmin" % (k, timings[k], timings[k] / 60))
+        current_app.logger.info("%s: %.2fs = %.2fmin" % (k, timings[k], timings[k] / 60))
     return jsonify(new_version=analysisversion.version,
                    old_version=base_version_number,
                    ), 200

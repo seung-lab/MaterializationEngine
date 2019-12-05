@@ -10,13 +10,16 @@ def create_app(test_config=None):
     from .materialize_bp import bp as materialize_bp
     from .utils import get_instance_folder_path
     from .database import db
-
+    import logging
+    
     # Define the Flask Object
     app = Flask(__name__,
                 static_folder="../static",
                 instance_path=get_instance_folder_path(),
                 instance_relative_config=True)
     # load configuration (from test_config if passed)
+    logging.basicConfig(level=logging.DEBUG)
+
     if test_config is None:
         app = configure_app(app)
     else:
