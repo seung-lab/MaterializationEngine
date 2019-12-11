@@ -7,6 +7,8 @@ from emannotationschemas import get_schema
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import numpy as np
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 
 class MaterializeAnnotationException(Exception):
     pass
@@ -19,7 +21,8 @@ class RootIDNotFoundException(MaterializeAnnotationException):
 class AnnotationParseFailure(MaterializeAnnotationException):
     pass
 
-def create_new_version(sql_uri, dataset, time_stamp):
+
+def create_new_version(sql_uri, dataset, time_stamp, version=None):
     engine = create_engine(sql_uri, pool_size=20, max_overflow=50)
     Session = sessionmaker(bind=engine)
     session = Session()
@@ -32,10 +35,12 @@ def create_new_version(sql_uri, dataset, time_stamp):
         new_version_number = 1
     else:
         new_version_number = top_version.version + 1
-
+    if version is not None:
+        new_version_number = version
     analysisversion = em_models.AnalysisVersion(dataset=dataset,
                                                 time_stamp=time_stamp,
-                                                version=new_version_number)
+                                                version=new_version_number,
+                                                valid=False)
     session.add(analysisversion)
     session.commit()
     return analysisversion
@@ -87,6 +92,7 @@ class MaterializationManager(object):
     def __init__(self, dataset_name, schema_name,
                  table_name, version = 1, version_id = None,
                  annotation_model=None,
+                 create_metadata = True, 
                  sqlalchemy_database_uri=None):
         self._dataset_name = dataset_name
         self._schema_name = schema_name
@@ -105,8 +111,9 @@ class MaterializationManager(object):
 
         if sqlalchemy_database_uri is not None:
             self._sqlalchemy_engine = create_engine(sqlalchemy_database_uri,
-                                                    echo=True)
-            em_models.Base.metadata.create_all(self.sqlalchemy_engine)
+                                                    echo=False)
+            if create_metadata:
+                em_models.Base.metadata.create_all(self.sqlalchemy_engine)
 
             self._sqlalchemy_session = sessionmaker(
                 bind=self.sqlalchemy_engine)
@@ -167,6 +174,21 @@ class MaterializationManager(object):
     def schema_init(self):
         return self._schema_init
 
+    def copy_table(self, old_model, include_relationships=False):
+        if include_relationships:
+            columns = self.annotation_model.__table__.columns
+            stmt = self.annotation_model.__table__.insert().from_select(columns, old_model.__table__)
+        else:
+            t_old = old_model.__table__
+            t_new = self.annotation_model.__table__
+            stmt = f"CREATE TABLE {t_new} AS TABLE {t_old}"
+        self.this_sqlalchemy_session.execute(stmt)
+        self.this_sqlalchemy_session.commit()
+        conn = self.sqlalchemy_engine.connect()
+        ctx = MigrationContext.configure(conn)
+        op = Operations(ctx)
+        
+
     def get_serialized_info(self):
         """ Puts all initialization parameters into a dict
 
@@ -177,7 +199,7 @@ class MaterializationManager(object):
                 "table_name": self.table_name,
                 "version": self.version,
                 "sqlalchemy_database_uri": self.sqlalchemy_database_uri}
-        print(info)
+        #print(info)
         return info
 
     def _drop_table(self):
@@ -224,7 +246,7 @@ class MaterializationManager(object):
                                       time_stamp=None):
         """ Materializes single annotation object
 
-        :param blob: binary
+        :param blob: binary or dict
         :param sv_id_to_root_id_dict: dict
         :param pixel_ratios: tuple
             length 3 tuple of ratios to multiple position
@@ -235,8 +257,10 @@ class MaterializationManager(object):
         """
         schema = self.get_schema(
             cg, cv, pixel_ratios=pixel_ratios, time_stamp=time_stamp)
-        data = schema.load(json.loads(blob)).data
-
+        if (type(blob) == str):
+            data = schema.load(json.loads(blob)).data
+        elif (type(blob) == dict):
+            data = schema.load(blob).data
         return flatten_dict(data)
 
     def bulk_insert_annotations(self, annotations):
@@ -245,6 +269,11 @@ class MaterializationManager(object):
         self.this_sqlalchemy_session.bulk_insert_mappings(self.annotation_model,
                                                           annotations)
         
+    def bulk_update_annotations(self, annotations):
+        assert self.is_sql
+
+        self.this_sqlalchemy_session.bulk_update_mappings(self.annotation_model,
+                                                          annotations)
 
     def add_annotation_to_sql_database(self, deserialized_annotation):
         """ Transforms annotation object into postgis format and commits to the
