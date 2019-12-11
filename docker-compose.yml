@@ -7,7 +7,7 @@ services:
       ports:
         - 5432:5432
       volumes:
-        - ./data:/var/lib/postgresql/data
+        - postgres_data:/var/lib/postgresql/data
       healthcheck:
         test: "pg_isready -h localhost -p 5432 -q -U postgres"
         interval: 3s
@@ -26,4 +26,14 @@ services:
         - 80:80
       links:
         - db
+    flower:
+      image: mher/flower
+      environment:
+        - CELERY_BROKER_URL = redis://redis:6379/0
+        - FLOWER_PORT=8888
+      command: ["flower", "--broker=redis://redis:6379/0", "--port=8888"]  
+      ports:
+        - 8888:8888
 
+volumes:
+  postgres_data:
