@@ -1,4 +1,4 @@
-version: '2.1'
+version: '3'
 services:
     db:
       image: mdillon/postgis
@@ -19,3 +19,11 @@ services:
         - 8080:8080
       links:
         - db
+    materialize:
+      build:
+        context: .
+      ports:
+        - 80:80
+      links:
+        - db
+
