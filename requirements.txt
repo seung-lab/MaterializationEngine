@@ -1,5 +1,6 @@
+-e git+https://github.com/seung-lab/igneous.git#egg=igneous
 numpy
-pychunkedgraph>=0.1.105
+pychunkedgraph
 emannotationschemas>=2.0.0
 DynamicAnnotationDB
 argschema
