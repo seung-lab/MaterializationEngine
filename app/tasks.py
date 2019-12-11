@@ -1,15 +1,20 @@
 import celery
 from flask import current_app
-from materializationengine import materialize
-from emannotationschemas.models import AnalysisTable, AnalysisVersion
-from materializationengine.schemas import IncrementalMaterializationSchema
+from app import materialize
+from emannotationschemas import models as em_models
+from emannotationschemas.models import AnalysisTable, AnalysisVersion, format_version_db_uri, Base
+from app.schemas import IncrementalMaterializationSchema
+from app import materializationmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy import func, and_, or_
+from pychunkedgraph.backend import chunkedgraph
 import logging
+import time
+import numpy as np
 
 @celery.task(bind=True)    
-def incremental_materialization_task(self):
+def incremental_materialization_task(self, dataset_name):
 
     materialized_schema = IncrementalMaterializationSchema()
     dataset = dataset_name
@@ -18,6 +23,8 @@ def incremental_materialization_task(self):
     cg_instance_id = current_app.config['BIG_TABLE_CONFIG']['instance_id']
     amdb_instance_id = current_app.config['BIG_TABLE_CONFIG']['amdb_instance_id']
 
+
+    # can we talk about this???
     blacklist = ["pni_synapses", "pni_synapses_i2",  "is_chandelier"]
     
     engine = create_engine(sql_uri)
