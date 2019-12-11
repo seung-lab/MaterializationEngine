@@ -1,9 +1,9 @@
 from flask import Blueprint, jsonify, abort, current_app, request, render_template, url_for, redirect
-from materializationengine import materialize
+from app import materialize
 from emannotationschemas import get_types, get_schema
 from emannotationschemas.models import AnalysisTable, AnalysisVersion
-from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema, IncrementalMaterializationSchema
-from materializationengine.database import db
+from app.schemas import AnalysisVersionSchema, AnalysisTableSchema, IncrementalMaterializationSchema
+from app.database import db
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy import func, and_, or_
@@ -11,7 +11,7 @@ import pandas as pd
 from emannotationschemas.models import make_annotation_model, make_dataset_models, declare_annotation_model
 import requests
 import logging
-from .tasks import incremental_materialization_task
+from app.tasks import incremental_materialization_task
 
 __version__ = "0.1.2"
 bp = Blueprint("materialize", __name__, url_prefix="/materialize")
@@ -22,8 +22,8 @@ def make_df_with_links_to_id(objects, schema, url, col):
     df[col] = df.apply(lambda x:
                        "<a href='{}'>{}</a>".format(url_for(url,
                                                             id=x.id),
-                                                    x[col]),
-                       axis=1)
+                                                            x[col]),
+                                                            axis=1)
     return df
 
 
@@ -165,7 +165,7 @@ def synapse_report(id):
 @bp.route('/table/<int:id>/generic')
 def generic_report(id):
     table = AnalysisTable.query.filter(AnalysisTable.id == id).first_or_404()
-
+    
     make_dataset_models(table.analysisversion.dataset, [],
                         version=table.analysisversion.version)
 
@@ -209,7 +209,7 @@ def get_dataset_version(dataset_name):
 
 @bp.route("/dataset/<dataset_name>/new_version", methods=["POST"])
 def materialize_dataset(dataset_name):
-    if (datatset_name not in get_datasets()):
+    if (dataset_name not in get_datasets()):
         abort(404, "Dataset name not valid")
     incremental_materialization_task.apply_async()
     return jsonify({}), 200

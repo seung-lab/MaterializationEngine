@@ -1,16 +1,12 @@
 import pandas as pd
 from emannotationschemas import models as em_models
-# from emannotationschemas.base import flatten_dict
-# from emannotationschemas import get_schema
-# from functools import partial
-# import json
 import requests
 import numpy as np
 from pychunkedgraph.backend import chunkedgraph
 from multiwrapper import multiprocessing_utils as mu
 from dynamicannotationdb.annodb_meta import AnnotationMetaDB
 import cloudvolume
-from materializationengine import materializationmanager
+from app import materializationmanager
 
 
 def _process_all_annotations_thread(args):
