@@ -1,4 +1,4 @@
-from materializationengine import materialize, materializationmanager
+from app import materialize, materializationmanager
 import argschema
 import os
 import marshmallow as mm

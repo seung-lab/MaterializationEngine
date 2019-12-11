@@ -1,6 +1,6 @@
 # from materializationengine import materialize
 # from emannotationschemas.models import make_annotation_model, get_next_version
-from materializationengine.database import Base
+from app.database import Base
 from emannotationschemas.models import AnalysisVersion
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker

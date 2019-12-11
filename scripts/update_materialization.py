@@ -1,4 +1,4 @@
-from materializationengine import materialize
+from app import materialize
 from emannotationschemas.models import make_annotation_model, get_next_version
 import argschema
 import os
