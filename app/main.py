@@ -5,14 +5,13 @@ def create_app(test_config=None):
     from flask_sqlalchemy import SQLAlchemy
     from flask import Flask
     from celery import Celery
-    from .database import Base
-    from materializationengine.config import configure_app
-    from .admin import setup_admin
-    from .materialize_bp import bp as materialize_bp
+    from app.config import configure_app
+    from app.admin import setup_admin
+    from app.api import bp as materialize_bp
     from .utils import get_instance_folder_path
-    from .database import db
+    from app.database import db, Base
     import logging
-
+    
     # Define the Flask Object
     app = Flask(__name__,
                 static_folder="../static",
@@ -36,5 +35,6 @@ def create_app(test_config=None):
     celery = Celery(app.name, broker=app.config['CELERY_BROKER'])
     celery.conf.update(app.config)
     return app
-
-
+    
+if __name__ == "__main__":
+    create_app.run(debug=True, host="0.0.0.0", port=80)

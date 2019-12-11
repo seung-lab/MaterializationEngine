@@ -23,7 +23,7 @@ class BaseConfig:
     LOGGING_LOCATION = HOME + '/.materializationengine/bookshelf.log'
     LOGGING_LEVEL = logging.DEBUG
     CHUNKGRAPH_TABLE_ID = "pinky100_sv16"
-    SQLALCHEMY_DATABASE_URI = "postgres://postgres:synapsedb@localhost:5432/testing"
+    SQLALCHEMY_DATABASE_URI = "postgres://postgres:synapsedb@localhost:5432/synapsedb"
     DATABASE_CONNECT_OPTIONS = {}
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SECRET_KEY = "MYSUPERSECRETTESTINGKEY"
@@ -50,10 +50,10 @@ class ProductionConfig(BaseConfig):
 
 
 config = {
-    "default": "materializationengine.config.BaseConfig",
-    "development": "materializationengine.config.DevConfig",
-    "testing": "materializationengine.config.TestConfig",
-    "production": "materializationengine.config.ProductionConfig",
+    "default": "app.config.BaseConfig",
+    "development": "app.config.DevConfig",
+    "testing": "app.config.TestConfig",
+    "production": "app.config.ProductionConfig",
 }
 
 
