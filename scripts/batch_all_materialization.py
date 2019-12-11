@@ -6,6 +6,9 @@ import datetime
 import time
 import pickle as pkl
 import requests
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from emannotationschemas.models import format_version_db_uri
 
 HOME = os.path.expanduser("~")
 
@@ -22,6 +25,7 @@ class BatchMaterializationSchema(argschema.ArgSchema):
                               description="number of threads to use in parallelization")
     time_stamp = mm.fields.DateTime(default=str(datetime.datetime.utcnow()),
                                     description="time to use for materialization")
+    version = mm.fields.Int(description = "version number to use (default create a new one)")
     sql_uri = mm.fields.Str(
         description="connection uri string to postgres database"
         "(default to MATERIALIZATION_POSTGRES_URI environment variable")
@@ -46,14 +50,39 @@ if __name__ == '__main__':
 
     print(sql_uri)
     print(mod.args)
-
-    if sql_uri is not None:
-        analysisversion = materializationmanager.create_new_version(
-            sql_uri, mod.args['dataset_name'], mod.args['time_stamp'])
+    dataset = mod.args['dataset']
+    if 'version' not in mod.args:
+        version = None
     else:
-        analysisversion = None
+        version = mod.args['version']
+
+    analysisversion = materializationmanager.create_new_version(
+            sql_uri, mod.args['dataset_name'], mod.args['time_stamp'], version=version)
 
     print(analysisversion)
+
+    start = time.time()
+
+    # create a database for this version 
+    engine = create_engine(sql_uri)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    conn = engine.connect()
+    conn.execute("commit")
+    new_db_name = f'{dataset}_v{analysisversion.version}'
+    #conn.execute(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = '{base_db_name}';")
+    conn.execute(f"create database {new_db_name}")
+    copy_time = time.time()-start
+
+    version_db_uri = format_version_db_uri(sql_uri, dataset, analysisversion.version)
+    version_engine = create_engine(version_db_uri)
+    VersionSession = sessionmaker(bind=version_engine)
+    version_session = VersionSession()
+    version_session.execute("CREATE EXTENSION postgis; CREATE EXTENSION postgis_topology;")
+    version_session.execute('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO analysis_user;')
+    version_session.execute('GRANT SELECT ON ALL TABLES IN SCHEMA public TO analysis_user;')
+    version_session.commit()
 
     annotation_endpoint = "https://www.dynamicannotationframework.com/annotation"
 
@@ -105,3 +134,10 @@ if __name__ == '__main__':
 
     for k in timings:
         print("%s: %.2fs = %.2fmin" % (k, timings[k], timings[k] / 60))
+    
+    engine = create_engine(sql_uri)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    analysisversion.valid = True
+    session.add(analysisversion)
+    session.commit()
