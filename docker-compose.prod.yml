@@ -1,0 +1,59 @@
+version: '3'
+services:
+    db:
+      image: mdillon/postgis
+      env_file:
+        - ./.env.prod
+      # environment:
+      #   - POSTGRES_USER=test
+      #   - POSTGRES_PASSWORD=test
+      #   - POSTGRES_DB=test     
+      ports:
+        - 5432:5432
+      volumes:
+        - postgres_data:/var/lib/postgresql/data
+      healthcheck:
+        test: "pg_isready -h localhost -p 5432 -q -U postgres"
+        interval: 3s
+        timeout: 5s
+        retries: 5
+    adminer:
+      image: adminer
+      ports:
+        - 8080:8080
+      links:
+        - db
+    materialize:
+      build:
+        context: .
+      command: gunicorn --bind 0.0.0.0:5000 manage:app
+      ports:
+        - 5000:5000
+      env_file:
+        - ./.env.prod
+      depends_on:
+        - db
+        - celery
+    celery:
+      build: .
+      command: celery worker -A run.celery --loglevel=debug
+      depends_on: 
+        - redis
+    redis:
+      image: 'redis:3.0-alpine'
+      command: redis-server
+      volumes:
+        - 'redis:/data'
+      ports:
+        - 6379:6379     
+    flower:
+      image: mher/flower
+      environment:
+        - FLOWER_PORT=5555
+      command: ["flower", "--broker=redis://redis:6379/0", "--port=5555"]  
+      ports:
+        - 5555:5555
+
+volumes:
+  postgres_data:
+  redis:
