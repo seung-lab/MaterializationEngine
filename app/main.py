@@ -7,7 +7,8 @@ def create_app(test_config=None):
     from celery import Celery
     from app.config import configure_app
     from app.admin import setup_admin
-    from app.api import materialize
+    from app.api import api
+    from app.routes import views
     from .utils import get_instance_folder_path
     from app.database import db, Base
     import logging
@@ -33,7 +34,9 @@ def create_app(test_config=None):
         admin = setup_admin(app, db)
     create_celery(app, celery)
     
-    app.register_blueprint(materialize)
+    app.register_blueprint(api)
+    app.register_blueprint(views)
+    
 
     return app
     
