@@ -1,25 +1,20 @@
-from flask import current_app
-# from app import materialize
-from emannotationschemas import models as em_models
-from emannotationschemas.models import AnalysisTable, AnalysisVersion, format_version_db_uri, Base
-# from app.schemas import IncrementalMaterializationSchema
-# from app import materializationmanager
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, scoped_session
-from sqlalchemy import func, and_, or_
-# from pychunkedgraph.backend import chunkedgraph
-import logging
 import time
-import numpy as np
+import random
+
+from flask import current_app
 from app.database import db
 from app import celery
-import random
+
 
 
 @celery.task(bind=True)
 def add_together(self, x, y):
-    time.sleep(10)
+    time.sleep(random.randint(6, 20))
     return x + y
+
+@celery.task(bind=True)
+def get_status(self):
+    return self.AsyncResult(self.request.id).state
 
 @celery.task(bind=True)
 def long_task():
@@ -27,6 +22,10 @@ def long_task():
     return {'current': 100, 'total': 100, 'status': 'Task completed!',
             'result': 42}
 
+@celery.task(bind=True)
+def incremental_materialization(self):
+    time.sleep(random.randint(6, 20))
+    return "Materializing..."
 
 # @celery.task   
 # def incremental_materialization_task(self, dataset_name):
