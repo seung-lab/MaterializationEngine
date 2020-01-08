@@ -7,6 +7,6 @@
 {% block content %}
 <h3> versions </h3>
 {{table|safe}}
-<a href="{{url_for('materialize.dataset_view',dataset_name=dataset)}}?all=true">show all</a> 
+<a href="{{url_for('views.dataset_view',dataset_name=dataset)}}?all=true">show all</a> 
 
 {% endblock %}
