@@ -4,9 +4,9 @@ from app import celery
 from app.celery_app import create_celery
 from app.database import db
 
-application = create_app()
-create_celery(application, celery)
-cli = FlaskGroup(application)
+app = create_app()
+create_celery(app, celery)
+cli = FlaskGroup(app)
 
 @cli.command("create_db")
 def create_db():
