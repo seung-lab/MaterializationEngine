@@ -2,9 +2,7 @@ import time
 import random
 
 from flask import current_app
-from app.database import db
-from app import celery
-
+from app.extensions import db, celery
 
 
 @celery.task(bind=True)
