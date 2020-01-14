@@ -5,7 +5,7 @@ import requests
 import logging
 from app.tasks import add_together, get_status
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
 api = Blueprint("api", __name__, url_prefix='/api/v1/')
 
