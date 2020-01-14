@@ -1,8 +1,8 @@
-FROM tiangolo/uwsgi-nginx-flask:python3.6
+FROM tiangolo/uwsgi-nginx-flask:python3.7
 
 COPY override/timeout.conf /etc/nginx/conf.d/timeout.conf
 COPY override/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-COPY requirements.txt /app
+
 RUN mkdir -p /home/nginx/.cloudvolume/secrets \
   && chown -R nginx /home/nginx \
   && usermod -d /home/nginx -s /bin/bash nginx \
@@ -30,7 +30,7 @@ RUN mkdir -p /home/nginx/.cloudvolume/secrets \
   && apt-key adv --no-tty --keyserver hkp://keyserver.ubuntu.com --recv-key 612DEFB798507F25 \
   && apt-get update \
   && apt-get install -y python3-graph-tool \
-  && ln -s /usr/lib/python3/dist-packages/graph_tool /usr/local/lib/python3.6/site-packages/graph_tool \
+  && ln -s /usr/lib/python3/dist-packages/graph_tool /usr/local/lib/python3.7/site-packages/graph_tool \
   && pip install --no-cache-dir --upgrade scipy \
   # PYCHUNKEDGRAPH
   #   Need pip 18.1 for process-dependency-links flag support
@@ -58,4 +58,4 @@ RUN mkdir -p /home/nginx/.cloudvolume/secrets \
         \( -type f -a \( -name '*.pyc' -o -name '*.pyo' \) \) \
       \) -exec rm -rf '{}' +
 
-COPY . /app
+COPY ./ /app
