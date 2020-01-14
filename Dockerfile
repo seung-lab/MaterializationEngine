@@ -2,13 +2,13 @@ FROM tiangolo/uwsgi-nginx-flask:python3.7
 
 COPY override/timeout.conf /etc/nginx/conf.d/timeout.conf
 COPY override/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-
+COPY requirements.txt /app
 RUN mkdir -p /home/nginx/.cloudvolume/secrets \
   && chown -R nginx /home/nginx \
   && usermod -d /home/nginx -s /bin/bash nginx \
   && apt-get update \
   && apt-get install -y \
-      # Boost and g++ for compiling igneous' C extensions (Mesher)
+      # Boost and g++ for compiling DracoPy and graph_tool
       build-essential \
       libboost-dev \
       # Required for adding graph-tools and cloud-sdk to the apt source list
@@ -58,4 +58,4 @@ RUN mkdir -p /home/nginx/.cloudvolume/secrets \
         \( -type f -a \( -name '*.pyc' -o -name '*.pyo' \) \) \
       \) -exec rm -rf '{}' +
 
-COPY ./ /app
+COPY . /app
