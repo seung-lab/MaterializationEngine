@@ -15,7 +15,7 @@ from app.tasks import add_together
 
 __version__ = "0.1.2"
 
-views = Blueprint("views", __name__)
+views = Blueprint("views", __name__, url_prefix='/materialize')
 
 
 def get_datasets():
