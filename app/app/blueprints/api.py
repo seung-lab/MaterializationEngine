@@ -7,7 +7,7 @@ from app.tasks import add_together, get_status
 
 __version__ = "0.1.2"
 
-api = Blueprint("api", __name__, url_prefix='/api/v1/')
+api = Blueprint("api", __name__, url_prefix='/materialize/api/v1/')
 
 
 def get_datasets():
