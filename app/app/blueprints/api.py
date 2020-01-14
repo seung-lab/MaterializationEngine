@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, abort, current_app, request, render_template, url_for, redirect
 from app.schemas import AnalysisVersionSchema, AnalysisTableSchema, IncrementalMaterializationSchema
-from app.database import db
+from app.extensions import db
 import requests
 import logging
 from app.tasks import add_together, get_status
