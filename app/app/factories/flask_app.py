@@ -1,5 +1,3 @@
-__version__ = "0.1.2"
-
 
 def create_app(test_config=None):
     from flask_sqlalchemy import SQLAlchemy
