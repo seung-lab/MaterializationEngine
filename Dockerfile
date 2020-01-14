@@ -58,4 +58,4 @@ RUN mkdir -p /home/nginx/.cloudvolume/secrets \
         \( -type f -a \( -name '*.pyc' -o -name '*.pyo' \) \) \
       \) -exec rm -rf '{}' +
 
-COPY . /app
+COPY ./app /app
