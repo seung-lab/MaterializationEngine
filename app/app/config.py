@@ -5,7 +5,6 @@ from emannotationschemas.models import Base
 from flask_sqlalchemy import SQLAlchemy
 
 
-
 class BaseConfig:
     HOME = os.path.expanduser("~")
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -24,15 +23,12 @@ class BaseConfig:
     LOGGING_LEVEL = logging.DEBUG
     CHUNKGRAPH_TABLE_ID = "pinky100_sv16"
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite://")    #"postgres://postgres:synapsedb@db:5432/synapsedb"
-    DATABASE_CONNECT_OPTIONS = {}
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SECRET_KEY = "MYSUPERSECRETTESTINGKEY"
-    REDIS_HOST = "redis"
-    REDIS_PORT = 6379
-    CELERY_BROKER_URL = os.environ.get(
-        'REDIS_URL', "redis://{host}:{port}/0".format(
-        host=REDIS_HOST, port=str(REDIS_PORT)))
-    CELERY_RESULT_BACKEND = CELERY_BROKER_URL
+    REDIS_HOST = os.environ.get('REDIS_SERVICE_HOST')
+    REDIS_PORT = os.environ.get('REDIS_SERVICE_PORT')
+    REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
+    CELERY_BROKER_URL = REDIS_URL
+    CELERY_RESULT_BACKEND = REDIS_URL
 
 
 class DevConfig(BaseConfig):
