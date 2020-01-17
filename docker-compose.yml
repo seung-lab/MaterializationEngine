@@ -29,7 +29,7 @@ services:
       volumes:
         - ./app:/app
       env_file:
-        - ./.env.dev
+        - ./.env.dev 
       depends_on:
         - db
         - celery
@@ -38,16 +38,16 @@ services:
       build:
         context: .
         dockerfile: Dockerfile
-      command: celery worker -A app.main.celery --loglevel=debug
+      command: celery worker -A app.main.celery --loglevel=info
+      env_file:
+        - ./.env.dev 
       depends_on: 
         - redis
     redis:
-      image: 'redis:3.0-alpine'
-      command: redis-server
-      volumes:
-        - 'redis:/data'
+      image: redis:5.0.4-alpine
+      command: ["redis-server"]
       ports:
-        - 6379:6379     
+        - 6379:6379 
     flower:
       image: mher/flower
       environment:
