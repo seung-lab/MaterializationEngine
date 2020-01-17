@@ -13,11 +13,13 @@ def create_app(test_config=None):
 
     # Define the Flask Object
     app = Flask(__name__,
-                static_folder="./static",
+                static_folder="static",
                 instance_path=get_instance_folder_path(),
                 instance_relative_config=True,
-                template_folder="./templates")
+                template_folder="../../templates")
     # load configuration (from test_config if passed)
+    print(app.static_folder)
+    print(app.template_folder)
     logging.basicConfig(level=logging.DEBUG)
 
     if test_config is None:
