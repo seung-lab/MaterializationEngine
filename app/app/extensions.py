@@ -8,4 +8,4 @@ Base = declarative_base()
 db = SQLAlchemy(model_class=Base)
 
 #create celery
-celery = Celery('app.main')
+celery = Celery(include=['app.tasks'])
