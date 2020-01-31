@@ -1,174 +1,232 @@
 import time
 import random
+import numpy as np
 
-from flask import current_app
-from app.extensions import db, celery
+# from app import materialize
+from celery import Task
+from celery import group, chord, chain
+from app.schemas import MaterializationSchema, AnalysisVersionSchema
+from app import materializationmanager
+from annotationframeworkclient.annotationengine import AnnotationClient
+from annotationframeworkclient.infoservice import InfoServiceClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.sql import func
 
+import datetime as dt 
+# from pychunkedgraph.backend import chunkedgraph
+from emannotationschemas.models import format_version_db_uri, Base
+from emannotationschemas.models import AnalysisVersion, AnalysisTable
+from emannotationschemas import models as em_models
+from emannotationschemas.base import flatten_dict
+from emannotationschemas import get_schema
+from app.extensions import celery
+from dataclasses import dataclass
+from multiprocessing.dummy import Pool
+from celery.concurrency import eventlet
+# import eventlet
+import logging
 
-@celery.task(bind=True)
+# annotion client info service
+
+anno_client = AnnotationClient(dataset_name='pinky100')
+logging.info(anno_client.infoserviceclient())
+SQL_URI = celery.conf.get_by_parts('MATERIALIZATION_POSTGRES_URI')
+BIGTABLE = celery.conf.get_by_parts('BIGTABLE_CONFIG')
+CG_TABLE = BIGTABLE['instance_id']
+DATASET = BIGTABLE['project_id']
+CG_INSTANCE_ID = BIGTABLE['instance_id']
+AMDB_INSTANCE_ID = BIGTABLE['amdb_instance_id']
+CHUNKGRAPH_TABLE_ID = celery.conf.get_by_parts('CHUNKGRAPH_TABLE_ID')
+
+engine = create_engine(SQL_URI, pool_recycle=3600, pool_size=20, max_overflow=50)
+Session = scoped_session(sessionmaker(bind=engine, autocommit=False, autoflush=False))
+session = Session()
+Base.metadata.create_all(engine)
+
+BLACKLIST = ["pni_synapses", "pni_synapses_i2",  "is_chandelier"]
+
+class SqlAlchemyTask(Task):
+    """An abstract Celery Task that ensures that the connection the the
+    database is closed on task completion"""
+
+    def after_return(self, status, retval, task_id, args, kwargs, einfo):
+        if session is not None:
+            Session.remove()
+
+@celery.task()
+def task_1(name):
+    data = { 'name': name,
+    'second_name': 'second_name'}
+    return data
+
+@celery.task()
+def task_2(data):
+    print(data['name'], data['second_name'])
+
+def test_chain(dataset_name):
+    chain = task_1.s(dataset_name) | task_2.s()
+    chain()
+
+@celery.task()
+def run_incrementalization(dataset_name):
+    chain = increment_version.s(dataset_name) | create_database_from_template.s()
+    chain()
+    
+@celery.task(bind=True, name='process:tasks.add')
 def add_together(self, x, y):
     time.sleep(random.randint(6, 20))
     return x + y
 
-@celery.task(bind=True)
+@celery.task(bind=True, name='app.app.tasks.get_status')
 def get_status(self):
     return self.AsyncResult(self.request.id).state
 
-@celery.task(bind=True)
-def long_task():
-    time.sleep(random.randint(6, 20))
-    return {'current': 100, 'total': 100, 'status': 'Task completed!',
-            'result': 42}
-
-@celery.task(bind=True)
-def incremental_materialization(self):
-    time.sleep(random.randint(6, 20))
-    return "Materializing..."
-
-# @celery.task   
-# def incremental_materialization_task(self, dataset_name):
-
-#     materialized_schema = IncrementalMaterializationSchema()
-#     dataset = dataset_name
-#     sql_uri = current_app.config['MATERIALIZATION_POSTGRES_URI']
-#     cg_table = current_app.config['CHUNKGRAPH_TABLE_ID']
-#     cg_instance_id = current_app.config['BIG_TABLE_CONFIG']['instance_id']
-#     amdb_instance_id = current_app.config['BIG_TABLE_CONFIG']['amdb_instance_id']
+def get_cg_tabel_id(dataset_name):
+    try:
+        info_client  = InfoServiceClient(dataset_name=dataset_name)
+        data = info_client.get_dataset_info()
+        cg_table_id = data['graphene_source'].rpartition('/')[-1]
+        return cg_table_id
+    except Exception as e:
+        logging.error(f"Could not connect to infoservice: {e}")
+        return 
 
 
-#     # can we talk about this???
-#     blacklist = ["pni_synapses", "pni_synapses_i2",  "is_chandelier"]
+# @celery.task(name='process:tasks.increment_version')   
+def increment_version(dataset_name): 
+    analysisversion = materializationmanager.create_new_version(
+        SQL_URI, dataset_name, str(dt.datetime.utcnow()))
+    version = analysisversion.version
+    base_version_number = 1
+    base_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==base_version_number).first()
+    new_db_name = f'{dataset_name}_v{analysisversion.version}'
+    base_db_name = f'{dataset_name}_v{base_version_number}'
+    version_db_uri = format_version_db_uri(SQL_URI, dataset_name, version)
+    base_version_db_uri = format_version_db_uri(SQL_URI, dataset_name,  base_version_number)
+    logging.info(f'making new version {analysisversion.version} with timestamp {analysisversion.time_stamp}')
+    logging.info(f'New version name: {new_db_name}, Base version name: {base_db_name}')
+    {'new_db_name': new_db_name, 'base_db_name': base_db_name}
+    metadata = {'dataset_name': dataset_name,
+            'analysisversion': analysisversion,
+            'base_version': base_version, 
+            'base_version_number': base_version_number,
+            'base_version_db_uri': base_version_db_uri,
+            'version_db_uri': version_db_uri,
+            'new_db_name': new_db_name, 
+            'base_db_name': base_db_name}
+    return metadata
+
+@celery.task(base=SqlAlchemyTask, name='app.app.tasks.create_database_from_template')   
+def create_database_from_template(metadata):
+    analysisversion = metadata['analysisversion']
+    conn = engine.connect()
+    conn.execute("commit")
+    conn.execute(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = '{metadata['base_db_name']}';")
+    conn.execute(f"create database {metadata['new_db_name']} TEMPLATE {metadata['base_db_name']}")
+    logging.info("Connecting....")
+
+    tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == metadata['base_version']).all()
+
+    for table in tables:
+        if table.schema != em_models.root_model_name.lower():
+            new_analysistable = AnalysisTable(schema=table.schema,
+                                              tablename=table.tablename,
+                                              valid=False,
+                                              analysisversion_id=metadata['analysisversion'].id)
+            session.add(new_analysistable)
+            session.commit()
+
+
+def get_max_root_id(metadata):
+    analysisversion = metadata['analysisversion']
+    base_version_engine = create_engine(metadata['base_version_db_uri'])
+    BaseVersionSession = sessionmaker(bind=base_version_engine)
+    base_version_session = BaseVersionSession()
+    root_model = em_models.make_cell_segment_model(metadata['dataset_name'], 
+                                                    version=analysisversion.version)
+
+    prev_max_id = int(base_version_session.query(func.max(root_model.id).label('max_root_id')).first()[0])
+    cg = chunkedgraph.ChunkedGraph(table_id=CHUNKGRAPH_TABLE_ID)
+    max_root_id = materialize.find_max_root_id_before(cg,
+                                                      metadata['base_version'].time_stamp,
+                                                      2*chunkedgraph.LOCK_EXPIRED_TIME_DELTA,
+                                                      start_id=np.uint64(prev_max_id),
+                                                      delta_id=100)
+    max_seg_id = cg.get_segment_id(np.uint64(max_root_id))
+    return max_seg_id
+
+def materialize_root_ids(metadata, max_seg_id):
+    new_roots, old_roots = materialize.materialize_root_ids_delta(cg_table_id=CHUNKGRAPH_TABLE_ID,
+                                                                  dataset_name=metadata['dataset_name'],
+                                                                  time_stamp=metadata['analysisversion'].time_stamp,
+                                                                  time_stamp_base=metadata['base_version'].time_stamp,
+                                                                  min_root_id = max_seg_id,
+                                                                  analysisversion=metadata['analysisversion'],
+                                                                  sqlalchemy_database_uri=metadata['version_db_uri'],
+                                                                  cg_instance_id=CG_INSTANCE_ID)
+                                                                  # n_threads=materialized_schema["n_threads"])
+    return new_roots, old_roots
+
+def get_missing_tables():    
+    tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == analysisversion).all()
     
-#     engine = create_engine(sql_uri)
-#     Session = sessionmaker(bind=engine)
-#     session = Session()
- 
-#     analysisversion = materializationmanager.create_new_version(
-#         sql_uri, dataset_name, materialized_schema['time_stamp'])
-#     version = analysisversion.version
-#     base_version_number = materialized_schema['base_version']
-#     base_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==base_version_number).first()
+    anno_client = AnnotationClient(dataset_name=dataset_name)
+    all_tables = anno_client.get_tables()
+    missing_tables_info = [t for t in all_tables 
+                           if (t['table_name'] not in [t.tablename for t in tables]) 
+                           and (t['table_name']) not in blacklist]
+    return missing_tables_info
 
-#     new_db_name = f'{dataset_name}_v{analysisversion.version}'
-#     base_db_name = f'{dataset_name}_v{base_version_number}'
 
-#     version_db_uri = format_version_db_uri(sql_uri, dataset_name, version)
-#     base_version_db_uri = format_version_db_uri(sql_uri, dataset_name,  base_version_number)
-#     current_app.logger.info(version_db_uri)
-#     current_app.logger.info(f'making new version {analysisversion.version} with timestamp {analysisversion.time_stamp}')
-#     start = time.time()
-#     conn = engine.connect()
-#     conn.execute("commit")
-#     conn.execute(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = '{base_db_name}';")
-#     conn.execute(f"create database {new_db_name} TEMPLATE {base_db_name}")
-#     copy_time = time.time()-start
-
-#     timings = {}
-#     timings['copy database'] = copy_time 
-
-#     tables = session.query(AnalysisTable).filter(
-#              AnalysisTable.analysisversion == base_version).all()
-
-#     for table in tables:
-#         if table.schema != em_models.root_model_name.lower():
-#             time_start = time.time()
-#             new_analysistable = AnalysisTable(schema=table.schema,
-#                                               tablename=table.tablename,
-#                                               valid=False,
-#                                               analysisversion_id=analysisversion.id)
-#             session.add(new_analysistable)
-#             session.commit()
-#             timings[table.tablename] = time.time() - time_start
-#             current_app.logger.info(table.tablename)
-
-#     for k in timings:
-#         current_app.logger.info("%s: %.2fs = %.2fmin" % (k, timings[k], timings[k] / 60))
-
-#     assert(base_version is not None)
-#     timings = {}
+@celery.task()
+def materialize_annotations():
     
-#     base_version_engine = create_engine(base_version_db_uri)
-#     BaseVersionSession = sessionmaker(bind=base_version_engine)
-#     base_version_session = BaseVersionSession()
-#     root_model = em_models.make_cell_segment_model(dataset_name, version=analysisversion.version)
+    for table_info in missing_tables_info:
+        materialize.materialize_all_annotations(materialized_schema["cg_table_id"],
+                                                materialized_schema["dataset_name"],
+                                                table_info['schema_name'],
+                                                table_info['table_name'],
+                                                analysisversion=analysisversion,
+                                                time_stamp=analysisversion.time_stamp,
+                                                cg_instance_id=materialized_schema["cg_instance_id"],
+                                                sqlalchemy_database_uri=version_db_uri,
+                                                block_size=100,)
+                                               # n_threads=25*materialized_schema["n_threads"])
+        at = AnalysisTable(schema=table_info['schema_name'],        
+                           tablename=table_info['table_name'],
+                           valid=True,
+                           analysisversion=analysisversion)
+        session.add(at)
+        session.commit()
 
-#     prev_max_id = int(base_version_session.query(func.max(root_model.id).label('max_root_id')).first()[0])
-#     cg = chunkedgraph.ChunkedGraph(table_id=materialized_schema['cg_table_id'])
-#     max_root_id = materialize.find_max_root_id_before(cg,
-#                                                       base_version.time_stamp,
-#                                                       2*chunkedgraph.LOCK_EXPIRED_TIME_DELTA,
-#                                                       start_id=np.uint64(prev_max_id),
-#                                                       delta_id=100)
-#     max_seg_id = cg.get_segment_id(np.uint64(max_root_id))
-#     time_start = time.time()
-#     new_roots, old_roots = materialize.materialize_root_ids_delta(materialized_schema["cg_table_id"],
-#                                                                   dataset_name=materialized_schema["dataset_name"],
-#                                                                   time_stamp=analysisversion.time_stamp,
-#                                                                   time_stamp_base=base_version.time_stamp,
-#                                                                   min_root_id = max_seg_id,
-#                                                                   analysisversion=analysisversion,
-#                                                                   sqlalchemy_database_uri=version_db_uri,
-#                                                                   cg_instance_id=materialized_schema["cg_instance_id"],
-#                                                                   n_threads=materialized_schema["n_threads"])
-#     timings['root_ids'] = time.time()-time_start
+
+def materialize_changes(old_roots):
+    tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == analysisversion).all()
+    version_engine = create_engine(version_db_uri)
+    VersionSession = sessionmaker(bind=version_engine)
+    version_session = VersionSession()
+    version_session.execute('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO analysis_user;')
+    version_session.execute('GRANT SELECT ON ALL TABLES IN SCHEMA public TO analysis_user;')
+
+    for table in tables:
+        if table.schema != em_models.root_model_name.lower():
+            time_start = time.time()
+            materialize.materialize_annotations_delta(materialized_schema["cg_table_id"],
+                                                      materialized_schema["dataset_name"],
+                                                      table.tablename,
+                                                      table.schema,
+                                                      old_roots,
+                                                      analysisversion,
+                                                      version_db_uri,
+                                                      cg_instance_id=materialized_schema["cg_instance_id"],)
+
+                                                      # n_threads=3*materialized_schema["n_threads"])
+    root_model = em_models.make_cell_segment_model(dataset_name, version=analysisversion.version)
+    version_session.query(root_model).filter(root_model.id.in_(old_roots.tolist())).delete(synchronize_session=False)
+
+    version_session.commit()
     
-#     tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == analysisversion).all()
-    
-#     anno_client = AnnotationClient(dataset_name=dataset_name)
-#     all_tables = anno_client.get_tables()
-#     missing_tables_info = [t for t in all_tables 
-#                            if (t['table_name'] not in [t.tablename for t in tables]) 
-#                            and (t['table_name']) not in blacklist]
-
-#     for table_info in missing_tables_info:
-#         materialize.materialize_all_annotations(materialized_schema["cg_table_id"],
-#                                                 materialized_schema["dataset_name"],
-#                                                 table_info['schema_name'],
-#                                                 table_info['table_name'],
-#                                                 analysisversion=analysisversion,
-#                                                 time_stamp=analysisversion.time_stamp,
-#                                                 cg_instance_id=materialized_schema["cg_instance_id"],
-#                                                 sqlalchemy_database_uri=version_db_uri,
-#                                                 block_size=100,
-#                                                 n_threads=25*materialized_schema["n_threads"])
-#         at = AnalysisTable(schema=table_info['schema_name'],        
-#                            tablename=table_info['table_name'],
-#                            valid=True,
-#                            analysisversion=analysisversion)
-#         session.add(at)
-#         session.commit()
-        
-    
-#     tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == analysisversion).all()
-#     version_engine = create_engine(version_db_uri)
-#     VersionSession = sessionmaker(bind=version_engine)
-#     version_session = VersionSession()
-#     version_session.execute('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO analysis_user;')
-#     version_session.execute('GRANT SELECT ON ALL TABLES IN SCHEMA public TO analysis_user;')
-
-#     for table in tables:
-#         if table.schema != em_models.root_model_name.lower():
-#             time_start = time.time()
-#             materialize.materialize_annotations_delta(materialized_schema["cg_table_id"],
-#                                                       materialized_schema["dataset_name"],
-#                                                       table.tablename,
-#                                                       table.schema,
-#                                                       old_roots,
-#                                                       analysisversion,
-#                                                       version_db_uri,
-#                                                       cg_instance_id=materialized_schema["cg_instance_id"],
-#                                                       n_threads=3*materialized_schema["n_threads"])
-#             timings[table.tablename] = time.time() - time_start
-#     root_model = em_models.make_cell_segment_model(dataset_name, version=analysisversion.version)
-#     version_session.query(root_model).filter(root_model.id.in_(old_roots.tolist())).delete(synchronize_session=False)
-
-#     version_session.commit()
-    
-#     new_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==analysisversion.version).first()
-#     new_version.valid = True
-#     session.commit()
-
-#     for k in timings:
-#         current_app.logger.info("%s: %.2fs = %.2fmin" % (k, timings[k], timings[k] / 60))
-#     return {'new_version': analysisversion.version,
-#             'old_version': base_version_number}
+    new_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==analysisversion.version).first()
+    new_version.valid = True
+    session.commit()
