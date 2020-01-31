@@ -18,8 +18,6 @@ def create_app(test_config=None):
                 instance_relative_config=True,
                 template_folder="../../templates")
     # load configuration (from test_config if passed)
-    print(app.static_folder)
-    print(app.template_folder)
     logging.basicConfig(level=logging.DEBUG)
 
     if test_config is None:
@@ -30,7 +28,6 @@ def create_app(test_config=None):
     db.init_app(app)
     with app.app_context(): 
         admin = setup_admin(app, db)
-    create_celery(app, celery)
     
     app.register_blueprint(api)
     app.register_blueprint(views)
