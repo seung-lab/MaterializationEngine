@@ -16,5 +16,6 @@ alembic
 annotationframeworkclient
 celery
 redis
+eventlet
 # -e git+https://github.com/seung-lab/igneous.git#egg=igneous
 
