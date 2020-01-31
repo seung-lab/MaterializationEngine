@@ -8,6 +8,7 @@ services:
         - 5432:5432
       volumes:
         - postgres_data:/var/lib/postgresql/data
+        - ./entrypoint.sh:/var/lib/postgresql/entrypoint.sh
       healthcheck:
         test: "pg_isready -h localhost -p 5432 -q -U postgres"
         interval: 3s
@@ -32,16 +33,26 @@ services:
         - ./.env.dev 
       depends_on:
         - db
-        - celery
-    celery:
+        - celery-process
+        - celery-eventlets
+    celery-process:
       image: 'celery:tag'
       build:
         context: .
         dockerfile: Dockerfile
-      command: celery worker -A app.main.celery --loglevel=info
+      command: ["celery", "worker", "--app=app.main.celery", "--concurrency=1", "--hostname=worker.process@%h", "--queues=process", "--loglevel=INFO"] # celery worker -A app.main.celery --loglevel=info
       env_file:
         - ./.env.dev 
       depends_on: 
+        - redis  
+    celery-eventlets:
+      image: 'celery:tag'
+      build: .
+      restart: "no"
+      env_file:
+        - ./.env.dev   
+      command: ["celery", "worker", "--app=app.main.celery","--pool=eventlet", "--concurrency=100", "--hostname=worker.threads@%h", "--queues=threads", "--loglevel=INFO"]
+      depends_on:
         - redis
     redis:
       image: redis:5.0.4-alpine
@@ -56,7 +67,8 @@ services:
       ports:
         - 5555:5555
       depends_on: 
-        - celery
+        - celery-eventlets
+        - celery-process
 
 volumes:
   postgres_data:
