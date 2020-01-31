@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, abort, current_app, request, render_template, url_for, redirect
 from emannotationschemas import get_types, get_schema
 from emannotationschemas.models import AnalysisTable, AnalysisVersion
-from app.schemas import AnalysisVersionSchema, AnalysisTableSchema, IncrementalMaterializationSchema
+from app.schemas import AnalysisVersionSchema, AnalysisTableSchema, MaterializationSchema
 from app.extensions import db
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
@@ -10,7 +10,7 @@ import pandas as pd
 from emannotationschemas.models import make_annotation_model, make_dataset_models, declare_annotation_model
 import requests
 import logging
-from app.tasks import add_together
+
 
 __version__ = "0.1.2"
 
@@ -18,14 +18,16 @@ views = Blueprint("views", __name__, url_prefix='/materialize')
 
 
 def get_datasets():
-    # url = current_app.config['INFOSERVICE_ENDPOINT'] + "/api/datasets"
-    return []#requests.get(url).json()
+    url = current_app.config['INFOSERVICE_ENDPOINT'] + "/api/datasets"
+    return requests.get(url).json()
 
-# @views.route("/home")
-# def index():
-#     return render_template('datasets.html',
-#                            datasets=get_datasets(),
-#                            version=__version__)
+
+@views.route("/home")
+def index():
+    return render_template('datasets.html',
+                           datasets=get_datasets(),
+                           version=__version__)
+
 
 @views.route("/test")
 def test():
@@ -40,6 +42,27 @@ def make_df_with_links_to_id(objects, schema, url, col):
                                                             x[col]),
                                                             axis=1)
     return df
+
+@views.route('/dataset')
+def datasets():
+    # datasets = (AnalysisVersion.query.filter(AnalysisVersion.dataset = 'pinky100')
+    #             .first_or_404())
+    # TODO wire to info service
+    return jsonify(get_datasets())
+
+
+@views.route("/dataset/<dataset_name>", methods=["GET"])
+def get_dataset_version(dataset_name):
+    # datasets = (AnalysisVersion.query.filter(AnalysisVersion.dataset = 'pinky100')
+    #             .first_or_404())
+    if (dataset_name not in get_datasets()):
+        abort(404, "dataset not valid")
+
+    if (request.method == 'GET'):
+        versions = (db.session.query(AnalysisVersion).all())
+        schema = AnalysisVersionSchema(many=True)
+        # results = schema.dump(versions)
+        return jsonify(schema.dump(versions).data)
 
 
 @views.route('/dataset/<dataset_name>')
