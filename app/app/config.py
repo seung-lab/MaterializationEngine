@@ -22,14 +22,14 @@ class BaseConfig:
     LOGGING_LOCATION = HOME + '/.materializationengine/bookshelf.log'
     LOGGING_LEVEL = logging.DEBUG
     CHUNKGRAPH_TABLE_ID = "pinky100_sv16"
-    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite://")    #"postgres://postgres:synapsedb@db:5432/synapsedb"
+    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite://")
+    MATERIALIZATION_POSTGRES_URI = "postgres://postgres:synapsedb@db:5432/postgres" #"db://postgres:synapsedb@db:5432/synapsedb"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     REDIS_HOST = os.environ.get('REDIS_SERVICE_HOST')
     REDIS_PORT = os.environ.get('REDIS_SERVICE_PORT')
     REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
     CELERY_BROKER_URL = REDIS_URL
     CELERY_RESULT_BACKEND = REDIS_URL
-
 
 class DevConfig(BaseConfig):
     DEBUG = True
