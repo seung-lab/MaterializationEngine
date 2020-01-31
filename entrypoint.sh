@@ -11,11 +11,9 @@ then
     echo "PostgreSQL started"
 fi
 
-if [ "$FLASK_ENV" = "development" ]
-then
-    echo "Creating the database tables..."
-    python manage.py create_db
-    echo "Tables created"
-fi
+psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<-EOSQL
 
+    CREATE ROLE postgres with SUPERUSER PASSWORD 'synapsedb';
+
+EOSQL
 exec "$@"
