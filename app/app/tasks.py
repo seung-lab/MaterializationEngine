@@ -27,10 +27,7 @@ from celery.concurrency import eventlet
 # import eventlet
 import logging
 
-# annotion client info service
 
-anno_client = AnnotationClient(dataset_name='pinky100')
-logging.info(anno_client.infoserviceclient())
 SQL_URI = celery.conf.get_by_parts('MATERIALIZATION_POSTGRES_URI')
 BIGTABLE = celery.conf.get_by_parts('BIGTABLE_CONFIG')
 CG_TABLE = BIGTABLE['instance_id']
@@ -54,34 +51,6 @@ class SqlAlchemyTask(Task):
         if session is not None:
             Session.remove()
 
-@celery.task()
-def task_1(name):
-    data = { 'name': name,
-    'second_name': 'second_name'}
-    return data
-
-@celery.task()
-def task_2(data):
-    print(data['name'], data['second_name'])
-
-def test_chain(dataset_name):
-    chain = task_1.s(dataset_name) | task_2.s()
-    chain()
-
-@celery.task()
-def run_incrementalization(dataset_name):
-    chain = increment_version.s(dataset_name) | create_database_from_template.s()
-    chain()
-    
-@celery.task(bind=True, name='process:tasks.add')
-def add_together(self, x, y):
-    time.sleep(random.randint(6, 20))
-    return x + y
-
-@celery.task(bind=True, name='app.app.tasks.get_status')
-def get_status(self):
-    return self.AsyncResult(self.request.id).state
-
 def get_cg_tabel_id(dataset_name):
     try:
         info_client  = InfoServiceClient(dataset_name=dataset_name)
@@ -92,38 +61,28 @@ def get_cg_tabel_id(dataset_name):
         logging.error(f"Could not connect to infoservice: {e}")
         return 
 
-def get_missing_tables():    
+def get_missing_tables(dataset_name, analysisversion):    
     tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == analysisversion).all()
     
     anno_client = AnnotationClient(dataset_name=dataset_name)
     all_tables = anno_client.get_tables()
     missing_tables_info = [t for t in all_tables 
                            if (t['table_name'] not in [t.tablename for t in tables]) 
-                           and (t['table_name']) not in blacklist]
+                           and (t['table_name']) not in BLACKLIST]
     return missing_tables_info
 
-# @celery.task(name='process:tasks.increment_version')   
 def materialize_metadata(dataset_name): 
-    analysisversion = materializationmanager.create_new_version(
-        SQL_URI, dataset_name, str(dt.datetime.utcnow()))
-    version = analysisversion.version
-    base_version_number = 1
-    base_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==base_version_number).first()
-    new_db_name = f'{dataset_name}_v{analysisversion.version}'
-    base_db_name = f'{dataset_name}_v{base_version_number}'
+    base_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==session.query(func.max(AnalysisVersion.version)))
+    version = base_version + 1
+    analysisversion = session.query(AnalysisVersion).filter(AnalysisVersion.version == version).first()
     version_db_uri = format_version_db_uri(SQL_URI, dataset_name, version)
-    base_version_db_uri = format_version_db_uri(SQL_URI, dataset_name,  base_version_number)
+
     logging.info(f'making new version {analysisversion.version} with timestamp {analysisversion.time_stamp}')
-    logging.info(f'New version name: {new_db_name}, Base version name: {base_db_name}')
-    {'new_db_name': new_db_name, 'base_db_name': base_db_name}
     metadata = {'dataset_name': dataset_name,
             'analysisversion': analysisversion,
-            'base_version': base_version, 
-            'base_version_number': base_version_number,
-            'base_version_db_uri': base_version_db_uri,
+            'base_version': base_version,
             'version_db_uri': version_db_uri,
-            'new_db_name': new_db_name, 
-            'base_db_name': base_db_name}
+            }
     return metadata
 
 @celery.task(base=SqlAlchemyTask, name='app.app.tasks.create_database_from_template')   
@@ -177,33 +136,30 @@ def materialize_root_ids(metadata, max_seg_id):
                                                                   # n_threads=materialized_schema["n_threads"])
     return new_roots, old_roots
 
-
-
-
 @celery.task()
-def materialize_annotations(missing_tables_info):
+def materialize_annotations(metadata, missing_tables_info):
     for table_info in missing_tables_info:
         materialize.materialize_all_annotations(metadata["cg_table_id"],
                                                 metadata["dataset_name"],
                                                 table_info['schema_name'],
                                                 table_info['table_name'],
-                                                analysisversion=analysisversion,
-                                                time_stamp=analysisversion.time_stamp,
+                                                analysisversion=metadata['analysisversion'],
+                                                time_stamp=metadata['analysisversion'].time_stamp,
                                                 cg_instance_id=metadata["cg_instance_id"],
-                                                sqlalchemy_database_uri=version_db_uri,
+                                                sqlalchemy_database_uri=metadata['version_db_uri'],
                                                 block_size=100,)
                                                # n_threads=25*materialized_schema["n_threads"])
         at = AnalysisTable(schema=table_info['schema_name'],        
                            tablename=table_info['table_name'],
                            valid=True,
-                           analysisversion=analysisversion)
+                           analysisversion=metadata['analysisversion'])
         session.add(at)
         session.commit()
 
 
-def materialize_changes(old_roots):
-    tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == analysisversion).all()
-    version_engine = create_engine(version_db_uri)
+def materialize_changes(metadata, old_roots):
+    tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == metadata['analysisversion']).all()
+    version_engine = create_engine(metadata['version_db_uri'])
     VersionSession = sessionmaker(bind=version_engine)
     version_session = VersionSession()
     version_session.execute('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO analysis_user;')
@@ -212,21 +168,21 @@ def materialize_changes(old_roots):
     for table in tables:
         if table.schema != em_models.root_model_name.lower():
             time_start = time.time()
-            materialize.materialize_annotations_delta(materialized_schema["cg_table_id"],
-                                                      materialized_schema["dataset_name"],
+            materialize.materialize_annotations_delta(metadata["cg_table_id"],
+                                                      metadata["dataset_name"],
                                                       table.tablename,
                                                       table.schema,
                                                       old_roots,
-                                                      analysisversion,
-                                                      version_db_uri,
-                                                      cg_instance_id=materialized_schema["cg_instance_id"],)
+                                                      metadata['analysisversion'],
+                                                      metadata['version_db_uri'],
+                                                      cg_instance_id=metadata["cg_instance_id"],)
 
                                                       # n_threads=3*materialized_schema["n_threads"])
-    root_model = em_models.make_cell_segment_model(dataset_name, version=analysisversion.version)
+    root_model = em_models.make_cell_segment_model(metadata['dataset_name'], version=metadata['analysisversion'].version)
     version_session.query(root_model).filter(root_model.id.in_(old_roots.tolist())).delete(synchronize_session=False)
 
     version_session.commit()
     
-    new_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==analysisversion.version).first()
+    new_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==metadata['analysisversion'].version).first()
     new_version.valid = True
     session.commit()
