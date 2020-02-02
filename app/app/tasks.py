@@ -92,9 +92,18 @@ def get_cg_tabel_id(dataset_name):
         logging.error(f"Could not connect to infoservice: {e}")
         return 
 
+def get_missing_tables():    
+    tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == analysisversion).all()
+    
+    anno_client = AnnotationClient(dataset_name=dataset_name)
+    all_tables = anno_client.get_tables()
+    missing_tables_info = [t for t in all_tables 
+                           if (t['table_name'] not in [t.tablename for t in tables]) 
+                           and (t['table_name']) not in blacklist]
+    return missing_tables_info
 
 # @celery.task(name='process:tasks.increment_version')   
-def increment_version(dataset_name): 
+def materialize_metadata(dataset_name): 
     analysisversion = materializationmanager.create_new_version(
         SQL_URI, dataset_name, str(dt.datetime.utcnow()))
     version = analysisversion.version
@@ -168,28 +177,19 @@ def materialize_root_ids(metadata, max_seg_id):
                                                                   # n_threads=materialized_schema["n_threads"])
     return new_roots, old_roots
 
-def get_missing_tables():    
-    tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == analysisversion).all()
-    
-    anno_client = AnnotationClient(dataset_name=dataset_name)
-    all_tables = anno_client.get_tables()
-    missing_tables_info = [t for t in all_tables 
-                           if (t['table_name'] not in [t.tablename for t in tables]) 
-                           and (t['table_name']) not in blacklist]
-    return missing_tables_info
+
 
 
 @celery.task()
-def materialize_annotations():
-    
+def materialize_annotations(missing_tables_info):
     for table_info in missing_tables_info:
-        materialize.materialize_all_annotations(materialized_schema["cg_table_id"],
-                                                materialized_schema["dataset_name"],
+        materialize.materialize_all_annotations(metadata["cg_table_id"],
+                                                metadata["dataset_name"],
                                                 table_info['schema_name'],
                                                 table_info['table_name'],
                                                 analysisversion=analysisversion,
                                                 time_stamp=analysisversion.time_stamp,
-                                                cg_instance_id=materialized_schema["cg_instance_id"],
+                                                cg_instance_id=metadata["cg_instance_id"],
                                                 sqlalchemy_database_uri=version_db_uri,
                                                 block_size=100,)
                                                # n_threads=25*materialized_schema["n_threads"])
