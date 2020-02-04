@@ -6,24 +6,33 @@ import requests
 import logging
 # from app.tasks import add_together, get_status, process_ids, increment_version, create_database_from_template # incremental_materialization_task
 import numpy as np
+import json
 
 __version__ = "0.2.1"
 
 api = Blueprint("api", __name__, url_prefix='/materialize/api/v1/')
 
 
-@api.route("/chain/<name>", methods=('GET', ))
-def test_chain(name):
-    from app.tasks import test_chain
-    task = test_chain(name)
-    print(task)
-    return 'Test'
+@api.route("/metadata/<dataset_name>", methods=('GET', ))
+def get_metadata(dataset_name):
+    from app.tasks import get_materialization_metadata
+    results = get_materialization_metadata(dataset_name)
+    logging.info("Results are: ", results)
+    return results
+   
 
-@api.route("/incrementalization/<name>")
-def run_increment(name):
-    from app.tasks import run_incrementalization
-    run_incrementalization(name)
-    return "Running..."
+@api.route("/max_root_id/<dataset_name>", methods=('GET', ))
+def get_max_root_id(dataset_name):
+    from app.tasks import get_max_root_id
+    results = get_max_root_id(dataset_name)
+    logging.info("Results are: ", results)
+    return results
+
+@api.route("/incrementalization/<dataset_name>/<analysisversion>")
+def find_missing_tables(dataset_name, analysisversion):
+    from app.tasks import get_missing_tables
+    results = get_missing_tables(dataset_name, analysisversion)
+    return jsonify(results)
 
 @api.route("/<int:x>/<int:y>", methods=('GET', ))
 def add(x,y):
