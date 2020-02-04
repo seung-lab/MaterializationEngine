@@ -9,6 +9,7 @@ def create_app(test_config=None):
     from app.utils import get_instance_folder_path
     from app.extensions import db, Base, celery
     from app.factories.celery_app import create_celery
+    from app.schemas import ma
     import logging
 
     # Define the Flask Object
@@ -25,7 +26,9 @@ def create_app(test_config=None):
     else:
         app.config.update(test_config)
     # register blueprints
+
     db.init_app(app)
+    ma.init_app(app)
     with app.app_context(): 
         admin = setup_admin(app, db)
     
