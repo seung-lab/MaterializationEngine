@@ -16,7 +16,7 @@ class AnalysisTableSchema(ma.ModelSchema):
         model = models.AnalysisTable
 
 
-class IncrementalMaterializationSchema(Schema):
+class MaterializationSchema(Schema):
     cg_table_id = fields.Str(default="pinky100_sv16",
                                 description="PyChunkedGraph table id")
     dataset_name = fields.Str(default="pinky100",
