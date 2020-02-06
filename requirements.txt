@@ -1,9 +1,9 @@
--e git+https://github.com/seung-lab/igneous.git#egg=igneous
-numpy
-pychunkedgraph
+git+git://github.com/seung-lab/igneous.git#egg=igneous
+git+git://github.com/seung-lab/PyChunkedGraph.git#egg=pychunkedgraph
+cloud-volume
 emannotationschemas>=2.0.0
 DynamicAnnotationDB
-argschema
+argschema<2.0.1
 pandas
 Flask
 sqlalchemy
@@ -17,5 +17,4 @@ annotationframeworkclient
 celery
 redis
 eventlet
-# -e git+https://github.com/seung-lab/igneous.git#egg=igneous
 
