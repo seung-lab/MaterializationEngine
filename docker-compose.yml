@@ -33,26 +33,21 @@ services:
         - ./.env.dev 
       depends_on:
         - db
-        - celery-process
-        - celery-eventlets
     celery-process:
-      image: 'celery:tag'
-      build:
-        context: .
-        dockerfile: Dockerfile
+      image: 'materialize:tag'
       command: ["celery", "worker", "--app=app.main.celery", "--concurrency=1", "--hostname=worker.process@%h", "--queues=process", "--loglevel=INFO"] # celery worker -A app.main.celery --loglevel=info
       env_file:
         - ./.env.dev 
-      depends_on: 
+      depends_on:
+        - materialize 
         - redis  
     celery-eventlets:
-      image: 'celery:tag'
-      build: .
-      restart: "no"
+      image: 'materialize:tag'
       env_file:
         - ./.env.dev   
       command: ["celery", "worker", "--app=app.main.celery","--pool=eventlet", "--concurrency=100", "--hostname=worker.threads@%h", "--queues=threads", "--loglevel=INFO"]
       depends_on:
+        - materialize
         - redis
     redis:
       image: redis:5.0.4-alpine
