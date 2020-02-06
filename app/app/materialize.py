@@ -1,11 +1,12 @@
 import pandas as pd
 from emannotationschemas import models as em_models
-# from emannotationschemas.base import flatten_dict
-# from emannotationschemas import get_schema
-# from functools import partial
-# import json
+from emannotationschemas.base import flatten_dict
+from emannotationschemas import get_schema
+from functools import partial
+import json
 import requests
 import numpy as np
+import pychunkedgraph
 from pychunkedgraph.backend import chunkedgraph
 from multiwrapper import multiprocessing_utils as mu
 import cloudvolume
@@ -13,7 +14,9 @@ from app import materializationmanager
 from pytz import UTC
 import datetime
 from dynamicannotationdb.annodb_meta import AnnotationMetaDB
+import logging
 
+logging.info(f"PYCHUNKEDGRAPH VERSION {pychunkedgraph.__version__}")
 
 def _process_all_annotations_thread(args):
     """ Helper for process_all_annotations """
@@ -332,16 +335,16 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
                            time_stamp,
                            cg_table_id, amdb_info, cg_info,
                            mm.get_serialized_info(), cv_info, pixel_ratios])
-
-    if n_threads == 1:
-        results = mu.multiprocess_func(
-            _process_all_annotations_thread, multi_args,
-            n_threads=n_threads,
-            verbose=True, debug=n_threads == 1)
-    else:
-        results = mu.multisubprocess_func(
-            _process_all_annotations_thread, multi_args,
-            n_threads=n_threads, package_name="materializationengine")
+    return multi_args
+    # if n_threads == 1:
+    #     results = mu.multiprocess_func(
+    #         _process_all_annotations_thread, multi_args,
+    #         n_threads=n_threads,
+    #         verbose=True, debug=n_threads == 1)
+    # else:
+    #     results = mu.multisubprocess_func(
+    #         _process_all_annotations_thread, multi_args,
+    #         n_threads=n_threads, package_name="materializationengine")
 
 
 def process_existing_annotations(cg_table_id,
@@ -718,7 +721,7 @@ def materialize_all_annotations(cg_table_id,
          number of threads to use to materialize
     """
 
-    process_all_annotations(cg_table_id,
+    queued_annotations = process_all_annotations(cg_table_id,
                             dataset_name=dataset_name,
                             schema_name=schema_name,
                             table_name=table_name,
@@ -729,5 +732,5 @@ def materialize_all_annotations(cg_table_id,
                             cg_instance_id=cg_instance_id,
                             block_size=block_size,
                             n_threads=n_threads)
-
+    return queued_annotations
 
