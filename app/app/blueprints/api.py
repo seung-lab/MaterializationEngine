@@ -28,18 +28,11 @@ def get_max_root_id(dataset_name):
     logging.info("Results are: ", results)
     return results
 
-@api.route("/incrementalization/<dataset_name>/<analysisversion>")
-def find_missing_tables(dataset_name, analysisversion):
-    from app.tasks import get_missing_tables
-    results = get_missing_tables(dataset_name, analysisversion)
-    return jsonify(results)
-
-@api.route("/<int:x>/<int:y>", methods=('GET', ))
-def add(x,y):
-    from app.tasks import add_together
-    task = add_together.delay(x,y)
-    print(task.id)
-    return 'Test'
+@api.route("/create_database/<template_dataset_name>/<new_database_name>", methods=('GET', ))
+def create_database(template_dataset_name: str, new_database_name: str):
+    from app.tasks import create_database_from_template
+    task = create_database_from_template.delay(template_dataset_name, new_database_name)
+    return f"Creating database {new_database_name} from template {template_dataset_name}"
 
 @api.route("/status")
 def status():
@@ -53,15 +46,10 @@ def new_version(dataset_name):
     increment_version(dataset_name)
     return jsonify(name=f'increment version:{dataset_name}')
 
-@api.route("/create_database/<new_name>:<old_name>")
-def create_database(new_name, old_name):
-    from app.tasks import create_database_from_template
-    create_database_from_template.apply_async([new_name,old_name])
-    return jsonify(name=f'{new_name}:{old_name}')
-
-# @api.route("/dataset/<dataset_name>/new_version", methods=["POST"])
-# def materialize_dataset(dataset_name):
-#     if (dataset_name not in get_datasets()):
-#         abort(404, "Dataset name not valid")
-#     incremental_materialization_task.apply_async()
-#     return jsonify({}), 200
+@api.route("/materialize/<dataset_name>")
+def materialize_annotations(dataset_name):
+    from app.tasks import materialize_annotations
+    # if (dataset_name not in get_datasets()):
+    #     abort(404, "Dataset name not valid")
+    materialize_annotations.apply_async([dataset_name])
+    return jsonify({}), 200
