@@ -11,10 +11,12 @@ RUN mkdir -p /home/nginx/.cloudvolume/secrets \
       # Boost and g++ for compiling DracoPy and graph_tool
       build-essential \
       libboost-dev \
+      g++ \
       # Required for adding graph-tools and cloud-sdk to the apt source list
       lsb-release \
       curl \
       apt-transport-https \
+      apt-utils \
   # GOOGLE-CLOUD-SDK
   && pip install --no-cache-dir --upgrade crcmod \
   && echo "deb https://packages.cloud.google.com/apt cloud-sdk-$(lsb_release -c -s) main" > /etc/apt/sources.list.d/google-cloud-sdk.list \
