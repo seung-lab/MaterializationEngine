@@ -44,7 +44,7 @@ Base.metadata.create_all(engine)
 BLACKLIST = ["pni_synapses", "pni_synapses_i2",  "is_chandelier"]
 
 @celery.task(name='process:app.tasks.test_add')
-def test_add(x,y):
+def test_celery(x,y):
     return x + y
 
 

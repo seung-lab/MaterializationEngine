@@ -12,6 +12,12 @@ __version__ = "0.2.1"
 
 api = Blueprint("api", __name__, url_prefix='/materialize/api/v1/')
 
+@api.route("/test_celery")
+def celery_test():
+    from app.tasks import test_celery
+    tasks = 10000
+    results = [test_celery.delay(1, 2) for i in range(tasks)]
+    return f"Creating {tasks} tasks"
 
 @api.route("/metadata/<dataset_name>", methods=('GET', ))
 def get_metadata(dataset_name):
