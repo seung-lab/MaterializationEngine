@@ -20,21 +20,23 @@ from emannotationschemas.models import AnalysisVersion, AnalysisTable
 from emannotationschemas import models as em_models
 from emannotationschemas.base import flatten_dict
 from emannotationschemas import get_schema
-from app.extensions import celery
+from app.celery_worker import celery
 from dataclasses import dataclass
 from multiprocessing.dummy import Pool
 from celery.concurrency import eventlet
+from flask import current_app
 # import eventlet
 import logging
 
+logging.debug(f"Celery Settings: {current_app.config}")
 
-SQL_URI = celery.conf.get_by_parts('MATERIALIZATION_POSTGRES_URI')
-BIGTABLE = celery.conf.get_by_parts('BIGTABLE_CONFIG')
+SQL_URI = current_app.config['MATERIALIZATION_POSTGRES_URI']
+BIGTABLE = current_app.config['BIGTABLE_CONFIG']
 CG_TABLE = BIGTABLE['instance_id']
 DATASET = BIGTABLE['project_id']
 CG_INSTANCE_ID = BIGTABLE['instance_id']
 AMDB_INSTANCE_ID = BIGTABLE['amdb_instance_id']
-CHUNKGRAPH_TABLE_ID = celery.conf.get_by_parts('CHUNKGRAPH_TABLE_ID')
+CHUNKGRAPH_TABLE_ID = current_app.config['CHUNKGRAPH_TABLE_ID']
 
 engine = create_engine(SQL_URI, pool_recycle=3600, pool_size=20, max_overflow=50)
 Session = scoped_session(sessionmaker(bind=engine, autocommit=False, autoflush=False))
