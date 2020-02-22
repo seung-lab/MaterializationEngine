@@ -49,7 +49,6 @@ BLACKLIST = ["pni_synapses", "pni_synapses_i2",  "is_chandelier"]
 def test_celery(x,y):
     return x + y
 
-
 class SqlAlchemyTask(Task):
     """An abstract Celery Task that ensures that the connection the the
     database is closed on task completion"""
@@ -93,15 +92,6 @@ def get_materialization_metadata(dataset_name: str) -> dict:
             }
     return metadata
 
-@celery.task(base=SqlAlchemyTask)
-def create_database(database_name: str):
-    conn = engine.connect()
-    conn.execute("commit")
-    conn.execute(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = '{metadata['base_db_name']}';")
-    conn.execute(f"create database {database_name}")
-    logging.info("Connecting....")
-
-
 @celery.task(base=SqlAlchemyTask, name='process:app.tasks.create_database_from_template')   
 def create_database_from_template(template_dataset_name: str, new_database_name: str):
     metadata = get_materialization_metadata(template_dataset_name)
@@ -142,17 +132,17 @@ def get_max_root_id(dataset_name: str) -> int:
     max_seg_id = cg.get_segment_id(np.uint64(max_root_id))
     return max_seg_id
 
-def materialize_root_ids(dataset_name: str, max_seg_id: int):
-    metadata = get_materialization_metadata(dataset_name)
-    new_roots, old_roots = materialize.materialize_root_ids_delta(cg_table_id=metadata['cg_table_id'],
-                                                                  dataset_name=metadata['dataset_name'],
-                                                                  time_stamp=metadata['analysisversion_timestamp'],
-                                                                  time_stamp_base=metadata['base_version_timestamp'],
-                                                                  min_root_id = max_seg_id,
-                                                                  analysisversion=metadata['analysisversion'],
-                                                                  sqlalchemy_database_uri=metadata['version_db_uri'],
-                                                                  cg_instance_id=CG_INSTANCE_ID)
-    return new_roots, old_roots
+# def materialize_root_ids(dataset_name: str, max_seg_id: int):
+#     metadata = get_materialization_metadata(dataset_name)
+#     new_roots, old_roots = materialize.materialize_root_ids_delta(cg_table_id=metadata['cg_table_id'],
+#                                                                   dataset_name=metadata['dataset_name'],
+#                                                                   time_stamp=metadata['analysisversion_timestamp'],
+#                                                                   time_stamp_base=metadata['base_version_timestamp'],
+#                                                                   min_root_id = max_seg_id,
+#                                                                   analysisversion=metadata['analysisversion'],
+#                                                                   sqlalchemy_database_uri=metadata['version_db_uri'],
+#                                                                   cg_instance_id=CG_INSTANCE_ID)
+#     return new_roots, old_roots
 
 
 @celery.task(name='process:app.tasks.materialize_annotations')
@@ -162,7 +152,7 @@ def materialize_annotations(dataset_name: str):
 
     metadata = get_materialization_metadata(dataset_name)
     for table_info in missing_tables_info:
-        t = materialize.materialize_all_annotations(metadata["cg_table_id"],
+        materialized_info = materialize.materialize_all_annotations(metadata["cg_table_id"],
                                                 metadata["dataset_name"],
                                                 table_info['schema_name'],
                                                 table_info['table_name'],
@@ -170,14 +160,40 @@ def materialize_annotations(dataset_name: str):
                                                 time_stamp=metadata['analysisversion_timestamp'],
                                                 cg_instance_id=CG_INSTANCE_ID,
                                                 sqlalchemy_database_uri=metadata['version_db_uri'],
-                                                block_size=100,)
-        logging.info(t)
+                                                block_size=100)
+        # materialize_root_ids.apply_async(materialized_info)
         at = AnalysisTable(schema=table_info['schema_name'],        
                            tablename=table_info['table_name'],
                            valid=True,
                            analysisversion=metadata['analysisversion'])
         session.add(at)
         session.commit()
+
+@celery.task(name='process:app.tasks.materialize_root_ids')
+def materialize_root_ids(args):
+    root_ids, serialized_mm_info = args
+    model = em_models.make_cell_segment_model(serialized_mm_info["dataset_name"],
+                                              serialized_mm_info["version"])
+    mm = materializationmanager.MaterializationManager(**serialized_mm_info,
+                                                       annotation_model=model)
+
+    annos_dict = {}
+    annos_list = []
+    for root_id in root_ids:
+        ann = {"id": int(root_id)}
+        if mm.is_sql:
+            # mm.add_annotation_to_sql_database(ann)
+            annos_list.append(ann)
+        else:
+            annos_dict[root_id] = ann
+
+    if not mm.is_sql:
+        return annos_dict
+    else:
+        mm.bulk_insert_annotations(annos_list)
+        mm.commit_session()
+
+
 
 
 def materialize_changes(dataset_name: str, old_roots):
@@ -191,15 +207,15 @@ def materialize_changes(dataset_name: str, old_roots):
 
     for table in tables:
         if table.schema != em_models.root_model_name.lower():
-            time_start = time.time()
-            materialize.materialize_annotations_delta(metadata["cg_table_id"],
-                                                      metadata["dataset_name"],
-                                                      table.tablename,
-                                                      table.schema,
-                                                      old_roots,
-                                                      metadata['analysisversion'],
-                                                      metadata['version_db_uri'],
-                                                      cg_instance_id=CG_INSTANCE_ID,)
+            delta_info = materialize.materialize_annotations_delta(metadata["cg_table_id"],
+                                                                   metadata["dataset_name"],
+                                                                   table.tablename,
+                                                                   table.schema,
+                                                                   old_roots,
+                                                                   metadata['analysisversion'],
+                                                                   metadata['version_db_uri'],
+                                                                   cg_instance_id=CG_INSTANCE_ID,)
+        materialize_delta_annotation_task.apply_async(delta_info)
     root_model = em_models.make_cell_segment_model(metadata['dataset_name'], version=metadata['analysisversion'].version)
     version_session.query(root_model).filter(root_model.id.in_(old_roots.tolist())).delete(synchronize_session=False)
 
@@ -208,3 +224,26 @@ def materialize_changes(dataset_name: str, old_roots):
     new_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==metadata['analysisversion'].version).first()
     new_version.valid = True
     session.commit()
+
+@celery.task(name='process:app.tasks.materialize_delta_annotation_task')
+def materialize_delta_annotation_task(args):
+    """ Helper for materialize_annotations_delta """
+    (block, col, time_stamp,  mm_info, cg_info) = args
+    cg = chunkedgraph.ChunkedGraph(**cg_info)
+    mm = materializationmanager.MaterializationManager(**mm_info)
+    annos_list = []
+    for id_, sup_id in block:
+        new_root = cg.get_root(sup_id, time_stamp=time_stamp)
+        annos_list.append({
+            'id': id_,
+            col: int(new_root)
+        })
+
+    try:
+        mm.bulk_update_annotations(annos_list)
+        mm.commit_session()
+    except Exception as e:
+        print(e)
+        print("Timestamp:", time_stamp)
+        print(annos_list)
+        raise Exception(e)
