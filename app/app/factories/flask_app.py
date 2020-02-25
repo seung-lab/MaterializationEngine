@@ -19,7 +19,7 @@ def create_app(test_config=None):
                 instance_relative_config=True,
                 template_folder="../../templates")
     # load configuration (from test_config if passed)
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
 
     if test_config is None:
         app = configure_app(app)
