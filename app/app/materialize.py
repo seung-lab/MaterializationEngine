@@ -18,7 +18,7 @@ import logging
 
 logging.info(f"PYCHUNKEDGRAPH VERSION {pychunkedgraph.__version__}")
 
-def _process_all_annotations_task(args):
+def _process_all_annotations_thread(args):
     """ Helper for process_all_annotations """
     anno_id_start, anno_id_end, dataset_name, \
         table_name, schema_name, version, \
@@ -475,7 +475,7 @@ def materialize_root_ids_delta(cg_table_id,
 
         for root_id_block in root_id_blocks:
             multi_args.append([root_id_block, mm.get_serialized_info()])
-    
+
     return multi_args, new_root_ids, expired_root_ids
         # if n_threads == 1:
         #     results = mu.multiprocess_func(
