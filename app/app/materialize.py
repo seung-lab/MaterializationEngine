@@ -18,7 +18,7 @@ import logging
 
 logging.info(f"PYCHUNKEDGRAPH VERSION {pychunkedgraph.__version__}")
 
-def _process_all_annotations_thread(args):
+def _process_all_annotations_task(args):
     """ Helper for process_all_annotations """
     anno_id_start, anno_id_end, dataset_name, \
         table_name, schema_name, version, \
@@ -48,30 +48,16 @@ def _process_all_annotations_thread(args):
                                                                    pixel_ratios=pixel_ratios,
                                                                    time_stamp=time_stamp)
         deserialized_annotation['id'] = int(annotation_id)
-        # this is now done in deserialization
-        # sv_id_to_root_id_dict = {}
-        # if sv_ids is not None:
-        #     for i_sv_id, sv_id in enumerate(sv_ids):
-        #         print("%d / %d" % (i_sv_id + 1, len(sv_ids)), end='\r')
-
-        #         # Read root_id from pychunkedgraph
-        #         sv_id_to_root_id_dict[sv_id] = cg.get_root(sv_id)
-
 
         if mm.is_sql:
-            # mm.add_annotation_to_sql_database(deserialized_annotation)
             annos_list.append(deserialized_annotation)
-        # else:
         annos_dict[annotation_id] = deserialized_annotation
 
     try:
         mm.bulk_insert_annotations(annos_list)
         mm.commit_session()
     except Exception as e:
-        print(e)
-        print("Timestamp:", time_stamp)
-        print(annos_dict)
-        raise Exception(e)
+        logging.error(f"Failed to insert annotations: {e}")
 
 
 def _materialize_root_ids_thread(args):
@@ -97,30 +83,6 @@ def _materialize_root_ids_thread(args):
         mm.bulk_insert_annotations(annos_list)
         mm.commit_session()
 
-
-# def _materialize_root_ids_inc_thread(args):
-#     root_ids, serialized_mm_info = args
-#     CellSegment = em_models.make_cell_segment_model(serialized_mm_info["dataset_name"],
-#                                                     serialized_mm_info["version"])
-#     mm = materializationmanager.MaterializationManager(**serialized_mm_info,
-#                                                        annotation_model=model)
-
-#     annos_list = []
-
-#     root_ids = np.array(root_ids)
-#     old_segments= mm.this_sqlalchemy_session.query(CellSegment).filter(CellSegment.id.in_(root_ids)).all()
-#     old_ids = np.array([s.id for s in old_segments])
-#     new_ids = root_ids[~np.isin(root_ids, old_ids)]
-
-#     #for root_id in new_ids:
-#     #    ann = {"id": int(root_id)}
-#     #    annos_list.append(ann)
-
-#     #mm.bulk_insert_annotations(annos_list)
-#     #mm.commit_session()
-#     return new_ids.tolist()
-
-
 def _materialize_delta_annotation_thread(args):
     """ Helper for materialize_annotations_delta """
     (block, col, time_stamp,  mm_info, cg_info) = args
@@ -138,11 +100,7 @@ def _materialize_delta_annotation_thread(args):
         mm.bulk_update_annotations(annos_list)
         mm.commit_session()
     except Exception as e:
-        print(e)
-        print("Timestamp:", time_stamp)
-        print(annos_list)
-        raise Exception(e)
-
+        logging.error(f"Failed to insert annotations: {e}")
 
 def find_max_root_id_before(cg,
                             time_stamp,
@@ -249,7 +207,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
                             sqlalchemy_database_uri=None,
                             amdb_client=None, amdb_instance_id=None,
                             cg_client=None, cg_instance_id=None,
-                            block_size=2500, n_threads=1):
+                            block_size=2500):
     """ Reads data from all annotations and acquires their mapping to root_ids
 
     :param dataset_name: str
@@ -266,7 +224,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
         amdb = AnnotationMetaDB(client=amdb_client,
                                 instance_id=amdb_instance_id)
     else:
-        raise Exception("Missing Instance ID for AnnotationMetaDB")
+        logging.error("Missing Instance ID for AnnotationMetaDB")
 
     if analysisversion is None:
         version = 0
@@ -282,7 +240,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
                                        client=cg_client,
                                        instance_id=cg_instance_id)
     else:
-        raise Exception("Missing Instance ID")
+        logging.error("Missing Instance ID")
 
     cv_path, pixel_ratios = get_segmentation_and_scales_from_infoservice(
         dataset_name)
@@ -301,7 +259,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     max_annotation_id = amdb.get_max_annotation_id(dataset_name,
                                                    table_name)
 
-    print("Max annotation id: %d" % max_annotation_id)
+    logging.info(f"Max annotation id: {max_annotation_id}")
 
     if max_annotation_id == 0:
         return {}
@@ -319,9 +277,9 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     cg_info = cg.get_serialized_info()
     amdb_info = amdb.get_serialized_info()
 
-    if n_threads > 1:
-        del cg_info["credentials"]
-        del amdb_info["credentials"]
+    # if n_threads > 1:
+    #     del cg_info["credentials"]
+    #     del amdb_info["credentials"]
 
     n_parts = int(max(1, np.ceil(max_annotation_id / block_size)))
     n_parts += 1
@@ -336,16 +294,6 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
                            cg_table_id, amdb_info, cg_info,
                            mm.get_serialized_info(), cv_info, pixel_ratios])
     return multi_args
-    # if n_threads == 1:
-    #     results = mu.multiprocess_func(
-    #         _process_all_annotations_thread, multi_args,
-    #         n_threads=n_threads,
-    #         verbose=True, debug=n_threads == 1)
-    # else:
-    #     results = mu.multisubprocess_func(
-    #         _process_all_annotations_thread, multi_args,
-    #         n_threads=n_threads, package_name="materializationengine")
-
 
 def process_existing_annotations(cg_table_id,
                                  dataset_name,
@@ -356,7 +304,7 @@ def process_existing_annotations(cg_table_id,
                                  analysisversion=None,
                                  sqlalchemy_database_uri=None,
                                  cg_client=None, cg_instance_id=None,
-                                 block_size=2500, n_threads=1):
+                                 block_size=2500):
     """ update existing entries in a materialized database
     filling in empty supervoxelID's and out of date rootIDs
     for root IDs which have expired between a base timestamp
@@ -388,6 +336,7 @@ def process_existing_annotations(cg_table_id,
     else:
         version = analysisversion.version
         version_id = analysisversion.id
+    amdb = AnnotationMetaDB(**serialized_amdb_info)
 
     if cg_client is None:
         cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id)
@@ -396,7 +345,7 @@ def process_existing_annotations(cg_table_id,
                                        client=cg_client,
                                        instance_id=cg_instance_id)
     else:
-        raise Exception("Missing Instance ID")
+        logging.error("Missing Instance ID")
 
     cv_path, pixel_ratios = get_segmentation_and_scales_from_infoservice(
         dataset_name)
@@ -416,7 +365,7 @@ def process_existing_annotations(cg_table_id,
     max_annotation_id = amdb.get_max_annotation_id(dataset_name,
                                                    table_name)
 
-    print("Max annotation id: %d" % max_annotation_id)
+    logging.info(f"Max annotation id: {max_annotation_id}")
 
     if max_annotation_id == 0:
         return {}
@@ -449,8 +398,6 @@ def process_existing_annotations(cg_table_id,
                            time_stamp,
                            cg_table_id, amdb_info, cg_info,
                            mm.get_serialized_info(), cv_info, pixel_ratios])
-
-    print(multi_args)
 
     if n_threads == 1:
         results = mu.multiprocess_func(
@@ -519,18 +466,8 @@ def materialize_root_ids_delta(cg_table_id,
     print(f'found {len(new_root_ids)} new root_ids, \
     {len(expired_root_ids)} expired, \
     {len(existing_new_cellsegments)} of new ones already in cellsegments')
-
     existing_new_root_ids = np.array([cs.id for cs in existing_new_cellsegments], dtype=np.uint64)
     filtered_new_root_ids = new_root_ids[~np.isin(new_root_ids, existing_new_root_ids)]
-
-    # DEPRECATED OLD SLOW WAY OF DETERMINING ROOT IDS
-    # root_ids = np.array(cg.get_latest_roots(time_stamp=time_stamp,
-    #                                n_threads=n_threads))
-    # old_root_ids = np.array(cg.get_latest_roots(time_stamp=time_stamp_base,
-    #                                n_threads=n_threads))
-    # slow_expired_root_ids = old_root_ids[~np.isin(old_root_ids, root_ids)]
-    # slow_new_root_ids = root_ids[~np.isin(root_ids, old_root_ids)]
-
     print(f'Inserting {len(filtered_new_root_ids)} root_ids into cellsegment table')
     if len(filtered_new_root_ids) > 0:
         root_id_blocks = np.array_split(filtered_new_root_ids, n_threads*3)
@@ -538,18 +475,19 @@ def materialize_root_ids_delta(cg_table_id,
 
         for root_id_block in root_id_blocks:
             multi_args.append([root_id_block, mm.get_serialized_info()])
+    
+    return multi_args, new_root_ids, expired_root_ids
+        # if n_threads == 1:
+        #     results = mu.multiprocess_func(
+        #         _materialize_root_ids_thread, multi_args,
+        #         n_threads=n_threads,
+        #         verbose=True, debug=n_threads == 1)
+        # else:
+        #     results = mu.multisubprocess_func(
+        #         _materialize_root_ids_thread, multi_args,
+        #         n_threads=n_threads, package_name="materializationengine")
 
-        if n_threads == 1:
-            results = mu.multiprocess_func(
-                _materialize_root_ids_thread, multi_args,
-                n_threads=n_threads,
-                verbose=True, debug=n_threads == 1)
-        else:
-            results = mu.multisubprocess_func(
-                _materialize_root_ids_thread, multi_args,
-                n_threads=n_threads, package_name="materializationengine")
-
-    return new_root_ids, expired_root_ids
+    # return new_root_ids, expired_root_ids
 
 
 def materialize_annotations_delta(
@@ -611,17 +549,16 @@ def materialize_annotations_delta(
                                   mm.get_serialized_info(),
                                   cg_info))
 
-            if n_threads == 1:
-                results = mu.multiprocess_func(
-                    _materialize_delta_annotation_thread, multi_args,
-                    n_threads=n_threads,
-                    verbose=True, debug=n_threads == 1)
-            else:
-                results = mu.multisubprocess_func(
-                    _materialize_delta_annotation_thread, multi_args,
-                    n_threads=n_threads, package_name="materializationengine")
-
-        # version_session.commit()
+            # if n_threads == 1:
+            #     results = mu.multiprocess_func(
+            #         _materialize_delta_annotation_thread, multi_args,
+            #         n_threads=n_threads,
+            #         verbose=True, debug=n_threads == 1)
+            # else:
+            #     results = mu.multisubprocess_func(
+            #         _materialize_delta_annotation_thread, multi_args,
+            #         n_threads=n_threads, package_name="materializationengine")
+    return multi_args
     
 
 def materialize_root_ids(cg_table_id, dataset_name,
@@ -731,6 +668,6 @@ def materialize_all_annotations(cg_table_id,
                             cg_client=cg_client,
                             cg_instance_id=cg_instance_id,
                             block_size=block_size,
-                            n_threads=n_threads)
+                            )
     return queued_annotations
 
