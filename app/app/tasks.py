@@ -159,10 +159,12 @@ def materialize_root_ids(metadata: dict):
                                                                   analysisversion=metadata['new_version'],
                                                                   sqlalchemy_database_uri=metadata['new_version_db_uri'],
                                                                   cg_instance_id=CG_INSTANCE_ID)
-    materialize_root_ids_subtask.apply_async(multi_args) # threading???
+    subtasks = []
+    for args in multi_args:
+        subtasks.append(materialize_root_ids_subtask.s(args))
+    results = group(subtasks)()
     metadata['old_roots'] = old_roots
     return metadata
-
 
 @celery.task(name='process:app.tasks.materialize_annotations')
 def materialize_annotations(metadata: dict):
@@ -178,7 +180,11 @@ def materialize_annotations(metadata: dict):
                                                 cg_instance_id=CG_INSTANCE_ID,
                                                 sqlalchemy_database_uri=metadata['version_db_uri'],
                                                 block_size=100)
-        process_all_annotations_subtask.apply_async(materialized_info)
+    subtasks = []
+    for args in materialized_info:
+        subtasks.append(process_all_annotations_subtask.s(args))
+    results = group(subtasks)()
+    for table_info in missing_tables_info:
         at = AnalysisTable(schema=table_info['schema_name'],        
                            tablename=table_info['table_name'],
                            valid=True,
@@ -206,7 +212,11 @@ def materialize_annotations_delta(metadata: dict):
                                                                    metadata['new_version'],
                                                                    metadata['new_version_db_uri'],
                                                                    cg_instance_id=CG_INSTANCE_ID,)
-        materialize_delta_annotation_subtask.apply_async(delta_info)
+    subtasks = []
+    for args in delta_info:
+        subtasks.append(materialize_delta_annotation_subtask.s(args))
+    results = group(subtasks)()
+
     root_model = em_models.make_cell_segment_model(metadata['dataset_name'], version=metadata['new_version'].version)
     version_session.query(root_model).filter(root_model.id.in_(metadata['old_roots'].tolist())).delete(synchronize_session=False)
 
