@@ -45,7 +45,7 @@ services:
       image: 'materialize:tag'
       env_file:
         - ./.env.dev   
-      command: ["celery", "worker", "--app=app.main.celery","--pool=eventlet", "--concurrency=100", "--hostname=worker.threads@%h", "--queues=threads", "--loglevel=INFO"]
+      command: ["celery", "worker", "--app=app.main.celery","--pool=threads", "--concurrency=100", "--hostname=worker.threads@%h", "--queues=threads", "--loglevel=DEBUG"]
       depends_on:
         - materialize
         - redis
