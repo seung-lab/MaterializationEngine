@@ -28,12 +28,6 @@ def index():
                            datasets=get_datasets(),
                            version=__version__)
 
-
-@views.route("/test")
-def test():
-    return "Hello World"
-
-
 def make_df_with_links_to_id(objects, schema, url, col):
     df = pd.DataFrame(data=schema.dump(objects, many=True).data)
     df[col] = df.apply(lambda x:
