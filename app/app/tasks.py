@@ -216,7 +216,7 @@ def materialize_annotations_delta(metadata: dict):
     session.commit()
     return metadata
 
-@celery.task(name='process:app.tasks.process_all_annotations_task')
+@celery.task(name='threads:app.tasks.process_all_annotations_task')
 def process_all_annotations_subtask(args):
     """ Helper for process_all_annotations """
     anno_id_start, anno_id_end, dataset_name, \
@@ -258,7 +258,7 @@ def process_all_annotations_subtask(args):
     except Exception as e:
         logging.error(f"Failed to insert annotations: {e}")
 
-@celery.task(name='process:app.tasks.materialize_delta_annotation_subtask')
+@celery.task(name='threads:app.tasks.materialize_delta_annotation_subtask')
 def materialize_delta_annotation_subtask(args):
     """ Helper for materialize_annotations_delta """
     (block, col, time_stamp,  mm_info, cg_info) = args
@@ -279,7 +279,7 @@ def materialize_delta_annotation_subtask(args):
         logging.error(f"ANNOTATION LIST ERROR:{annos_list}")
         raise Exception(e)
 
-@celery.task(name='process:app.tasks.materialize_root_ids_subtask')
+@celery.task(name='threads:app.tasks.materialize_root_ids_subtask')
 def materialize_root_ids_subtask(args):
     root_ids, serialized_mm_info = args
     model = em_models.make_cell_segment_model(serialized_mm_info["dataset_name"],
