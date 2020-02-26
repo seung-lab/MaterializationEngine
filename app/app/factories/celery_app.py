@@ -4,9 +4,9 @@ def create_celery(app=None, celery=None):
     celery.conf.broker_url = app.config['CELERY_BROKER_URL']
     celery.conf.update({
     'task_routes': ('app.task_router.TaskRouter'),
-    'task_serializer': 'json',
-    'result_serializer': 'json',
-    'accept_content': ['json']})
+    'task_serializer': 'pickle',
+    'result_serializer': 'pickle',
+    'accept_content': ['pickle']})
     celery.conf.update(app.config)
     TaskBase = celery.Task
     class ContextTask(TaskBase):
