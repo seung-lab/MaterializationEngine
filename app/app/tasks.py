@@ -76,7 +76,9 @@ def get_materialization_metadata(dataset_name: str, database_version: int, auto:
         base_mat_version = (session.query(AnalysisVersion).order_by(AnalysisVersion.version.desc()).first())
     else:
         base_mat_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==database_version).first()
-    logging.info(base_mat_version)
+
+    logging.info(f"BASE MATERIALIZATION VERSION: {base_mat_version}")
+
     base_mat_version_db_uri = format_version_db_uri(SQL_URI, dataset_name,  base_mat_version.version)
     try:
         info_client  = InfoServiceClient(dataset_name=dataset_name)
@@ -89,7 +91,7 @@ def get_materialization_metadata(dataset_name: str, database_version: int, auto:
                 'base_db_name': base_mat_version.dataset,
                 'cg_table_id': str(cg_table_id),
                 }
-        logging.info(f"METADATA:{metadata}")
+        logging.info(f"MATERIALIZATION TASK METADATA:{metadata}")
     except Exception as e:
         logging.error(f"Could not connect to infoservice: {e}") 
         raise e
@@ -98,21 +100,22 @@ def get_materialization_metadata(dataset_name: str, database_version: int, auto:
 
 @celery.task(base=SqlAlchemyTask, name='process:app.tasks.create_database_from_template')   
 def create_database_from_template(metadata: dict):
-    dataset_name = metadata['dataset_name']
-    new_mat_version = materializationmanager.create_new_version(SQL_URI, dataset_name, str(datetime.datetime.utcnow()))
-    new_mat_version_db_name = f'{dataset_name}_v{new_mat_version.version}'
-    new_mat_version_db_uri = format_version_db_uri(SQL_URI, dataset_name, new_mat_version.version)
+    new_mat_version = materializationmanager.create_new_version(SQL_URI, metadata['dataset_name'], str(datetime.datetime.utcnow()))
+    new_mat_version_db_name = f"{metadata['dataset_name']}_v{new_mat_version.version}"
+    new_mat_version_db_uri = format_version_db_uri(SQL_URI, metadata['dataset_name'], new_mat_version.version)
 
     metadata['new_mat_version'] = new_mat_version
     metadata['new_mat_version_db_name'] = str(new_mat_version_db_name)
     metadata['new_mat_version_db_uri'] = str(new_mat_version_db_uri)
-    logging.info(f"____________UPDATED METADATA___________: {metadata}")
+       
     conn = engine.connect()
     conn.execute("commit")
-    logging.info("Connecting....")
+    
+    logging.info("CONNECTING TO DB....")
+    
     conn.execute(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = '{metadata['base_db_name']}';")
     conn.execute(f"create database {new_mat_version_db_name} TEMPLATE {metadata['base_mat_version']}")
-    logging.info(metadata['base_mat_version'])
+        
     tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == metadata['base_mat_version']).all()
 
     for table in tables:
@@ -159,7 +162,9 @@ def materialize_root_ids(metadata: dict):
 @celery.task(name='process:app.tasks.materialize_annotations')
 def materialize_annotations(metadata: dict):
     missing_tables_info = get_missing_tables(metadata['dataset_name'], metadata['base_mat_version'])
-    logging.info(missing_tables_info)
+   
+    logging.info(f"MISSING TABLES: {missing_tables_info}")
+   
     for table_info in missing_tables_info:
         materialized_info = materialize.materialize_all_annotations(metadata["cg_table_id"],
                                                 metadata["dataset_name"],
@@ -271,7 +276,7 @@ def materialize_delta_annotation_subtask(args):
         mm.commit_session()
     except Exception as e:
         logging.error(e)
-        logging.error(f"Annotation list error:{annos_list}")
+        logging.error(f"ANNOTATION LIST ERROR:{annos_list}")
         raise Exception(e)
 
 @celery.task(name='process:app.tasks.materialize_root_ids_subtask')
