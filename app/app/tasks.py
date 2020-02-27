@@ -84,11 +84,15 @@ def run_materialization(dataset_name: str, database_version: int):
         database_version {int} -- Version of database to use to update from.
     """
     logging.info(f"DATASET_NAME: {dataset_name} | DATABASE_VERSION: {database_version}")
-    ret = (get_materialization_metadata.s(dataset_name, database_version) | create_database_from_template.s() | materialize_root_ids.s() | materialize_annotations.s() | materialize_annotations_delta.s()).apply_async()
+    ret = (get_materialization_metadata.s(dataset_name, database_version) | 
+           create_database_from_template.s() | 
+           materialize_root_ids.s() | 
+           materialize_annotations.s() |
+           materialize_annotations_delta.s()).apply_async()
 
 
 @celery.task(base=SqlAlchemyTask, name='process:app.tasks.get_materialization_metadata')   
-def get_materialization_metadata(dataset_name: str, database_version: int=None, use_latest: bool=True) -> dict:
+def get_materialization_metadata(dataset_name: str, database_version: int, use_latest: bool=False) -> dict:
     """Generate metadata for materialization, returns infoclient data and generates the template
     analysis database version for updating.
     
@@ -97,7 +101,8 @@ def get_materialization_metadata(dataset_name: str, database_version: int=None, 
         database_version {int} -- Version to use as template.
     
     Keyword Arguments:
-        use_latest {bool} -- Use latest version of databaes if True. Gets specific version if false (default: {False})
+        use_latest {bool} -- Use latest version of databaes if True. 
+                             Gets specific version if false (default: {False})
     
     Raises:
         info_service_error: Fails to connect to infoservice.
@@ -111,7 +116,7 @@ def get_materialization_metadata(dataset_name: str, database_version: int=None, 
         base_mat_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==database_version).first()
 
     logging.info(f"BASE MATERIALIZATION VERSION: {base_mat_version}")
-
+    
     base_mat_version_db_uri = format_version_db_uri(SQL_URI, dataset_name,  base_mat_version.version)
     try:
         info_client  = InfoServiceClient(dataset_name=dataset_name)
@@ -144,11 +149,11 @@ def create_database_from_template(metadata: dict) -> dict:
     
     logging.info("CONNECTING TO DB....")
     
-    conn.execute(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = '{metadata['base_db_name']}';")
+    conn.execute(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = '{metadata['base_mat_version']}';")
     conn.execute(f"create database {new_mat_version_db_name} TEMPLATE {metadata['base_mat_version']}")
         
     tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == metadata['base_mat_version']).all()
-
+    logging.info(tables)
     for table in tables:
         if table.schema != em_models.root_model_name.lower():
             new_analysistable = AnalysisTable(schema=table.schema,
@@ -170,7 +175,7 @@ def materialize_root_ids(metadata: dict) -> dict:
     prev_max_id = int(base_mat_version_session.query(func.max(root_model.id).label('max_root_id')).first()[0])
     cg = chunkedgraph.ChunkedGraph(table_id=metadata['cg_table_id'])
     max_root_id = materialize.find_max_root_id_before(cg,
-                                                      metadata['base_version_timestamp'],
+                                                      metadata['base_mat_version'].timestamp,
                                                       2*chunkedgraph.LOCK_EXPIRED_TIME_DELTA,
                                                       start_id=np.uint64(prev_max_id),
                                                       delta_id=100)
@@ -211,7 +216,7 @@ def materialize_annotations(metadata: dict) -> dict:
         at = AnalysisTable(schema=table_info['schema_name'],        
                            tablename=table_info['table_name'],
                            valid=True,
-                           analysisversion=metadata['analysisversion'])
+                           analysisversion=metadata['new_mat_version'])
         session.add(at)
         session.commit()
     return metadata
