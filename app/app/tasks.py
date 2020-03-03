@@ -36,11 +36,6 @@ Base.metadata.create_all(engine)
 
 BLACKLIST = ["pni_synapses", "pni_synapses_i2",  "is_chandelier"]
 
-@celery.task(name='process:app.tasks.test_add')
-def test_celery(x, y):
-    return x + y
-
-
 class SqlAlchemyTask(Task):
     """An abstract Celery Task class that ensures that the connection the the
     database is closed on task completion"""
@@ -73,8 +68,8 @@ def get_missing_tables(dataset_name: str, analysisversion: int) -> list:
 
 def run_materialization(dataset_name: str, database_version: int):
     """Start celery based materialization. A database and version are used as a 
-    base to update annotations.A series of tasks are chained in sequence passing 
-    metadata between each task. Requires pickle.
+    base to update annotations. A series of tasks are chained in sequence passing 
+    metadata between each task. Requires pickle celery serialization.
 
     Arguments:
         dataset_name {str} -- Name of dataset to use as a base.
@@ -82,14 +77,13 @@ def run_materialization(dataset_name: str, database_version: int):
     """
     logging.info(f"DATASET_NAME: {dataset_name} | DATABASE_VERSION: {database_version}")
     ret = (get_materialization_metadata.s(dataset_name, database_version) | 
-           create_database_from_template.s() | 
+           add_analysis_tables.s() | 
            materialize_root_ids.s() | 
            materialize_annotations.s() |
            materialize_annotations_delta.s()).apply_async()
 
-
-@celery.task(base=SqlAlchemyTask, name='process:app.tasks.get_materialization_metadata')   
-def get_materialization_metadata(dataset_name: str, database_version: int, use_latest: bool=False) -> dict:
+@celery.task(name='process:app.tasks.get_materialization_metadata')   
+def get_materialization_metadata(dataset_name: str, database_version: int, use_latest: bool=True) -> dict:
     """Generate metadata for materialization, returns infoclient data and generates the template
     analysis database version for updating.
 
@@ -107,11 +101,27 @@ def get_materialization_metadata(dataset_name: str, database_version: int, use_l
     Returns:
         dict -- Metadata used in proceeding celery tasks.
     """
-    base_mat_version = (session.query(AnalysisVersion).order_by(AnalysisVersion.version.desc()).first())
-
+    metadata = {}
+    new_incremental_version = True
+    if use_latest:
+        base_mat_version = (session.query(AnalysisVersion).order_by(AnalysisVersion.version.desc()).first())
+    else:
+        base_mat_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==database_version).first()
     if base_mat_version is None:
-        base_mat_version = materializationmanager.create_new_version(SQL_URI, dataset_name, str(datetime.datetime.utcnow()))
-        # base_mat_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==database_version).first()
+        new_incremental_version = False
+        base_mat_name = f"{dataset_name}_v1"
+        conn = engine.connect()
+        conn.execute("COMMIT")
+        conn.execute(f"CREATE DATABASE {base_mat_name}")
+        base_mat_version = materializationmanager.create_new_version(SQL_URI,
+                                                                     dataset_name,
+                                                                     str(datetime.datetime.utcnow()))
+        logging.info(f"NO MATERIALIZATION DATABASE EXISTS. CREATED DATABASE: {base_mat_version}")
+        metadata['new_mat_version'] = base_mat_version
+        metadata['new_mat_version_db_name'] = f"{dataset_name}_v{base_mat_version.version}"
+        metadata['new_mat_version_db_uri'] = format_version_db_uri(SQL_URI, 
+                                                                   dataset_name,
+                                                                   base_mat_version.version)
 
     logging.info(f"BASE MATERIALIZATION VERSION: {base_mat_version}")
 
@@ -124,33 +134,40 @@ def get_materialization_metadata(dataset_name: str, database_version: int, use_l
     except Exception as info_service_error:
         logging.error(f"Could not connect to infoservice: {info_service_error}") 
         raise info_service_error
-    metadata = {'dataset_name': str(dataset_name),
-        'base_mat_version': base_mat_version,
-        'base_mat_version_db_uri': str(base_mat_version_db_uri),
-        'base_db_name': base_mat_version.dataset,
-        'cg_table_id': str(cg_table_id), }
+    metadata.update(dataset_name = str(dataset_name),
+        base_mat_version = base_mat_version,
+        base_mat_version_db_uri = str(base_mat_version_db_uri),
+        base_db_name = base_mat_version.dataset,
+        cg_table_id = str(cg_table_id))
+    if new_incremental_version:
+        metadata = create_database_from_template(metadata)
     logging.info(f"MATERIALIZATION TASK METADATA:{metadata}")
     return metadata
 
 
-@celery.task(base=SqlAlchemyTask, name='process:app.tasks.create_database_from_template')   
+@celery.task(name='process:app.tasks.create_database_from_template')   
 def create_database_from_template(metadata: dict) -> dict:
+    logging.info(f"METADATA:_____________{metadata}")
+
     new_mat_version = materializationmanager.create_new_version(SQL_URI, metadata['dataset_name'], str(datetime.datetime.utcnow()))
     new_mat_version_db_name = f"{metadata['dataset_name']}_v{new_mat_version.version}"
     new_mat_version_db_uri = format_version_db_uri(SQL_URI, metadata['dataset_name'], new_mat_version.version)
-
+    
     metadata['new_mat_version'] = new_mat_version
     metadata['new_mat_version_db_name'] = str(new_mat_version_db_name)
     metadata['new_mat_version_db_uri'] = str(new_mat_version_db_uri)
-
+    
     conn = engine.connect()
     conn.execute("commit")
-
     logging.info("CONNECTING TO DB....")
-
     conn.execute(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = '{metadata['base_mat_version']}';")
     conn.execute(f"create database {new_mat_version_db_name} TEMPLATE {metadata['base_mat_version']}")
+    
+    return metadata
 
+
+@celery.task(name='process:app.tasks.add_analysis_tables')   
+def add_analysis_tables(metadata: dict) -> dict:
     tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == metadata['base_mat_version']).all()
     logging.info(tables)
     for table in tables:
@@ -158,7 +175,7 @@ def create_database_from_template(metadata: dict) -> dict:
             new_analysistable = AnalysisTable(schema=table.schema,
                                               tablename=table.tablename,
                                               valid=False,
-                                              analysisversion_id=new_mat_version.id)
+                                              analysisversion_id=metadata['new_mat_version'].id)
             session.add(new_analysistable)
             session.commit()
     return metadata
