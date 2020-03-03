@@ -137,7 +137,6 @@ def get_materialization_metadata(dataset_name: str, database_version: int, use_l
     metadata.update(dataset_name = str(dataset_name),
         base_mat_version = base_mat_version,
         base_mat_version_db_uri = str(base_mat_version_db_uri),
-        base_db_name = base_mat_version.dataset,
         cg_table_id = str(cg_table_id))
     if new_incremental_version:
         metadata = create_database_from_template(metadata)
@@ -169,9 +168,11 @@ def create_database_from_template(metadata: dict) -> dict:
 @celery.task(name='process:app.tasks.add_analysis_tables')   
 def add_analysis_tables(metadata: dict) -> dict:
     tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == metadata['base_mat_version']).all()
-    logging.info(tables)
+    logging.info(f"!!!!!!!!!!!!!!!!!!!!!!!!!!TABLES {tables}")
+
     for table in tables:
         if table.schema != em_models.root_model_name.lower():
+            logging.info(f"SCHEMA {table.schema}: TABLENAME {table.tablename}")
             new_analysistable = AnalysisTable(schema=table.schema,
                                               tablename=table.tablename,
                                               valid=False,
