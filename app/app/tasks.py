@@ -23,8 +23,7 @@ from app.celery_worker import celery
 
 SQL_URI = current_app.config['MATERIALIZATION_POSTGRES_URI']
 BIGTABLE = current_app.config['BIGTABLE_CONFIG']
-CG_TABLE = BIGTABLE['instance_id']
-DATASET = BIGTABLE['project_id']
+PROJECT_ID = BIGTABLE['project_id']
 CG_INSTANCE_ID = BIGTABLE['instance_id']
 AMDB_INSTANCE_ID = BIGTABLE['amdb_instance_id']
 CHUNKGRAPH_TABLE_ID = current_app.config['CHUNKGRAPH_TABLE_ID']
@@ -189,7 +188,7 @@ def materialize_root_ids(metadata: dict) -> dict:
     base_mat_version_session = BaseMatVersionSession()
     root_model = em_models.make_cell_segment_model(metadata['dataset_name'], 
                                                    version=metadata['new_mat_version'].version)
-
+    
     prev_max_id = int(base_mat_version_session.query(func.max(root_model.id).label('max_root_id')).first()[0])
     cg = chunkedgraph.ChunkedGraph(table_id=metadata['cg_table_id'])
     max_root_id = materialize.find_max_root_id_before(cg,
@@ -227,8 +226,8 @@ def materialize_annotations(metadata: dict) -> dict:
                                                 analysisversion=metadata['new_mat_version'],
                                                 time_stamp=metadata['new_mat_version'].time_stamp,
                                                 cg_instance_id=CG_INSTANCE_ID,
-                                                sqlalchemy_database_uri=metadata['version_db_uri'],
-                                                block_size=100)
+                                                sqlalchemy_database_uri=metadata['new_mat_version_db_uri'],
+                                                block_size=1000)
         process_all_annotations_subtask.delay(materialized_info)
     for table_info in missing_tables_info:
         at = AnalysisTable(schema=table_info['schema_name'],        
