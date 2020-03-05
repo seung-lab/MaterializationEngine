@@ -12,7 +12,7 @@ import requests
 import logging
 
 
-__version__ = "0.1.2"
+__version__ = "0.2.5"
 
 views = Blueprint("views", __name__, url_prefix='/materialize')
 
@@ -36,6 +36,10 @@ def make_df_with_links_to_id(objects, schema, url, col):
                                                             x[col]),
                                                             axis=1)
     return df
+
+@views.route('/test')
+def test_health():
+    return jsonify({"STATUS: ":"OK"}), 200
 
 @views.route('/dataset')
 def datasets():
