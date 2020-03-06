@@ -43,7 +43,7 @@ class SqlAlchemyTask(Task):
         if session is not None:
             Session.remove()
 
-def get_missing_tables(dataset_name: str, analysisversion: int) -> list:
+def get_missing_tables(dataset_name: str, dataset_version: int) -> list:
     """Get list of analysis tables from database. If there are blacklisted 
     tables they will not be included.
 
@@ -54,7 +54,7 @@ def get_missing_tables(dataset_name: str, analysisversion: int) -> list:
     Returns:
         list -- Tables that appear from versioned dataset
     """
-    tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == analysisversion).all()
+    tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == dataset_version).all()
 
     anno_client = AnnotationClient(dataset_name=dataset_name)
     all_tables = anno_client.get_tables()
@@ -83,8 +83,17 @@ def run_materialization(dataset_name: str, database_version: int, use_latest: bo
 
 @celery.task(name='process:app.tasks.setup_new_database')   
 def setup_new_database(database_name, version=1):
-    """[summary]
-    """    
+    """Create new analysis databse for materialization.
+    
+    Arguments:
+        database_name {str} -- Name of database to create
+    
+    Keyword Arguments:
+        version {int} -- Analysis version number to use (default: {1})
+    
+    Returns:
+        AnalysisVersion -- AnalysisVersion model of created database.
+    """
     database_uri = format_version_db_uri(SQL_URI, database_name, version)
 
     logging.info(database_uri)
@@ -104,7 +113,7 @@ def setup_new_database(database_name, version=1):
     base_mat_version = materializationmanager.create_new_version(database_uri,
                                                                 database_name,
                                                                 str(datetime.datetime.utcnow()))
-
+    logging.info(base_mat_version, base_mat_version.version)
     tables = get_missing_tables(database_name, base_mat_version)
     logging.info(base_mat_version.id)
     for table in tables:
@@ -144,6 +153,7 @@ def get_materialization_metadata(dataset_name: str, database_version: int, use_l
         base_mat_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==database_version).first()
     
     if base_mat_version is None:
+        increment = False
         base_mat_version = setup_new_database(dataset_name, database_version)
     
     if increment:
@@ -169,7 +179,15 @@ def get_materialization_metadata(dataset_name: str, database_version: int, use_l
 
 @celery.task(name='process:app.tasks.create_database_from_template')   
 def create_database_from_template(dataset_name, base_mat_version) -> dict:
-
+    """ Create a new database from existing version.
+    
+    Arguments:
+        dataset_name {str} -- Name of database to use.
+        base_mat_version {AnalysisVersion} -- Model of database to use as a template.
+    
+    Returns:
+        dict -- Appends metadata to dict to use in subsequent celery tasks in the chain.
+    """
     new_mat_version = materializationmanager.create_new_version(SQL_URI, dataset_name, str(datetime.datetime.utcnow()))
     new_mat_version_db_name = f"{dataset_name}_v{new_mat_version.version}"
     new_mat_version_db_uri = format_version_db_uri(SQL_URI, dataset_name, new_mat_version.version)
