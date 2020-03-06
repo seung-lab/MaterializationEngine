@@ -84,9 +84,7 @@ def run_materialization(dataset_name: str, database_version: int, use_latest: bo
 @celery.task(name='process:app.tasks.setup_new_database')   
 def setup_new_database(database_name, version=1):
     """[summary]
-    """
-    metadata = {}
-    
+    """    
     database_uri = format_version_db_uri(SQL_URI, database_name, version)
 
     logging.info(database_uri)
@@ -183,7 +181,7 @@ def create_database_from_template(dataset_name, base_mat_version) -> dict:
     conn = engine.connect()
     conn.execute("commit")
     logging.info("CONNECTING TO DB....")
-    conn.execute(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = '{metadata['base_mat_version']}';")
+    conn.execute(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = '{base_mat_version}';")
     conn.execute(f"create database {new_mat_version_db_name} TEMPLATE {base_mat_version}")
     
     return metadata
