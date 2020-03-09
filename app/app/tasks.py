@@ -139,7 +139,7 @@ def get_materialization_metadata(dataset_name: str, database_version: int, base_
 
 @celery.task(base=SqlAlchemyTask, name='process:app.tasks.setup_new_database') 
 def setup_new_database(metadata: dict) -> dict:
-    """Create new analysis databse for materialization.
+    """Create new analysis database for materialization.
 
     Arguments:
         dataset_name {str} -- Name of dataset to use as base.
