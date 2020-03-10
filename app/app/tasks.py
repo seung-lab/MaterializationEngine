@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.sql import func
 
 from app import materialize
-from app import materializationmanager
+from app import materializationmanager as manager
 from app.celery_worker import celery
 
 SQL_URI = current_app.config['MATERIALIZATION_POSTGRES_URI']
@@ -35,6 +35,7 @@ Base.metadata.create_all(engine)
 
 BLACKLIST = ["pni_synapses", "pni_synapses_i2",  "is_chandelier"]
 
+
 class SqlAlchemyTask(Task):
     """An abstract Celery Task class that ensures that the connection the the
     database is closed on task completion"""
@@ -42,6 +43,17 @@ class SqlAlchemyTask(Task):
     def after_return(self, status, retval, task_id, args, kwargs, einfo):
         if session is not None:
             Session.remove()
+
+
+def create_new_session(dataset_name, version):
+    database_uri = format_version_db_uri(SQL_URI,
+                                         dataset_name,
+                                         version)
+    engine = create_engine(database_uri, pool_recycle=3600, pool_size=20, max_overflow=50)
+    Session = scoped_session(sessionmaker(bind=engine, autocommit=False, autoflush=False))
+    session = Session()
+    return session
+
 
 def get_missing_tables(dataset_name: str, dataset_version: int) -> list:
     """Get list of analysis tables from database. If there are blacklisted 
@@ -75,6 +87,7 @@ def run_materialization(dataset_name: str, database_version: int, use_latest: bo
     """
     logging.info(f"DATASET_NAME: {dataset_name} | DATABASE_VERSION: {database_version}")
 
+    session = create_new_session(dataset_name, database_version)
     if use_latest:
         base_mat_version = (session.query(AnalysisVersion).order_by(AnalysisVersion.version.desc()).first())
     else:
@@ -122,7 +135,9 @@ def get_materialization_metadata(dataset_name: str, database_version: int, base_
         metadata.update(base_mat_version=base_mat_version)
 
     logging.info(f"BASE MATERIALIZATION VERSION: {base_mat_version}")
-    base_mat_version_db_uri = format_version_db_uri(SQL_URI, metadata['dataset_name'],  metadata['base_mat_version'].version)
+    base_mat_version_db_uri = format_version_db_uri(SQL_URI,
+                                                    metadata['dataset_name'],
+                                                    metadata['base_mat_version'].version)
     metadata.update(base_mat_version_db_uri=str(base_mat_version_db_uri))
     try:
         info_client = InfoServiceClient(dataset_name=metadata['dataset_name'])
@@ -153,16 +168,12 @@ def setup_new_database(metadata: dict) -> dict:
     new_database_uri = format_version_db_uri(SQL_URI,
                                              metadata['dataset_name'],
                                              metadata['database_version'])
-
     logging.info(new_database_uri)
-   
-
     new_mat_version_db_name = f"{metadata['dataset_name']}_v{metadata['database_version']}"
     metadata['new_mat_version_db_name'] = str(new_mat_version_db_name)
     metadata['new_mat_version_db_uri'] = str(new_database_uri)
 
     logging.info(f"NO MATERIALIZATION DATABASE EXISTS. CREATED DATABASE: {new_mat_version_db_name}")
-    
     engine = create_engine(SQL_URI)
     conn = engine.connect()
     conn.execute("commit")
@@ -173,9 +184,9 @@ def setup_new_database(metadata: dict) -> dict:
     session = Session()
     Base.metadata.create_all(engine)
     session.execute("CREATE EXTENSION postgis; CREATE EXTENSION postgis_topology;")
-    base_mat_version = materializationmanager.create_new_version(new_database_uri,
-                                                                 metadata['dataset_name'],
-                                                                 str(datetime.datetime.utcnow()))
+    base_mat_version = manager.create_new_version(new_database_uri,
+                                             metadata['dataset_name'],
+                                             str(datetime.datetime.utcnow()))
     metadata['base_mat_version'] = base_mat_version
     metadata['new_mat_version'] = base_mat_version
 
@@ -195,20 +206,22 @@ def setup_new_database(metadata: dict) -> dict:
 
 
 @celery.task(base=SqlAlchemyTask, name='process:app.tasks.create_database_from_template')
-def create_database_from_template(dataset_name, base_mat_version) -> dict:
+def create_database_from_template(metadata: dict) -> dict:
     """ Create a new database from existing version.
 
     Arguments:
-        dataset_name {str} -- Name of database to use.
-        base_mat_version {AnalysisVersion} -- Model of database to use as a template.
+        metadata {dict} -- Metadata used for materialization
 
     Returns:
         dict -- Appends metadata to dict to use in subsequent celery tasks in the chain.
     """
-    new_mat_version = materializationmanager.create_new_version(SQL_URI, dataset_name, str(datetime.datetime.utcnow()))
-    new_mat_version_db_name = f"{dataset_name}_v{new_mat_version.version}"
-    new_mat_version_db_uri = format_version_db_uri(SQL_URI, dataset_name, new_mat_version.version)
-    metadata = {}
+    new_mat_version = manager.create_new_version(SQL_URI,
+                                            metadata['dataset_name'],
+                                            str(datetime.datetime.utcnow()))
+    new_mat_version_db_name = f"{metadata['dataset_name']}_v{new_mat_version.version}"
+    new_mat_version_db_uri = format_version_db_uri(SQL_URI, 
+                                                   metadata['dataset_name'],
+                                                   new_mat_version.version)
     metadata['new_mat_version'] = new_mat_version
     metadata['new_mat_version_db_name'] = str(new_mat_version_db_name)
     metadata['new_mat_version_db_uri'] = str(new_mat_version_db_uri)
@@ -216,22 +229,23 @@ def create_database_from_template(dataset_name, base_mat_version) -> dict:
     conn = engine.connect()
     conn.execute("commit")
     logging.info("CONNECTING TO DB....")
-    conn.execute(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = '{base_mat_version}';")
-    conn.execute(f"create database {new_mat_version_db_name} TEMPLATE {base_mat_version}")
+    conn.execute(f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+                  WHERE pid <> pg_backend_pid() AND datname = '{metadata['base_mat_version']}';")
+    conn.execute(f"create database {new_mat_version_db_name} TEMPLATE {metadata['base_mat_version']}")
 
     return metadata
 
 
-@celery.task(name='process:app.tasks.add_analysis_tables')   
+@celery.task(name='process:app.tasks.add_analysis_tables')
 def add_analysis_tables(metadata: dict) -> dict:
     tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == metadata['base_mat_version']).all()        
     for table in tables:
         if table.schema != em_models.root_model_name.lower():
             logging.info(f"SCHEMA {table.schema}: TABLENAME {table.tablename}")
             new_analysistable = AnalysisTable(schema=table.schema,
-                                            tablename=table.tablename,
-                                            valid=False,
-                                            analysisversion_id=metadata['new_mat_version'].id)
+                                              tablename=table.tablename,
+                                              valid=False,
+                                              analysisversion_id=metadata['new_mat_version'].id)
             session.add(new_analysistable)
             session.commit()
     logging.info(f"TABLES {tables}")
@@ -267,6 +281,7 @@ def materialize_root_ids(metadata: dict) -> dict:
     results = group(subtasks)()
     metadata['old_roots'] = old_roots
     return metadata
+
 
 @celery.task(name='process:app.tasks.materialize_annotations')
 def materialize_annotations(metadata: dict) -> dict:
@@ -341,7 +356,7 @@ def process_all_annotations_subtask(args):
     cg = chunkedgraph.ChunkedGraph(**serialized_cg_info)
 
     cv = cloudvolume.CloudVolume(**serialized_cv_info)
-    mm = materializationmanager.MaterializationManager(**serialized_mm_info)
+    mm = manager.MaterializationManager(**serialized_mm_info)
 
     annos_dict = {}
     annos_list = []
@@ -375,7 +390,7 @@ def materialize_delta_annotation_subtask(args):
     """ Helper for materialize_annotations_delta """
     (block, col, time_stamp,  mm_info, cg_info) = args
     cg = chunkedgraph.ChunkedGraph(**cg_info)
-    mm = materializationmanager.MaterializationManager(**mm_info)
+    mm = manager.MaterializationManager(**mm_info)
     annos_list = []
     for id_, sup_id in block:
         new_root = cg.get_root(sup_id, time_stamp=time_stamp)
@@ -397,7 +412,7 @@ def materialize_root_ids_subtask(args):
     root_ids, serialized_mm_info = args
     model = em_models.make_cell_segment_model(serialized_mm_info['dataset_name'],
                                               serialized_mm_info['database_version'])
-    mm = materializationmanager.MaterializationManager(**serialized_mm_info,
+    mm = manager.MaterializationManager(**serialized_mm_info,
                                                        annotation_model=model)
     annos_dict = {}
     annos_list = []
