@@ -1,6 +1,6 @@
-git+git://github.com/seung-lab/igneous.git#egg=igneous
-git+git://github.com/seung-lab/PyChunkedGraph.git#egg=pychunkedgraph
-cloud-volume
+igneous
+pychunkedgraph
+cloud-volume==0.50.0
 emannotationschemas>=2.0.0
 DynamicAnnotationDB
 argschema<2.0.1
