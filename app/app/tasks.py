@@ -1,25 +1,25 @@
 import datetime
 import logging
 
+import cloudvolume
+import numpy as np
 from annotationframeworkclient.annotationengine import AnnotationClient
 from annotationframeworkclient.infoservice import InfoServiceClient
-from celery import Task
-from celery import group, chord, chain
-import cloudvolume
+from celery import Task, chain, chord, group
 from dynamicannotationdb.annodb_meta import AnnotationMetaDB
-from emannotationschemas.models import format_version_db_uri, Base
-from emannotationschemas.models import AnalysisVersion, AnalysisTable
 from emannotationschemas import models as em_models
+from emannotationschemas.models import (AnalysisTable, AnalysisVersion, Base,
+                                        format_version_db_uri)
 from flask import current_app
-import numpy as np
-from pychunkedgraph.backend import chunkedgraph
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.sql import func
+from sqlalchemy.exc import OperationalError
 
-from app import materialize
 from app import materializationmanager as manager
+from app import materialize
 from app.celery_worker import celery
+from pychunkedgraph.backend import chunkedgraph
 
 SQL_URI = current_app.config['MATERIALIZATION_POSTGRES_URI']
 BIGTABLE = current_app.config['BIGTABLE_CONFIG']
@@ -27,7 +27,7 @@ PROJECT_ID = BIGTABLE['project_id']
 CG_INSTANCE_ID = BIGTABLE['instance_id']
 AMDB_INSTANCE_ID = BIGTABLE['amdb_instance_id']
 CHUNKGRAPH_TABLE_ID = current_app.config['CHUNKGRAPH_TABLE_ID']
-
+SERVER_ADDRESS = "https://www.dynamicannotationframework.com/"
 engine = create_engine(SQL_URI, pool_recycle=3600, pool_size=20, max_overflow=50)
 Session = scoped_session(sessionmaker(bind=engine, autocommit=False, autoflush=False))
 session = Session()
@@ -45,17 +45,7 @@ class SqlAlchemyTask(Task):
             Session.remove()
 
 
-def create_new_session(dataset_name, version):
-    database_uri = format_version_db_uri(SQL_URI,
-                                         dataset_name,
-                                         version)
-    engine = create_engine(database_uri, pool_recycle=3600, pool_size=20, max_overflow=50)
-    Session = scoped_session(sessionmaker(bind=engine, autocommit=False, autoflush=False))
-    session = Session()
-    return session
-
-
-def get_missing_tables(dataset_name: str, dataset_version: int) -> list:
+def get_missing_tables(dataset_name: str, dataset_version: int, server_address: str = None) -> list:
     """Get list of analysis tables from database. If there are blacklisted 
     tables they will not be included.
 
@@ -66,9 +56,12 @@ def get_missing_tables(dataset_name: str, dataset_version: int) -> list:
     Returns:
         list -- Tables that appear from versioned dataset
     """
+    if server_address is None:
+        server_address = SERVER_ADDRESS
     tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == dataset_version).all()
 
-    anno_client = AnnotationClient(dataset_name=dataset_name)
+    anno_client = AnnotationClient(dataset_name=dataset_name,
+                                   server_address=server_address)
     all_tables = anno_client.get_tables()
     missing_tables_info = [t for t in all_tables
                            if (t['table_name'] not in [t.tablename for t in tables]) 
@@ -87,28 +80,33 @@ def run_materialization(dataset_name: str, database_version: int, use_latest: bo
     """
     logging.info(f"DATASET_NAME: {dataset_name} | DATABASE_VERSION: {database_version}")
 
-    session = create_new_session(dataset_name, database_version)
-    if use_latest:
-        base_mat_version = (session.query(AnalysisVersion).order_by(AnalysisVersion.version.desc()).first())
-    else:
-        base_mat_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==database_version).first()
-
-    logging.info(f"MATERIALZATION VERSION IS: {base_mat_version}")
-
-    if base_mat_version is None:
-        ret = (get_materialization_metadata.s(dataset_name, database_version) |
-               materialize_annotations.s()).apply_async()
-    else:
+    database_uri = format_version_db_uri(SQL_URI,
+                                         dataset_name,
+                                         database_version)
+    engine = create_engine(database_uri, pool_recycle=3600, pool_size=20, max_overflow=50)
+    Session = scoped_session(sessionmaker(bind=engine, autocommit=False, autoflush=False))
+    session = Session()
+    try:
+        if use_latest:
+            base_mat_version = (session.query(AnalysisVersion).order_by(AnalysisVersion.version.desc()).first())
+        else:
+            base_mat_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==database_version).first()
+        logging.info(f"MATERIALZATION VERSION IS: {base_mat_version}")
         ret = (get_materialization_metadata.s(dataset_name, database_version, base_mat_version) |
                create_database_from_template.s() |
                add_analysis_tables.s() |
                materialize_root_ids.s() |
                materialize_annotations.s() |
                materialize_annotations_delta.s()).apply_async()
+    except OperationalError as e:
+        logging.info(f"NO MATERIALIZATION DATABASE EXISTS: {e}")
+        ret = (get_materialization_metadata.s(dataset_name, database_version) |
+               materialize_annotations.s()).apply_async()
 
 
-@celery.task(name='process:app.tasks.get_materialization_metadata')   
-def get_materialization_metadata(dataset_name: str, database_version: int, base_mat_version=None) -> dict:
+@celery.task(name='process:app.tasks.get_materialization_metadata')
+def get_materialization_metadata(dataset_name: str, database_version: int,
+                                 base_mat_version=None, server_address: str = None) -> dict:
     """Generate metadata for materialization, returns infoclient data and generates the template
     analysis database version for updating.
 
@@ -126,6 +124,8 @@ def get_materialization_metadata(dataset_name: str, database_version: int, base_
     Returns:
         dict -- Metadata used in proceeding celery tasks.
     """
+    if server_address is None:
+        server_address = SERVER_ADDRESS
     metadata = {}
     metadata.update(dataset_name=str(dataset_name),
                     database_version=database_version)
@@ -140,7 +140,8 @@ def get_materialization_metadata(dataset_name: str, database_version: int, base_
                                                     metadata['base_mat_version'].version)
     metadata.update(base_mat_version_db_uri=str(base_mat_version_db_uri))
     try:
-        info_client = InfoServiceClient(dataset_name=metadata['dataset_name'])
+        info_client = InfoServiceClient(dataset_name=metadata['dataset_name'],
+                                        server_address=server_address)
         logging.info(info_client)
         data = info_client.get_dataset_info()
         cg_table_id = data['graphene_source'].rpartition('/')[-1]
@@ -152,7 +153,7 @@ def get_materialization_metadata(dataset_name: str, database_version: int, base_
     return metadata
 
 
-@celery.task(base=SqlAlchemyTask, name='process:app.tasks.setup_new_database') 
+@celery.task(base=SqlAlchemyTask, name='process:app.tasks.setup_new_database')
 def setup_new_database(metadata: dict) -> dict:
     """Create new analysis database for materialization.
 
@@ -185,8 +186,8 @@ def setup_new_database(metadata: dict) -> dict:
     Base.metadata.create_all(engine)
     session.execute("CREATE EXTENSION postgis; CREATE EXTENSION postgis_topology;")
     base_mat_version = manager.create_new_version(new_database_uri,
-                                             metadata['dataset_name'],
-                                             str(datetime.datetime.utcnow()))
+                                                  metadata['dataset_name'],
+                                                  str(datetime.datetime.utcnow()))
     metadata['base_mat_version'] = base_mat_version
     metadata['new_mat_version'] = base_mat_version
 
@@ -215,11 +216,12 @@ def create_database_from_template(metadata: dict) -> dict:
     Returns:
         dict -- Appends metadata to dict to use in subsequent celery tasks in the chain.
     """
-    new_mat_version = manager.create_new_version(SQL_URI,
-                                            metadata['dataset_name'],
-                                            str(datetime.datetime.utcnow()))
+    new_mat_version = manager.create_new_version(sql_uri=metadata['base_mat_version_db_uri'],
+                                                 dataset=metadata['dataset_name'],
+                                                 time_stamp=str(datetime.datetime.utcnow())
+                                                 )
     new_mat_version_db_name = f"{metadata['dataset_name']}_v{new_mat_version.version}"
-    new_mat_version_db_uri = format_version_db_uri(SQL_URI, 
+    new_mat_version_db_uri = format_version_db_uri(SQL_URI,
                                                    metadata['dataset_name'],
                                                    new_mat_version.version)
     metadata['new_mat_version'] = new_mat_version
@@ -252,7 +254,7 @@ def add_analysis_tables(metadata: dict) -> dict:
     return metadata
 
 
-@celery.task(base=SqlAlchemyTask, name='process:app.tasks.materialize_root_ids')   
+@celery.task(base=SqlAlchemyTask, name='process:app.tasks.materialize_root_ids')
 def materialize_root_ids(metadata: dict) -> dict:
     base_mat_version_engine = create_engine(metadata['base_mat_version_db_uri'])
     BaseMatVersionSession = sessionmaker(bind=base_mat_version_engine)
@@ -275,9 +277,7 @@ def materialize_root_ids(metadata: dict) -> dict:
                                                                               analysisversion=metadata['new_mat_version'],
                                                                               sqlalchemy_database_uri=metadata['new_mat_version_db_uri'],
                                                                               cg_instance_id=CG_INSTANCE_ID)
-    subtasks = []
-    for args in multi_args:
-        subtasks.append(materialize_root_ids_subtask.s(args))
+    subtasks = [materialize_root_ids_subtask.s(args) for args in multi_args]
     results = group(subtasks)()
     metadata['old_roots'] = old_roots
     return metadata
@@ -412,8 +412,7 @@ def materialize_root_ids_subtask(args):
     root_ids, serialized_mm_info = args
     model = em_models.make_cell_segment_model(serialized_mm_info['dataset_name'],
                                               serialized_mm_info['database_version'])
-    mm = manager.MaterializationManager(**serialized_mm_info,
-                                                       annotation_model=model)
+    mm = manager.MaterializationManager(**serialized_mm_info, annotation_model=model)
     annos_dict = {}
     annos_list = []
     for root_id in root_ids:
