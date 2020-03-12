@@ -27,7 +27,8 @@ PROJECT_ID = BIGTABLE['project_id']
 CG_INSTANCE_ID = BIGTABLE['instance_id']
 AMDB_INSTANCE_ID = BIGTABLE['amdb_instance_id']
 CHUNKGRAPH_TABLE_ID = current_app.config['CHUNKGRAPH_TABLE_ID']
-SERVER_ADDRESS = "https://tv1.dynamicannotationframework.com/"
+INFOSERVICE_ADDRESS = current_app.config['INFOSERVICE_ENDPOINT']
+ANNO_ADDRESS = current_app.config['ANNO_ENDPOINT']
 engine = create_engine(SQL_URI, pool_recycle=3600, pool_size=20, max_overflow=50)
 Session = scoped_session(sessionmaker(bind=engine, autocommit=False, autoflush=False))
 session = Session()
@@ -57,7 +58,7 @@ def get_missing_tables(dataset_name: str, dataset_version: int, server_address: 
         list -- Tables that appear from versioned dataset
     """
     if server_address is None:
-        server_address = SERVER_ADDRESS
+        server_address = ANNO_ADDRESS
     tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == dataset_version).all()
 
     anno_client = AnnotationClient(dataset_name=dataset_name,
@@ -128,7 +129,7 @@ def get_materialization_metadata(dataset_name: str, database_version: int,
         dict -- Metadata used in proceeding celery tasks.
     """
     if server_address is None:
-        server_address = SERVER_ADDRESS
+        server_address = INFOSERVICE_ADDRESS
     metadata = {}
     metadata.update(dataset_name=str(dataset_name),
                     database_version=database_version)
