@@ -27,7 +27,7 @@ PROJECT_ID = BIGTABLE['project_id']
 CG_INSTANCE_ID = BIGTABLE['instance_id']
 AMDB_INSTANCE_ID = BIGTABLE['amdb_instance_id']
 CHUNKGRAPH_TABLE_ID = current_app.config['CHUNKGRAPH_TABLE_ID']
-SERVER_ADDRESS = "https://www.dynamicannotationframework.com/"
+SERVER_ADDRESS = "https://tv1.dynamicannotationframework.com/"
 engine = create_engine(SQL_URI, pool_recycle=3600, pool_size=20, max_overflow=50)
 Session = scoped_session(sessionmaker(bind=engine, autocommit=False, autoflush=False))
 session = Session()
@@ -69,7 +69,8 @@ def get_missing_tables(dataset_name: str, dataset_version: int, server_address: 
     return missing_tables_info
 
 
-def run_materialization(dataset_name: str, database_version: int, use_latest: bool, increment: bool):
+def run_materialization(dataset_name: str, database_version: int, 
+                        use_latest: bool, increment: bool, server: str=None):
     """Start celery based materialization. A database and version are used as a 
     base to update annotations. A series of tasks are chained in sequence passing 
     metadata between each task. Requires pickle celery serialization.
@@ -92,7 +93,7 @@ def run_materialization(dataset_name: str, database_version: int, use_latest: bo
         else:
             base_mat_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==database_version).first()
         logging.info(f"MATERIALZATION VERSION IS: {base_mat_version}")
-        ret = (get_materialization_metadata.s(dataset_name, database_version, base_mat_version) |
+        ret = (get_materialization_metadata.s(dataset_name, database_version, base_mat_version, server) |
                create_database_from_template.s() |
                add_analysis_tables.s() |
                materialize_root_ids.s() |
@@ -100,7 +101,9 @@ def run_materialization(dataset_name: str, database_version: int, use_latest: bo
                materialize_annotations_delta.s()).apply_async()
     except OperationalError as e:
         logging.info(f"NO MATERIALIZATION DATABASE EXISTS: {e}")
-        ret = (get_materialization_metadata.s(dataset_name, database_version) |
+        ret = (get_materialization_metadata.s(dataset_name=dataset_name, 
+                                              database_version=database_version, 
+                                              server_address=server) |
                materialize_annotations.s()).apply_async()
 
 
