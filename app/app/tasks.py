@@ -102,7 +102,7 @@ def run_materialization(dataset_name: str, database_version: int,
                materialize_annotations_delta.s()).apply_async()
     except OperationalError as e:
         logging.info(f"NO MATERIALIZATION DATABASE EXISTS: {e}")
-        ret = (get_materialization_metadata.s(dataset_name=dataset_name, 
+        ret = (get_materialization_metadata.s(dataset_name=dataset_name,
                                               database_version=database_version, 
                                               server_address=server) |
                materialize_annotations.s()).apply_async()
@@ -263,15 +263,20 @@ def materialize_root_ids(metadata: dict) -> dict:
     base_mat_version_engine = create_engine(metadata['base_mat_version_db_uri'])
     BaseMatVersionSession = sessionmaker(bind=base_mat_version_engine)
     base_mat_version_session = BaseMatVersionSession()
+    Base.metadata.create_all(base_mat_version_engine)
     root_model = em_models.make_cell_segment_model(metadata['dataset_name'],
                                                    version=metadata['new_mat_version'].version)
-    prev_max_id = int(base_mat_version_session.query(func.max(root_model.id).label('max_root_id')).first()[0])
+    try:
+        prev_max_id = int(base_mat_version_session.query(func.max(root_model.id).label('max_root_id')).first()[0])
+    except Exception as e:
+        logging.error(e)
+        prev_max_id = 1
     cg = chunkedgraph.ChunkedGraph(table_id=metadata['cg_table_id'])
     max_root_id = materialize.find_max_root_id_before(cg,
-                                                      metadata['base_mat_version'].timestamp,
-                                                      2*chunkedgraph.LOCK_EXPIRED_TIME_DELTA,
-                                                      start_id=np.uint64(prev_max_id),
-                                                      delta_id=100)
+                                                    metadata['base_mat_version'].timestamp,
+                                                    2*chunkedgraph.LOCK_EXPIRED_TIME_DELTA,
+                                                    start_id=np.uint64(prev_max_id),
+                                                    delta_id=100)
     max_seg_id = cg.get_segment_id(np.uint64(max_root_id))
     multi_args, new_roots, old_roots = materialize.materialize_root_ids_delta(cg_table_id=metadata['cg_table_id'],
                                                                               dataset_name=metadata['dataset_name'],
