@@ -8,7 +8,7 @@ import logging
 import numpy as np
 import json
 
-__version__ = "0.2.15"
+__version__ = "0.2.16"
 
 api = Blueprint("api", __name__, url_prefix='/materialize/api/v1/')
 
