@@ -100,7 +100,6 @@ def run_materialization(dataset_name: str, database_version: int,
     else:
         version = database_version
         base_mat_version = None
-        logging.info(f"NO MATERIALIZATION DATABASE EXISTS: {e}")
         ret = (get_materialization_metadata.s(dataset_name, version, base_mat_version, server) |
                materialize_root_ids.s() |
                materialize_annotations.s() |
