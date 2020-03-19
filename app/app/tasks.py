@@ -90,14 +90,17 @@ def run_materialization(dataset_name: str, database_version: int,
             base_mat_version = (session.query(AnalysisVersion).order_by(AnalysisVersion.version.desc()).first())
         else:
             base_mat_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==database_version).first()
-        version = base_mat_version.version
-        logging.info(f"MATERIALZATION VERSION IS: {base_mat_version.version}")
-        ret = (get_materialization_metadata.s(dataset_name, version, base_mat_version, server) |
-               create_database_from_template.s() |  # need to route from create to new if already exists...
-               add_analysis_tables.s() |
-               materialize_root_ids.s() |
-               materialize_annotations.s() |
-               materialize_annotations_delta.s()).apply_async()
+        if base_mat_version is not None:
+            version = base_mat_version.version
+        else:
+            version = database_version
+            logging.info(f"MATERIALZATION VERSION IS: {base_mat_version.version}")
+            ret = (get_materialization_metadata.s(dataset_name, version, base_mat_version, server) |
+                create_database_from_template.s() |  # need to route from create to new if already exists...
+                add_analysis_tables.s() |
+                materialize_root_ids.s() |
+                materialize_annotations.s() |
+                materialize_annotations_delta.s()).apply_async()
     except ProgrammingError as e:
         version = database_version
         base_mat_version = None
