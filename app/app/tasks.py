@@ -94,7 +94,6 @@ def run_materialization(dataset_name: str, database_version: int,
             version = base_mat_version.version
         else:
             version = database_version
-            logging.info(f"MATERIALZATION VERSION IS: {base_mat_version.version}")
             ret = (get_materialization_metadata.s(dataset_name, version, base_mat_version, server) |
                 create_database_from_template.s() |  # need to route from create to new if already exists...
                 add_analysis_tables.s() |
