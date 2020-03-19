@@ -85,29 +85,26 @@ def run_materialization(dataset_name: str, database_version: int,
     """
     logging.info(f"DATASET_NAME: {dataset_name} | DATABASE_VERSION: {database_version}")
     session, engine = create_session(SQL_URI)
-    try:
-        if use_latest:
-            base_mat_version = (session.query(AnalysisVersion).order_by(AnalysisVersion.version.desc()).first())
-        else:
-            base_mat_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==database_version).first()
-        if base_mat_version is not None:
-            version = base_mat_version.version
-        else:
-            version = database_version
-            ret = (get_materialization_metadata.s(dataset_name, version, base_mat_version, server) |
-                create_database_from_template.s() |  # need to route from create to new if already exists...
-                add_analysis_tables.s() |
-                materialize_root_ids.s() |
-                materialize_annotations.s() |
-                materialize_annotations_delta.s()).apply_async()
-    except ProgrammingError as e:
+    if use_latest:
+        base_mat_version = (session.query(AnalysisVersion).order_by(AnalysisVersion.version.desc()).first())
+    else:
+        base_mat_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==database_version).first()
+    if base_mat_version is not None:
+        version = base_mat_version.version
+        ret = (get_materialization_metadata.s(dataset_name, version, base_mat_version, server) |
+            create_database_from_template.s() |  # need to route from create to new if already exists...
+            add_analysis_tables.s() |
+            materialize_root_ids.s() |
+            materialize_annotations.s() |
+            materialize_annotations_delta.s()).apply_async()
+    else:
         version = database_version
         base_mat_version = None
         logging.info(f"NO MATERIALIZATION DATABASE EXISTS: {e}")
         ret = (get_materialization_metadata.s(dataset_name, version, base_mat_version, server) |
                materialize_root_ids.s() |
                materialize_annotations.s() |
-               materialize_annotations_delta.s()).apply_async()
+               materialize_annotations_delta.s()).apply_async()      
 
 
 @celery.task(name='process:app.tasks.get_materialization_metadata')
@@ -271,15 +268,15 @@ def materialize_root_ids(metadata: dict) -> dict:
         prev_max_id = 1
     cg = chunkedgraph.ChunkedGraph(table_id=metadata['cg_table_id'])
     max_root_id = materialize.find_max_root_id_before(cg,
-                                                      metadata['base_mat_version'].timestamp,
+                                                      metadata['base_mat_version'].time_stamp,
                                                       2*chunkedgraph.LOCK_EXPIRED_TIME_DELTA,
                                                       start_id=np.uint64(prev_max_id),
                                                       delta_id=100)
     max_seg_id = cg.get_segment_id(np.uint64(max_root_id))
     multi_args, new_roots, old_roots = materialize.materialize_root_ids_delta(cg_table_id=metadata['cg_table_id'],
                                                                               dataset_name=metadata['dataset_name'],
-                                                                              time_stamp=metadata['new_mat_version'].timestamp,
-                                                                              time_stamp_base=metadata['base_mat_version'].timestamp,
+                                                                              time_stamp=metadata['new_mat_version'].time_stamp,
+                                                                              time_stamp_base=metadata['base_mat_version'].time_stamp,
                                                                               min_root_id=max_seg_id,
                                                                               analysisversion=metadata['new_mat_version'],
                                                                               sqlalchemy_database_uri=metadata['new_mat_version_db_uri'],
