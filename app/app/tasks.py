@@ -121,7 +121,6 @@ def new_materialization(dataset_name: str, database_version: int):
     base_mat_version = None
     ret = (get_materialization_metadata.s(dataset_name, version, base_mat_version) |
             setup_new_database.s() |
-            materialize_root_ids.s() |
             materialize_annotations.s() |
             materialize_annotations_delta.s()).apply_async()
 
