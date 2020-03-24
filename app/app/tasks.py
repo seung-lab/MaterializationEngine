@@ -105,6 +105,26 @@ def run_materialization(dataset_name: str, database_version: int,
                materialize_annotations_delta.s()).apply_async()
 
 
+def new_materialization(dataset_name: str, database_version: int):
+    """Start celery based materialization. A database and version are used as a
+    base to update annotations. A series of tasks are chained in sequence passing
+    metadata between each task. Requires pickle celery serialization.
+
+    Arguments:
+        dataset_name {str} -- Name of dataset to use as a base.
+        database_version {int} -- Version of database to use to update from.
+    """
+    logging.info("STARTING MATERIALIZATION")
+    logging.info(f"DATASET_NAME: {dataset_name} | DATABASE_VERSION: {database_version}")
+    session, engine = create_session(SQL_URI)
+    version = database_version
+    base_mat_version = None
+    ret = (get_materialization_metadata.s(dataset_name, version, base_mat_version, server) |
+            setup_new_database.s() |
+            materialize_root_ids.s() |
+            materialize_annotations.s() |
+            materialize_annotations_delta.s()).apply_async()
+
 
 @celery.task(name='process:app.tasks.get_materialization_metadata')
 def get_materialization_metadata(dataset_name: str, database_version: int,

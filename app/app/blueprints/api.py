@@ -25,11 +25,17 @@ def get_metadata(dataset_name, version):
     results = get_materialization_metadata(dataset_name, version)
     logging.info(f"Results are: {results}")
     return results
-   
+
 @api.route("/run/<dataset_name>/<dataset_version>/<use_latest>")
 def materialize_annotations(dataset_name, dataset_version, use_latest):
     from app.tasks import run_materialization
     run_materialization(dataset_name, dataset_version, use_latest)
+    return jsonify({"Dataset Name": dataset_name, "Version":dataset_version}), 200
+
+@api.route("/new/<dataset_name>/<dataset_version>")
+def create_new_materialization(dataset_name, dataset_version, use_latest):
+    from app.tasks import new_materialization
+    new_materialization(dataset_name, dataset_version)
     return jsonify({"Dataset Name": dataset_name, "Version":dataset_version}), 200
 
 # @api.route("/new/<dataset_name>/<dataset_version>/<use_latest>/<increment>")
