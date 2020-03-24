@@ -140,7 +140,7 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
     except requests.exceptions.RequestException as e:
         logging.info(f"ERROR {e}. Cannot connect to {endpoint}. Trying internal service.")
         endpoint = INFOSERVICE_ADDRESS
-        url = endpoint + '/api/dataset/{}'.format(dataset)
+        url = endpoint + 'info/api/dataset/{}'.format(dataset)
         r = requests.get(url)
 
     info = r.json()
