@@ -12,7 +12,7 @@ import requests
 import logging
 
 
-__version__ = "0.2.23"
+__version__ = "0.2.24"
 
 views = Blueprint("views", __name__, url_prefix='/materialize')
 
