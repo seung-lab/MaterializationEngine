@@ -15,8 +15,13 @@ from pytz import UTC
 import datetime
 from dynamicannotationdb.annodb_meta import AnnotationMetaDB
 import logging
+from flask import current_app
 
 logging.info(f"PYCHUNKEDGRAPH VERSION {pychunkedgraph.__version__}")
+
+INFOSERVICE_ADDRESS = current_app.config['INFOSERVICE_ENDPOINT']
+ANNO_ADDRESS = current_app.config['ANNO_ENDPOINT']
+
 
 def _process_all_annotations_thread(args):
     """ Helper for process_all_annotations """
@@ -129,8 +134,14 @@ def find_max_root_id_before(cg,
 def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.dynamicannotationframework.com/info'):
     url = endpoint + '/api/dataset/{}'.format(dataset)
     print(url)
-    r = requests.get(url)
-    assert (r.status_code == 200)
+    try:
+        r = requests.get(url)
+        assert (r.status_code == 200)
+    except requests.exceptions.RequestException as e:
+        logging.info(f"ERROR {e}. Cannot connect to {endpoint}. Trying internal service.")
+        endpoint = INFOSERVICE_ADDRESS
+        url = endpoint + '/api/dataset/{}'.format(dataset)
+
     info = r.json()
 
     img_cv = cloudvolume.CloudVolume(info['image_source'], mip=0)
@@ -421,11 +432,11 @@ def process_existing_annotations(cg_table_id,
         return anno_dict
 
 
-def materialize_root_ids_delta(cg_table_id, 
+def materialize_root_ids_delta(cg_table_id,
                                dataset_name,
                                time_stamp,
                                time_stamp_base,
-                               min_root_id =1,
+                               min_root_id=1,
                                analysisversion=None,
                                sqlalchemy_database_uri=None,
                                cg_client=None,
@@ -449,9 +460,9 @@ def materialize_root_ids_delta(cg_table_id,
         version_id = analysisversion.id
 
     new_root_ids, expired_root_ids = cg.get_delta_roots(time_stamp_base,
-                                                    time_stamp,
-                                                    min_seg_id=min_root_id,
-                                                    n_threads=n_threads)
+                                                        time_stamp,
+                                                        min_seg_id=min_root_id,
+                                                        n_threads=n_threads)
 
     model = em_models.make_cell_segment_model(dataset_name, version=version)
     mm = materializationmanager.MaterializationManager(
@@ -490,13 +501,17 @@ def materialize_root_ids_delta(cg_table_id,
     # return new_root_ids, expired_root_ids
 
 
-def materialize_annotations_delta(
-    cg_table_id, dataset_name,
-    table_name, schema_name,
-    old_roots,
-    analysisversion,
-    sqlalchemy_database_uri=None, cg_client=None,
-    cg_instance_id=None, n_threads=1, max_per_block = 200):
+def materialize_annotations_delta(cg_table_id,
+                                  dataset_name,
+                                  table_name,
+                                  schema_name,
+                                  old_roots,
+                                  analysisversion,
+                                  sqlalchemy_database_uri=None,
+                                  cg_client=None,
+                                  cg_instance_id=None,
+                                  n_threads=1,
+                                  max_per_block=200):
 
     if cg_client is None:
         cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id)
