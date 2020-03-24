@@ -189,7 +189,7 @@ def setup_new_database(metadata: dict) -> dict:
     base_mat_version = manager.create_new_version(SQL_URI,
                                                   metadata['dataset_name'],
                                                   str(datetime.datetime.utcnow()))
-    base_mat_version_db_uri = format_version_db_uri(SQL_URI,
+    new_mat_version_db_uri = format_version_db_uri(SQL_URI,
                                                     metadata['dataset_name'],
                                                     base_mat_version.version)
 
@@ -204,12 +204,12 @@ def setup_new_database(metadata: dict) -> dict:
         connection.execute(f"create database {base_db_name}")
         logging.info(f"CREATED NEW DATABASE {base_mat_version}")
 
-    logging.info(base_mat_version_db_uri)
+    logging.info(new_mat_version_db_uri)
 
 
-    new_database_session, new_engine = create_session(base_mat_version_db_uri)
+    new_database_session, new_engine = create_session(new_mat_version_db_uri)
     Base.metadata.create_all(new_engine)
-    base_mat_version = manager.create_new_version(base_mat_version_db_uri,
+    base_mat_version = manager.create_new_version(new_mat_version_db_uri,
                                                   metadata['dataset_name'],
                                                   base_mat_version.time_stamp,
                                                   base_mat_version.version)
@@ -228,7 +228,7 @@ def setup_new_database(metadata: dict) -> dict:
     metadata['base_mat_version'] = base_mat_version
     # assume new version is what was just created
     metadata['new_mat_version'] = metadata['base_mat_version']
-    metadata.update(base_mat_version_db_uri=base_mat_version_db_uri)
+    metadata.update(new_mat_version_db_uri=new_mat_version_db_uri)
     return metadata
 
 
