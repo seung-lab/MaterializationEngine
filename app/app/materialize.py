@@ -162,7 +162,7 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
                                                               SEGMENTATION_ADDRESS)
         pcg_seg_cv = cloudvolume.CloudVolume(info['pychunkgraph_segmentation_source'], mip=0)
     scale_factor = img_cv.resolution / pcg_seg_cv.resolution
-    pixel_ratios = tuple(scale_factor
+    pixel_ratios = tuple(scale_factor)
 
     return info['pychunkgraph_segmentation_source'], pixel_ratios
 
