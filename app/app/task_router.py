@@ -4,3 +4,4 @@ class TaskRouter(object):
             return {'queue': 'default'}
         namespace, _ = task.split(':')
         return {'queue': namespace}
+        
