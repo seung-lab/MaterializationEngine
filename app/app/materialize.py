@@ -142,7 +142,7 @@ def _parse_url(old_url, new_url):
 
 def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.dynamicannotationframework.com/info'):
     url = endpoint + '/api/dataset/{}'.format(dataset)
-    print(url)
+    internal = False
     try:
         r = requests.get(url)
         assert (r.status_code == 200)
@@ -152,13 +152,14 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
         endpoint = INFOSERVICE_ADDRESS
         url = endpoint + 'info/api/dataset/{}'.format(dataset)
         r = requests.get(url)
-
+    logging.info(url)
     info = r.json()
 
     img_cv = cloudvolume.CloudVolume(info['image_source'], mip=0)
     if internal:
         info['pychunkgraph_segmentation_source'] = _parse_url(info['pychunkgraph_segmentation_source'],
                                                               SEGMENTATION_ADDRESS)
+        logging.info(info['pychunkgraph_segmentation_source'])
     pcg_seg_cv = cloudvolume.CloudVolume(info['pychunkgraph_segmentation_source'], mip=0)
     scale_factor = img_cv.resolution / pcg_seg_cv.resolution
     pixel_ratios = tuple(scale_factor)
