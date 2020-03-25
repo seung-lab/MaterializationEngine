@@ -147,6 +147,7 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
         r = requests.get(url)
         assert (r.status_code == 200)
     except requests.exceptions.RequestException as e:
+        internal = True
         logging.error(f"ERROR {e}. Cannot connect to {endpoint}. Trying internal service.")
         endpoint = INFOSERVICE_ADDRESS
         url = endpoint + 'info/api/dataset/{}'.format(dataset)
@@ -155,13 +156,10 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
     info = r.json()
 
     img_cv = cloudvolume.CloudVolume(info['image_source'], mip=0)
-    try:
+    if internal:
         info['pychunkgraph_segmentation_source'] = _parse_url(info['pychunkgraph_segmentation_source'],
                                                               SEGMENTATION_ADDRESS)
-        pcg_seg_cv = cloudvolume.CloudVolume(info['pychunkgraph_segmentation_source'], mip=0)
-    except Exception as e:
-        logging.error(e)
-        pcg_seg_cv = cloudvolume.CloudVolume(info['pychunkgraph_segmentation_source'], mip=0)
+    pcg_seg_cv = cloudvolume.CloudVolume(info['pychunkgraph_segmentation_source'], mip=0)
     scale_factor = img_cv.resolution / pcg_seg_cv.resolution
     pixel_ratios = tuple(scale_factor)
 
