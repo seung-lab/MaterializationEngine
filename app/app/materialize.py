@@ -16,12 +16,13 @@ import datetime
 from dynamicannotationdb.annodb_meta import AnnotationMetaDB
 import logging
 from flask import current_app
+from urllib.parse import urlparse
 
 logging.info(f"PYCHUNKEDGRAPH VERSION {pychunkedgraph.__version__}")
 
 INFOSERVICE_ADDRESS = current_app.config['INFOSERVICE_ENDPOINT']
 ANNO_ADDRESS = current_app.config['ANNO_ENDPOINT']
-
+SEGMENTATION_ADDRESS = current_app.config['SEGMENTATION_ENDPOINT']
 
 def _process_all_annotations_thread(args):
     """ Helper for process_all_annotations """
@@ -131,6 +132,13 @@ def find_max_root_id_before(cg,
                                    delta_id=delta_id)
 
 
+def _parse_url(old_url, new_url):
+    parsed_old = urlparse(old_url)
+    parsed_new = urlparse(new_url)
+    url = parsed_old._replace(scheme=parsed_new.scheme,
+                              netloc=parsed_new.netloc)
+    return url.geturl()
+
 def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.dynamicannotationframework.com/info'):
     url = endpoint + '/api/dataset/{}'.format(dataset)
     print(url)
@@ -146,10 +154,15 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
     info = r.json()
 
     img_cv = cloudvolume.CloudVolume(info['image_source'], mip=0)
-    pcg_seg_cv = cloudvolume.CloudVolume(
-        info['pychunkgraph_segmentation_source'], mip=0)
+    try:
+        pcg_seg_cv = cloudvolume.CloudVolume(
+            info['pychunkgraph_segmentation_source'], mip=0)
+    except requests.exceptions.RequestException as e:
+        info['pychunkgraph_segmentation_source'] = _parse_url(info['pychunkgraph_segmentation_source'],
+                                                              SEGMENTATION_ADDRESS)
+        pcg_seg_cv = cloudvolume.CloudVolume(info['pychunkgraph_segmentation_source'], mip=0)
     scale_factor = img_cv.resolution / pcg_seg_cv.resolution
-    pixel_ratios = tuple(scale_factor)
+    pixel_ratios = tuple(scale_factor
 
     return info['pychunkgraph_segmentation_source'], pixel_ratios
 
