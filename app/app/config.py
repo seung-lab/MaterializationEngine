@@ -32,7 +32,7 @@ class BaseConfig:
     CELERY_RESULT_BACKEND = REDIS_URL
     ANNO_ENDPOINT = "http://www.dynamicannotationframework.com"
     INFOSERVICE_ENDPOINT = "http://www.dynamicannotationframework.com"
-    SEGMENTATION_ADDRESS = "http://www.dynamicannotationframework.com"
+    SEGMENTATION_ENDPOINT = "http://www.dynamicannotationframework.com"
 
 class DevConfig(BaseConfig):
     DEBUG = True
