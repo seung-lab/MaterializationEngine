@@ -4,7 +4,6 @@ def create_app(test_config=None):
     from flask import Flask
     from app.config import configure_app
     from app.admin import setup_admin
-    from app.blueprints.api import api
     from app.blueprints.routes import views
     from app.utils import get_instance_folder_path
     from app.extensions import db
@@ -29,9 +28,10 @@ def create_app(test_config=None):
     db.init_app(app)
     ma.init_app(app)
     with app.app_context():
+        from app.blueprints.api import api
         admin = setup_admin(app, db)
 
-    app.register_blueprint(api)
-    app.register_blueprint(views)
+        app.register_blueprint(api)
+        app.register_blueprint(views)
 
     return app
