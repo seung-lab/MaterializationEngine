@@ -1,19 +1,32 @@
 from flask import Blueprint, jsonify, abort, current_app, request, render_template, url_for, redirect
 # from materializationengine import materialize
 from emannotationschemas import get_types, get_schema
-
-from emannotationschemas.models import AnalysisTable, AnalysisVersion
+from emannotationschemas.models import AnalysisTable, AnalysisVersion, format_version_db_uri
 from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
 from materializationengine.database import db
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, MetaData, Table
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy import func, and_, or_
+from sqlalchemy.exc import NoSuchTableError
 import pandas as pd
 from emannotationschemas.models import make_annotation_model, make_dataset_models, declare_annotation_model
 import requests
+import logging
+from flask import current_app
 
 __version__ = "0.1.1"
+
+SQL_URI = current_app.config['MATERIALIZATION_POSTGRES_URI']
+
+
 bp = Blueprint("materialize", __name__, url_prefix="/materialize")
+
+
+def create_session(sql_uri: str = None):
+    engine = create_engine(sql_uri, pool_recycle=3600, pool_size=20, max_overflow=50)
+    Session = scoped_session(sessionmaker(bind=engine, autocommit=False, autoflush=False))
+    session = Session()
+    return session, engine
 
 
 def make_df_with_links_to_id(objects, schema, url, col):
@@ -177,29 +190,57 @@ def generic_report(id):
                            schema_name=table.schema)
 
 
-@bp.route('api/dataset')
+@bp.route('/api/v2/datasets')
 def datasets():
-    # datasets = (AnalysisVersion.query.filter(AnalysisVersion.dataset = 'pinky100')
-    #             .first_or_404())
-    # print(datasets)
-    # TODO wire to info service
-    return jsonify(get_datasets())
+    response = db.session.query(AnalysisVersion.dataset).distinct()
+    datasets = [r._asdict() for r in response]
+    return jsonify(datasets)
 
 
-@bp.route("api/dataset/<dataset_name>", methods=["GET"])
-def get_dataset_version(dataset_name):
-    # datasets = (AnalysisVersion.query.filter(AnalysisVersion.dataset = 'pinky100')
-    #             .first_or_404())
-    # print(datasets)
-    if (dataset_name not in get_datasets()):
-        abort(404, "dataset not valid")
+@bp.route("/api/v2/datasets/<dataset_name>", methods=["GET"])
+def get_dataset_versions(dataset_name):
+    response = db.session.query(AnalysisVersion).filter(AnalysisVersion.dataset == dataset_name).all()
+    schema = AnalysisVersionSchema(many=True)
+    versions, error = schema.dump(response)
+    logging.info(versions)
+    if versions:
+        return jsonify(versions), 200
+    else:
+        logging.error(error)
+        return abort(404)
 
-    if (request.method == 'GET'):
-        versions = (db.session.query(AnalysisVersion).all())
-        schema = AnalysisVersionSchema(many=True)
-        results = schema.dump(versions)
-        return jsonify(schema.dump(versions).data)
+@bp.route("/api/v2/datasets/<dataset_name>/<version>", methods=["GET"])
+def get_dataset_tables(dataset_name, version):
+    response = (db.session.query(AnalysisTable)
+                .filter(AnalysisTable.analysisversion)
+                .filter(AnalysisVersion.version == version)
+                .filter(AnalysisVersion.dataset == dataset_name)
+                .all())
+    schema = AnalysisTableSchema(many=True)
+    tables, error = schema.dump(response)
+    if tables:
+        return jsonify(tables), 200
+    else:
+        logging.error(error)
+        return abort(404)
 
+
+@bp.route("/api/v2/datasets/<dataset_name>/<version>/<tablename>", methods=["GET"])
+def get_annotations(dataset_name, version, tablename):
+    sql_uri = format_version_db_uri(SQL_URI, dataset_name, version)
+    session, engine = create_session(sql_uri)
+    metadata = MetaData()
+    try:
+        annotation_table = Table(tablename, metadata, autoload=True, autoload_with=engine)
+    except NoSuchTableError as e:
+        logging.error(f'No table exists {e}')
+        return abort(404)
+    response = session.query(annotation_table).limit(10).all()
+    annotations = [r._asdict() for r in response]
+    if annotations:
+        return jsonify(annotations), 200
+    else:
+        return abort(404)
 
 @bp.route("/dataset/<dataset_name>/new_version", methods=["POST"])
 def materialize_dataset(dataset):
