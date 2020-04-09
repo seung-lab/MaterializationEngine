@@ -13,6 +13,7 @@ def create_app(test_config=None):
     # Define the Flask Object
     app = Flask(__name__,
                 static_folder="../static",
+                template_folder="./templates",
                 instance_path=get_instance_folder_path(),
                 instance_relative_config=True)
     # load configuration (from test_config if passed)
@@ -24,7 +25,7 @@ def create_app(test_config=None):
     db.init_app(app)
     with app.app_context(): 
         from .materialize_bp import bp as materialize_bp
-        db.create_all()
+        # db.create_all()
         admin = setup_admin(app, db)
         app.register_blueprint(materialize_bp)
         
