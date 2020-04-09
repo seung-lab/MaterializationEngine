@@ -23,6 +23,7 @@ class BaseConfig(object):
     LOGGING_LEVEL = logging.DEBUG
     CHUNKGRAPH_TABLE_ID = "pinky100_sv16"
     SQLALCHEMY_DATABASE_URI = "postgres://postgres:synapsedb@localhost:5432/testing"
+    MATERIALIZATION_POSTGRES_URI = "postgres://postgres:synapsedb@localhost:5432/testing"
     DATABASE_CONNECT_OPTIONS = {}
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SECRET_KEY = "MYSUPERSECRETTESTINGKEY"
@@ -42,9 +43,8 @@ def configure_app(app):
         app.config.from_envvar('MATERIALIZATION_ENGINE_SETTINGS')
     # instance-folders configuration
     app.config.from_pyfile('config.cfg', silent=True)
-    print(app.config)
+    app.logger.debug(app.config)
     db = SQLAlchemy(model_class=Base)
     db.init_app(app)
-
-
+    app.app_context().push()
     return app
