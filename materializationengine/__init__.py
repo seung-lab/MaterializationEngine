@@ -7,7 +7,6 @@ def create_app(test_config=None):
     from .database import Base
     from materializationengine.config import configure_app
     from .admin import setup_admin
-    from .materialize_bp import bp as materialize_bp
     from .utils import get_instance_folder_path
     from .database import db
 
@@ -24,6 +23,7 @@ def create_app(test_config=None):
     # register blueprints
     db.init_app(app)
     with app.app_context(): 
+        from .materialize_bp import bp as materialize_bp
         db.create_all()
         admin = setup_admin(app, db)
         app.register_blueprint(materialize_bp)
