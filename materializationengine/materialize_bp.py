@@ -12,14 +12,12 @@ import pandas as pd
 from emannotationschemas.models import make_annotation_model, make_dataset_models, declare_annotation_model
 import requests
 import logging
-from flask import current_app
 
 __version__ = "0.1.1"
 
-SQL_URI = current_app.config['MATERIALIZATION_POSTGRES_URI']
-
-
 bp = Blueprint("materialize", __name__, url_prefix="/materialize")
+
+SQL_URI = current_app.config['MATERIALIZATION_POSTGRES_URI']
 
 
 def create_session(sql_uri: str = None):
