@@ -26,9 +26,8 @@ def create_app(test_config=None):
     with app.app_context(): 
         db.create_all()
         admin = setup_admin(app, db)
-
-
-    app.register_blueprint(materialize_bp)
+        app.register_blueprint(materialize_bp)
+        
     return app
 
 
