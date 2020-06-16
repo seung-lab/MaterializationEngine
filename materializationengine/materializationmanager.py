@@ -1,6 +1,8 @@
 import json
 import functools
 
+from materializationengine.models import AnalysisTable, AnalysisVersion
+
 from emannotationschemas import models as em_models
 from emannotationschemas.base import flatten_dict
 from emannotationschemas import get_schema
@@ -27,8 +29,8 @@ def create_new_version(sql_uri, dataset, time_stamp, version=None):
     Session = sessionmaker(bind=engine)
     session = Session()
 
-    top_version = (session.query(em_models.AnalysisVersion)
-                   .order_by(em_models.AnalysisVersion.version.desc())
+    top_version = (session.query(AnalysisVersion)
+                   .order_by(AnalysisVersion.version.desc())
                    .first())
 
     if top_version is None:
@@ -37,10 +39,10 @@ def create_new_version(sql_uri, dataset, time_stamp, version=None):
         new_version_number = top_version.version + 1
     if version is not None:
         new_version_number = version
-    analysisversion = em_models.AnalysisVersion(dataset=dataset,
-                                                time_stamp=time_stamp,
-                                                version=new_version_number,
-                                                valid=False)
+    analysisversion = AnalysisVersion(dataset=dataset,
+                                      time_stamp=time_stamp,
+                                      version=new_version_number,
+                                      valid=False)
     session.add(analysisversion)
     session.commit()
     return analysisversion
@@ -123,7 +125,7 @@ class MaterializationManager(object):
 
         try:
             self._schema_init = get_schema(self.schema_name)
-        except:
+        except ValueError:
             self._schema_init = None
 
         self._this_sqlalchemy_session = None
@@ -194,13 +196,12 @@ class MaterializationManager(object):
 
         :return: dict
         """
-        info = {"dataset_name": self.dataset_name,
+        #print(info)
+        return {"dataset_name": self.dataset_name,
                 "schema_name": self.schema_name,
                 "table_name": self.table_name,
                 "version": self.version,
                 "sqlalchemy_database_uri": self.sqlalchemy_database_uri}
-        #print(info)
-        return info
 
     def _drop_table(self):
         """ Deletes the table in the database """
@@ -217,9 +218,9 @@ class MaterializationManager(object):
         assert self.is_sql
         assert self._version_id is not None
 
-        at = em_models.AnalysisTable(tablename=self.table_name,
-                                     schema=self.schema_name,
-                                     analysisversion_id=self._version_id)
+        at = AnalysisTable(tablename=self.table_name,
+                           schema=self.schema_name,
+                           analysisversion_id=self._version_id)
         self.this_sqlalchemy_session.add(at)
         self.commit_session()
 
