@@ -1,20 +1,21 @@
-igneous
-pychunkedgraph
-cloud-volume==0.50.0
-emannotationschemas>=2.0.0
-DynamicAnnotationDB
+-e git+git://github.com/seung-lab/igneous.git#egg=igneous
+-e git+git://github.com/seung-lab/PyChunkedGraph.git#egg=pychunkedgraph
+-e git+https://github.com/seung-lab/DynamicAnnotationDB.git@postgres_v1#egg=dynamicannotationdb
+-e git+https://github.com/seung-lab/EMAnnotationSchemas.git@marshmallow_3.5.1#egg=emannotationschemas
+cloud-volume
 argschema<2.0.1
 pandas
 Flask
 sqlalchemy
 flask-sqlalchemy
+middle-auth-client
 marshmallow-sqlalchemy
 flask-marshmallow
 flask-admin
+flask-restx
+flask-accepts
 labelops
 alembic
 annotationframeworkclient
 celery
-redis
-eventlet
 
