@@ -6,6 +6,7 @@ from materializationengine.blueprints.routes import views
 from materializationengine.utils import get_instance_folder_path
 from materializationengine.schemas import ma
 from materializationengine.blueprints.api import api_bp
+from materializationengine.models import Base
 
 from celery.signals import after_setup_logger
 from flask_restx import Api
@@ -14,7 +15,7 @@ import sys
 
 __version__ = "0.2.35"
 
-db = SQLAlchemy()
+db = SQLAlchemy(model_class=Base)
 
 
 def create_app(test_config=None):
