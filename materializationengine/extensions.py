@@ -4,9 +4,6 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from celery import Celery
 
-# create database
-Base = declarative_base()
-db = SQLAlchemy(model_class=Base)
 
 # create celery
 celery = Celery(include=['materializationengine.tasks'])
