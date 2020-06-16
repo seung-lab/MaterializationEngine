@@ -6,7 +6,7 @@ from flask_accepts import accepts, responds
 from emannotationschemas.models import format_version_db_uri
 from materializationengine.models import AnalysisTable, AnalysisVersion
 from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
-from materializationengine.extensions import db, create_session
+from materializationengine.extensions import create_session
 from materializationengine.blueprints.routes import get_datasets
 from materializationengine.database import get_db
 import requests
