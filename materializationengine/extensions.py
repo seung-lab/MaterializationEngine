@@ -1,4 +1,3 @@
-from flask import g, current_app
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import create_engine
 from sqlalchemy.orm import scoped_session, sessionmaker
@@ -10,7 +9,7 @@ Base = declarative_base()
 db = SQLAlchemy(model_class=Base)
 
 # create celery
-celery = Celery(include=['app.tasks'])
+celery = Celery(include=['materializationengine.tasks'])
 
 
 def create_session(sql_uri: str = None):

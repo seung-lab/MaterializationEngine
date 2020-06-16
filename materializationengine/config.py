@@ -9,7 +9,7 @@ class BaseConfig:
     HOME = os.path.expanduser("~")
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
     # Statement for enabling the development environment
-    DEBUG = False
+    DEBUG = True
 
     INFOSERVICE_ENDPOINT = "http://info-service/info"
     BIGTABLE_CONFIG = {
@@ -24,6 +24,7 @@ class BaseConfig:
     CHUNKGRAPH_TABLE_ID = "pinky100_sv16"
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite://")
     MATERIALIZATION_POSTGRES_URI = "postgres://postgres:synapsedb@db:5432/synapsedb"
+    SQLALCHEMY_DATABASE_URI = MATERIALIZATION_POSTGRES_URI
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     REDIS_HOST = os.environ.get('REDIS_SERVICE_HOST')
     REDIS_PORT = os.environ.get('REDIS_SERVICE_PORT')
@@ -33,6 +34,7 @@ class BaseConfig:
     ANNO_ENDPOINT = "http://www.dynamicannotationframework.com"
     INFOSERVICE_ENDPOINT = "http://www.dynamicannotationframework.com"
     SEGMENTATION_ENDPOINT = "http://www.dynamicannotationframework.com"
+
 
 class DevConfig(BaseConfig):
     DEBUG = True
@@ -50,10 +52,10 @@ class ProductionConfig(BaseConfig):
 
 
 config = {
-    "default": "app.config.BaseConfig",
-    "development": "app.config.DevConfig",
-    "testing": "app.config.TestConfig",
-    "production": "app.config.ProductionConfig",
+    "default": "materializationengine.config.BaseConfig",
+    "development": "materializationengine.config.DevConfig",
+    "testing": "materializationengine.config.TestConfig",
+    "production": "materializationengine.config.ProductionConfig",
 }
 
 

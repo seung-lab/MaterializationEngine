@@ -1,15 +1,17 @@
-from flask import Blueprint, jsonify, abort, current_app, request, render_template, url_for, redirect
+from flask import Blueprint, jsonify, abort, current_app, \
+                  request, render_template, url_for, redirect
 from emannotationschemas import get_types, get_schema
-from emannotationschemas.models import AnalysisTable, AnalysisVersion
-from app.schemas import AnalysisVersionSchema, AnalysisTableSchema, MaterializationSchema
-from app.extensions import db
+from materializationengine.models import AnalysisTable, AnalysisVersion
+from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
+from materializationengine.extensions import db
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy import func, and_, or_
 import pandas as pd
-from emannotationschemas.models import make_annotation_model, make_dataset_models, declare_annotation_model
+from emannotationschemas.models import make_annotation_model, \
+                                       make_dataset_models, \
+                                       declare_annotation_model
 import requests
-import logging
 
 
 __version__ = "0.2.35"
@@ -18,11 +20,12 @@ views = Blueprint("views", __name__, url_prefix='/materialize')
 
 
 def get_datasets():
-    url = current_app.config['INFOSERVICE_ENDPOINT'] + "/api/datasets"
+    url = current_app.config['INFOSERVICE_ENDPOINT'] + "/info/api/datasets"
     return requests.get(url).json()
 
 
-@views.route("/home")
+@views.route("/")
+@views.route("/index")
 def index():
     return render_template('datasets.html',
                            datasets=get_datasets(),
@@ -116,7 +119,7 @@ def table_view(id):
         "synapse": url_for('materialize.synapse_report', id=id),
         "cell_type_local": url_for('materialize.cell_type_local_report', id=id)
     }
-    if table.schema in mapping.keys():
+    if table.schema in mapping:
         return redirect(mapping[table.schema])
     else:
         return redirect(url_for('materialize.generic_report', id=id))
