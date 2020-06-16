@@ -10,10 +10,10 @@ import pychunkedgraph
 from pychunkedgraph.backend import chunkedgraph
 from multiwrapper import multiprocessing_utils as mu
 import cloudvolume
-from app import materializationmanager
+from materializationengine import materializationmanager
 from pytz import UTC
 import datetime
-from dynamicannotationdb.annodb_meta import AnnotationMetaDB
+from dynamicannotationdb.client import AnnotationDBMeta
 import logging
 from flask import current_app
 from urllib.parse import urlparse
@@ -550,7 +550,7 @@ def materialize_annotations_delta(cg_table_id,
         sqlalchemy_database_uri=sqlalchemy_database_uri)
 
     root_columns = [ col for col in model.__table__.columns.keys() if col.endswith('root_id')]
-    
+
     base_query = mm.this_sqlalchemy_session.query(model)
     for col in root_columns:
         sup_col = col.replace('root_id', 'supervoxel_id')
@@ -560,7 +560,7 @@ def materialize_annotations_delta(cg_table_id,
         print(table_name, col, need_update_count, col_query_missing.count())
         if need_update_count > 0:
             col_query = base_query.filter(model.__dict__[col].in_(old_roots.tolist()))
-            col_query_missing = base_query.filter(model.__dict__[col] == None)
+            col_query_missing = base_query.filter(model.__dict__[col] is None)
             id_sup_ids = []
             for obj in col_query.all():
                 sup_id = int(obj.__dict__[sup_col])
@@ -578,15 +578,15 @@ def materialize_annotations_delta(cg_table_id,
                                   mm.get_serialized_info(),
                                   cg_info))
 
-            # if n_threads == 1:
-            #     results = mu.multiprocess_func(
-            #         _materialize_delta_annotation_thread, multi_args,
-            #         n_threads=n_threads,
-            #         verbose=True, debug=n_threads == 1)
-            # else:
-            #     results = mu.multisubprocess_func(
-            #         _materialize_delta_annotation_thread, multi_args,
-            #         n_threads=n_threads, package_name="materializationengine")
+                    # if n_threads == 1:
+                    #     results = mu.multiprocess_func(
+                    #         _materialize_delta_annotation_thread, multi_args,
+                    #         n_threads=n_threads,
+                    #         verbose=True, debug=n_threads == 1)
+                    # else:
+                    #     results = mu.multisubprocess_func(
+                    #         _materialize_delta_annotation_thread, multi_args,
+                    #         n_threads=n_threads, package_name="materializationengine")
     return multi_args
     
 
