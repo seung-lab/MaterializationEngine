@@ -4,7 +4,6 @@ from materializationengine.config import configure_app
 from materializationengine.admin import setup_admin
 from materializationengine.blueprints.routes import views
 from materializationengine.utils import get_instance_folder_path
-from materializationengine.extensions import db
 from materializationengine.schemas import ma
 from materializationengine.blueprints.api import api_bp
 
