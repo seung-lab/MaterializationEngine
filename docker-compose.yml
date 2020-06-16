@@ -28,24 +28,28 @@ services:
       ports:
         - 80:80
       volumes:
-        - ./app:/app
+        - .:/app
       env_file:
         - ./.env.dev 
       depends_on:
         - db
     celery-process:
       image: 'materialize:tag'
-      command: ["celery", "worker", "--app=app.main.celery", "--concurrency=1", "--hostname=worker.process@%h", "--queues=process", "--loglevel=INFO"] # celery worker -A app.main.celery --loglevel=info
+      command: ["celery", "worker", "--app=run.celery", "--concurrency=1", "--hostname=worker.process@%h", "--queues=process", "--loglevel=INFO"] # celery worker -A app.main.celery --loglevel=info
       env_file:
         - ./.env.dev 
+      volumes:
+        - .:/app
       depends_on:
         - materialize 
         - redis  
     celery-eventlets:
       image: 'materialize:tag'
+      volumes:
+        - .:/app
       env_file:
         - ./.env.dev   
-      command: ["celery", "worker", "--app=app.main.celery","--pool=threads", "--concurrency=100", "--hostname=worker.threads@%h", "--queues=threads", "--loglevel=DEBUG"]
+      command: ["celery", "worker", "--app=run.celery","--pool=threads", "--concurrency=100", "--hostname=worker.threads@%h", "--queues=threads", "--loglevel=INFO"]
       depends_on:
         - materialize
         - redis
