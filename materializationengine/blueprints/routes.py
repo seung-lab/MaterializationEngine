@@ -3,7 +3,6 @@ from flask import Blueprint, jsonify, abort, current_app, \
 from emannotationschemas import get_types, get_schema
 from materializationengine.models import AnalysisTable, AnalysisVersion
 from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
-from materializationengine.extensions import db
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy import func, and_, or_
