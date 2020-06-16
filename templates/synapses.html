@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+
+{% block header %}
+  <h1>{% block title %}{{dataset}}</h1>
+   <h3>version {{analysisversion}}</h3> 
+   <h4> {{table_name}} (schema: {{schema_name}})</h4>
+   {% endblock %}</h1>
+{% endblock %}
+
+{% block content %}
+
+<table>
+  <tr><td>synapses</td><td>{{num_synapses}}</td></tr>
+  <tr><td>autapses</td><td>{{num_autapses}}</td></tr>
+  <tr><td>unattached</td><td>{{num_no_root}}</td></tr>
+</table>
+{% endblock %}
