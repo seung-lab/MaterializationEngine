@@ -1,6 +1,6 @@
 import pandas as pd
 from emannotationschemas import models as em_models
-from emannotationschemas.base import flatten_dict
+from emannotationschemas.flatten import flatten_dict
 from emannotationschemas import get_schema
 from functools import partial
 import json
@@ -13,7 +13,7 @@ import cloudvolume
 from materializationengine import materializationmanager
 from pytz import UTC
 import datetime
-from dynamicannotationdb.client import AnnotationDBMeta
+from dynamicannotationdb.materialization_client import DynamicMaterializationClient
 import logging
 from flask import current_app
 from urllib.parse import urlparse
@@ -32,7 +32,7 @@ def _process_all_annotations_thread(args):
         serialized_cg_info, serialized_mm_info, \
         serialized_cv_info, pixel_ratios = args
 
-    amdb = AnnotationMetaDB(**serialized_amdb_info)
+    amdb = DynamicMaterializationClient(**serialized_amdb_info)
 
     cg = chunkedgraph.ChunkedGraph(**serialized_cg_info)
 
@@ -244,12 +244,12 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
         annotation_id -> deserialized data
     """
     if amdb_client is None:
-        amdb = AnnotationMetaDB()
+        amdb = DynamicMaterializationClient()
     elif amdb_instance_id is not None:
-        amdb = AnnotationMetaDB(client=amdb_client,
+        amdb = DynamicMaterializationClient(client=amdb_client,
                                 instance_id=amdb_instance_id)
     else:
-        logging.error("Missing Instance ID for AnnotationMetaDB")
+        logging.error("Missing Instance ID for DynamicMaterializationClient")
 
     if analysisversion is None:
         version = 0
@@ -361,7 +361,7 @@ def process_existing_annotations(cg_table_id,
     else:
         version = analysisversion.version
         version_id = analysisversion.id
-    amdb = AnnotationMetaDB(**serialized_amdb_info)
+    amdb = DynamicMaterializationClient(**serialized_amdb_info)
 
     if cg_client is None:
         cg = chunkedgraph.ChunkedGraph(table_id=cg_table_id)
