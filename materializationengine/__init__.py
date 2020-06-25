@@ -33,7 +33,7 @@ def create_app(test_config=None):
     else:
         app.config.update(test_config)
     # register blueprints
-    
+  
     apibp = Blueprint('api', __name__, url_prefix='/materialize/api')
 
     db.init_app(app)
@@ -43,9 +43,9 @@ def create_app(test_config=None):
         api.add_namespace(api_bp, path='/v2')
         app.register_blueprint(apibp)
 
-        admin = setup_admin(app, db)
         db.init_app(app)
         db.create_all()
+        admin = setup_admin(app, db)
 
         app.register_blueprint(views)
 
