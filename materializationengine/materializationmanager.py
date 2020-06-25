@@ -4,7 +4,7 @@ import functools
 from materializationengine.models import AnalysisTable, AnalysisVersion
 
 from emannotationschemas import models as em_models
-from emannotationschemas.base import flatten_dict
+from emannotationschemas.flatten import flatten_dict
 from emannotationschemas import get_schema
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
