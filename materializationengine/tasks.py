@@ -13,7 +13,7 @@ from materializationengine.extensions import create_session
 from materializationengine.celery_worker import celery
 from materializationengine.models import AnalysisTable, AnalysisVersion
 
-from dynamicannotationdb.client import AnnotationDBMeta
+from dynamicannotationdb.materialization_client import DynamicMaterializationClient
 from emannotationschemas import models as em_models
 from emannotationschemas.models import Base, format_version_db_uri
 from flask import current_app
@@ -395,7 +395,7 @@ def process_all_annotations_subtask(args):
         serialized_cg_info, serialized_mm_info, \
         serialized_cv_info, pixel_ratios = args
 
-    amdb = AnnotationMetaDB(**serialized_amdb_info)
+    amdb = DynamicMaterializationClient(**serialized_amdb_info)
 
     cg = chunkedgraph.ChunkedGraph(**serialized_cg_info)
 
