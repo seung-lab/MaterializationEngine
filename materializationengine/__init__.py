@@ -2,10 +2,11 @@ from flask_sqlalchemy import SQLAlchemy
 from flask import Flask, Blueprint
 from materializationengine.config import configure_app
 from materializationengine.admin import setup_admin
-from materializationengine.blueprints.routes import views
+from materializationengine.views import views_bp
 from materializationengine.utils import get_instance_folder_path
 from materializationengine.schemas import ma
-from materializationengine.blueprints.api import api_bp
+from materializationengine.blueprints.materialize.api import mat_bp
+from materializationengine.blueprints.client.api import client_bp
 from materializationengine.models import Base
 
 from celery.signals import after_setup_logger
@@ -33,21 +34,23 @@ def create_app(test_config=None):
     else:
         app.config.update(test_config)
     # register blueprints
-  
+
     apibp = Blueprint('api', __name__, url_prefix='/materialize/api')
 
     db.init_app(app)
     ma.init_app(app)
     with app.app_context():
         api = Api(apibp, title="Materialization Engine API", version=__version__, doc="/doc")
-        api.add_namespace(api_bp, path='/v2')
+        api.add_namespace(mat_bp, path='/v2')
+        api.add_namespace(client_bp, path='/v2')
+
         app.register_blueprint(apibp)
+        app.register_blueprint(views_bp)
 
         db.init_app(app)
         db.create_all()
         admin = setup_admin(app, db)
 
-        app.register_blueprint(views)
 
     return app
 
