@@ -15,8 +15,9 @@ from emannotationschemas.models import format_version_db_uri
 from materializationengine.models import AnalysisTable, AnalysisVersion
 from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
 from materializationengine.extensions import create_session
-from materializationengine.blueprints.routes import get_datasets
+from materializationengine.views import get_datasets
 from materializationengine.database import get_db
+from middle_auth_client import auth_required, auth_requires_permission
 import requests
 import logging
 import numpy as np
@@ -29,51 +30,50 @@ from sqlalchemy.exc import NoSuchTableError
 
 __version__ = "0.2.35"
 
-# api = Blueprint("api", __name__, url_prefix='/materialize/api/v1/')
-api_bp = Namespace("Materialization Engine", description="Materialization Engine")
+mat_bp = Namespace("Materialization Engine", description="Materialization Engine")
 
 
-@api_bp.route("/metadata/<dataset_name>/<version>")
+@mat_bp.route("/metadata/<aligned_volume>/<version>")
 class MetaDataResource(Resource):
-    def get(self, dataset_name, version):
+    def get(self, aligned_volume, version):
         from materializationengine.tasks import get_materialization_metadata
 
-        results = get_materialization_metadata(dataset_name, version)
+        results = get_materialization_metadata(aligned_volume, version)
         logging.info(f"Results are: {results}")
         return results
 
 
-@api_bp.route("/run/<string:dataset_name>/<int:dataset_version>/<use_latest>")
+@mat_bp.route("/run/<string:aligned_volume>/<int:version>/<use_latest>")
 class RunMaterializeResource(Resource):
-    def get(self, dataset_name, dataset_version, use_latest):
+    def get(self, aligned_volume, version, use_latest):
         from materializationengine.tasks import run_materialization
 
-        run_materialization(dataset_name, dataset_version, use_latest)
-        return jsonify({"Dataset Name": dataset_name, "Version": dataset_version}), 200
+        run_materialization(aligned_volume, version, use_latest)
+        return jsonify({"Aligned Volume": aligned_volume, "Version": version}), 200
 
 
-@api_bp.route("/new/<dataset_name>/<dataset_version>")
+@mat_bp.route("/new/<aligned_volume>/<version>")
 class NewMaterializeResource(Resource):
-    def get(self, dataset_name, dataset_version):
+    def get(self, aligned_volume, version):
         from materializationengine.tasks import new_materialization
 
-        new_materialization(dataset_name, dataset_version)
-        return jsonify({"Dataset Name": dataset_name, "Version": dataset_version}), 200
+        new_materialization(aligned_volume, version)
+        return jsonify({"Aligned Volume": aligned_volume, "Version": version}), 200
 
 
-@api_bp.route("/datasets")
+@mat_bp.route("/aligned_volumes")
 class DatasetResource(Resource):
     def get(self):
         response = db.session.query(AnalysisVersion.dataset).distinct()
-        datasets = [r._asdict() for r in response]
-        return jsonify(datasets)
+        aligned_volumes = [r._asdict() for r in response]
+        return jsonify(aligned_volumes)
 
 
-@api_bp.route("/datasets/<dataset_name>")
+@mat_bp.route("/aligned_volumes/<aligned_volume>")
 class VersionResource(Resource):
-    def get(self, dataset_name):
+    def get(self, aligned_volume):
         response = (
-            db.session.query(AnalysisVersion).filter(AnalysisVersion.dataset == dataset_name).all()
+            db.session.query(AnalysisVersion).filter(AnalysisVersion.dataset == aligned_volume).all()
         )
         schema = AnalysisVersionSchema(many=True)
         versions, error = schema.dump(response)
@@ -85,14 +85,14 @@ class VersionResource(Resource):
             return abort(404)
 
 
-@api_bp.route("/datasets/<dataset_name>/<version>")
+@mat_bp.route("/aligned_volumes/<aligned_volume>/<version>")
 class TableResource(Resource):
-    def get(self, dataset_name, version):
+    def get(self, aligned_volume, version):
         response = (
             db.session.query(AnalysisTable)
             .filter(AnalysisTable.analysisversion)
             .filter(AnalysisVersion.version == version)
-            .filter(AnalysisVersion.dataset == dataset_name)
+            .filter(AnalysisVersion.dataset == aligned_volume)
             .all()
         )
         schema = AnalysisTableSchema(many=True)
@@ -104,11 +104,11 @@ class TableResource(Resource):
             return abort(404)
 
 
-@api_bp.route("/datasets/<dataset_name>/<version>/<tablename>")
+@mat_bp.route("/aligned_volumes/<aligned_volume>/<version>/<tablename>")
 class AnnotationResource(Resource):
-    def get(self, dataset_name, version, tablename):
+    def get(self, aligned_volume, version, tablename):
         db = get_db()
-        sql_uri = format_version_db_uri(db, dataset_name, version)
+        sql_uri = format_version_db_uri(db, aligned_volume, version)
         session, engine = create_session(sql_uri)
         metadata = MetaData()
         try:
