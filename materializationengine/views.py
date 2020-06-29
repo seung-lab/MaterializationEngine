@@ -18,14 +18,13 @@ import pandas as pd
 from emannotationschemas.models import (
     make_annotation_model,
     make_dataset_models,
-    declare_annotation_model,
 )
 import requests
 
 
 __version__ = "0.2.35"
 
-views = Blueprint("views", __name__, url_prefix="/materialize")
+views_bp = Blueprint("views", __name__, url_prefix="/materialize")
 
 
 def get_datasets():
@@ -33,8 +32,8 @@ def get_datasets():
     return requests.get(url).json()
 
 
-@views.route("/")
-@views.route("/index")
+@views_bp.route("/")
+@views_bp.route("/index")
 def index():
     return render_template("datasets.html", datasets=get_datasets(), version=__version__)
 
@@ -47,12 +46,12 @@ def make_df_with_links_to_id(objects, schema, url, col):
     return df
 
 
-@views.route("/test")
+@views_bp.route("/test")
 def test_health():
     return jsonify({"STATUS: ": "OK"}), 200
 
 
-@views.route("/dataset")
+@views_bp.route("/dataset")
 def datasets():
     # datasets = (AnalysisVersion.query.filter(AnalysisVersion.dataset = 'pinky100')
     #             .first_or_404())
@@ -60,7 +59,7 @@ def datasets():
     return jsonify(get_datasets())
 
 
-@views.route("/dataset/<dataset_name>", methods=["GET"])
+@views_bp.route("/dataset/<dataset_name>", methods=["GET"])
 def get_dataset_version(dataset_name):
     # datasets = (AnalysisVersion.query.filter(AnalysisVersion.dataset = 'pinky100')
     #             .first_or_404())
@@ -74,7 +73,7 @@ def get_dataset_version(dataset_name):
         return jsonify(schema.dump(versions).data)
 
 
-@views.route("/dataset/<dataset_name>")
+@views_bp.route("/dataset/<dataset_name>")
 def dataset_view(dataset_name):
     version_query = AnalysisVersion.query.filter(AnalysisVersion.dataset == dataset_name)
     show_all = request.args.get("all", False) is not False
@@ -94,7 +93,7 @@ def dataset_view(dataset_name):
     )
 
 
-@views.route("/version/<int:id>")
+@views_bp.route("/version/<int:id>")
 def version_view(id):
     version = AnalysisVersion.query.filter(AnalysisVersion.id == id).first_or_404()
 
@@ -117,7 +116,7 @@ def version_view(id):
     )
 
 
-@views.route("/table/<int:id>")
+@views_bp.route("/table/<int:id>")
 def table_view(id):
     table = AnalysisTable.query.filter(AnalysisTable.id == id).first_or_404()
     mapping = {
@@ -130,7 +129,7 @@ def table_view(id):
         return redirect(url_for("materialize.generic_report", id=id))
 
 
-@views.route("/table/<int:id>/cell_type_local")
+@views_bp.route("/table/<int:id>/cell_type_local")
 def cell_type_local_report(id):
     table = AnalysisTable.query.filter(AnalysisTable.id == id).first_or_404()
     if table.schema != "cell_type_local":
@@ -167,7 +166,7 @@ def cell_type_local_report(id):
     )
 
 
-@views.route("/table/<int:id>/synapse")
+@views_bp.route("/table/<int:id>/synapse")
 def synapse_report(id):
     table = AnalysisTable.query.filter(AnalysisTable.id == id).first_or_404()
     if table.schema != "synapse":
@@ -203,7 +202,7 @@ def synapse_report(id):
     )
 
 
-@views.route("/table/<int:id>/generic")
+@views_bp.route("/table/<int:id>/generic")
 def generic_report(id):
     table = AnalysisTable.query.filter(AnalysisTable.id == id).first_or_404()
 
