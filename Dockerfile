@@ -1,4 +1,4 @@
-FROM gcr.io/neuromancer-seung-import/pychunkedgraph:vpinky-prod.1.5
+FROM gcr.io/neuromancer-seung-import/pychunkedgraph:graph-tool_dracopy
 
 ENV UWSGI_INI ./uwsgi.ini
 
