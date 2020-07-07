@@ -1,5 +1,5 @@
 from flask_sqlalchemy import SQLAlchemy
-from flask import Flask, Blueprint, jsonify
+from flask import Flask, Blueprint, jsonify, redirect
 from materializationengine.config import configure_app
 from materializationengine.admin import setup_admin
 from materializationengine.views import views_bp
@@ -54,6 +54,10 @@ def create_app(test_config=None):
     @app.route("/health")
     def health():
         return jsonify("healthy"), 200
+
+    @app.route("/materialize/")
+    def index():
+        return redirect("/materialize/views")
 
     return app
 
