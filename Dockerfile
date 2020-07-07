@@ -1,5 +1,7 @@
 FROM gcr.io/neuromancer-seung-import/pychunkedgraph:vpinky-prod.1.5
 
-COPY requirements.txt /app
-RUN pip install --no-cache-dir --process-dependency-links -r requirements.txt
+ENV UWSGI_INI ./uwsgi.ini
+
+COPY requirements.txt /app/.
+RUN pip install -r requirements.txt
 COPY . /app
