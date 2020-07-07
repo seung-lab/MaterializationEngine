@@ -24,7 +24,7 @@ import requests
 
 __version__ = "0.2.35"
 
-views_bp = Blueprint("views", __name__, url_prefix="/materialize")
+views_bp = Blueprint("views", __name__, url_prefix="/materialize/views")
 
 
 def get_datasets():
@@ -44,11 +44,6 @@ def make_df_with_links_to_id(objects, schema, url, col):
         lambda x: "<a href='{}'>{}</a>".format(url_for(url, id=x.id), x[col]), axis=1
     )
     return df
-
-
-@views_bp.route("/test")
-def test_health():
-    return jsonify({"STATUS: ": "OK"}), 200
 
 
 @views_bp.route("/dataset")
