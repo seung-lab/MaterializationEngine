@@ -22,17 +22,20 @@ class BaseConfig:
     LOGGING_LOCATION = HOME + "/.materializationengine/bookshelf.log"
     LOGGING_LEVEL = logging.DEBUG
     CHUNKGRAPH_TABLE_ID = "pinky100_sv16"
-    MATERIALIZATION_POSTGRES_URI = "postgres://postgres:synapsedb@db:5432/"
-    SQLALCHEMY_DATABASE_URI = "postgres://postgres:annodb@localhost:5432/annodb"
+    MATERIALIZATION_POSTGRES_URI = "postgres://postgres:materialize@db:5432/materialize"
+    SQLALCHEMY_DATABASE_URI = "postgres://postgres:materialize@db:5432/materialize"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     REDIS_HOST = os.environ.get("REDIS_SERVICE_HOST")
     REDIS_PORT = os.environ.get("REDIS_SERVICE_PORT")
     REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
     CELERY_BROKER_URL = REDIS_URL
     CELERY_RESULT_BACKEND = REDIS_URL
-    ANNO_ENDPOINT = "http://www.dynamicannotationframework.com"
-    INFOSERVICE_ENDPOINT = "http://www.dynamicannotationframework.com"
-    SEGMENTATION_ENDPOINT = "http://www.dynamicannotationframework.com"
+    ANNO_ENDPOINT = "http://minniev1.microns-daf.com/annotation/"
+    INFOSERVICE_ENDPOINT = "http://globalv1.daf-apis.com/info"
+    AUTH_URI = "https://globalv1.daf-apis.com/auth"
+    GLOBAL_SERVER = "https://globalv1.daf-apis.com/auth"
+    SCHEMA_SERVICE_ENDPOINT = "https://globalv1.daf-apis.com/schema/"
+    SEGMENTATION_ENDPOINT = "https://globalv1.daf-apis.com/"
 
 
 class DevConfig(BaseConfig):
