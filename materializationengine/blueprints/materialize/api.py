@@ -30,11 +30,22 @@ from sqlalchemy.exc import NoSuchTableError
 
 __version__ = "0.2.35"
 
-mat_bp = Namespace("Materialization Engine", description="Materialization Engine")
+authorizations = {
+    'apikey': {
+        'type': 'apiKey',
+        'in': 'query',
+        'name': 'middle_auth_token'
+    }
+}
 
+mat_bp = Namespace("Materialization Engine",
+                   authorizations=authorizations,
+                   description="Materialization Engine")
 
 @mat_bp.route("/metadata/<aligned_volume>/<version>")
 class MetaDataResource(Resource):
+    @auth_required
+    @mat_bp.doc("get_materialized_metadata", security="apikey")
     def get(self, aligned_volume, version):
         from materializationengine.tasks import get_materialization_metadata
 
@@ -45,32 +56,37 @@ class MetaDataResource(Resource):
 
 @mat_bp.route("/run/<string:aligned_volume>/<int:version>/<use_latest>")
 class RunMaterializeResource(Resource):
+    @auth_required
+    @mat_bp.doc("run updating materialization", security="apikey")
     def get(self, aligned_volume, version, use_latest):
         from materializationengine.tasks import run_materialization
 
         run_materialization(aligned_volume, version, use_latest)
         return jsonify({"Aligned Volume": aligned_volume, "Version": version}), 200
 
-
 @mat_bp.route("/new/<aligned_volume>/<version>")
 class NewMaterializeResource(Resource):
+    @auth_required
+    @mat_bp.doc("create new materialized version", security="apikey")
     def get(self, aligned_volume, version):
         from materializationengine.tasks import new_materialization
 
         new_materialization(aligned_volume, version)
         return jsonify({"Aligned Volume": aligned_volume, "Version": version}), 200
 
-
 @mat_bp.route("/aligned_volumes")
 class DatasetResource(Resource):
+    @auth_required
+    @mat_bp.doc("get_aligned_volume_versions", security="apikey")
     def get(self):
         response = db.session.query(AnalysisVersion.dataset).distinct()
         aligned_volumes = [r._asdict() for r in response]
         return jsonify(aligned_volumes)
 
-
 @mat_bp.route("/aligned_volumes/<aligned_volume>")
 class VersionResource(Resource):
+    @auth_required
+    @mat_bp.doc("get_analysis_versions", security="apikey")
     def get(self, aligned_volume):
         response = (
             db.session.query(AnalysisVersion).filter(AnalysisVersion.dataset == aligned_volume).all()
@@ -84,9 +100,10 @@ class VersionResource(Resource):
             logging.error(error)
             return abort(404)
 
-
 @mat_bp.route("/aligned_volumes/<aligned_volume>/<version>")
 class TableResource(Resource):
+    @auth_required
+    @mat_bp.doc("get_all_tables", security="apikey")
     def get(self, aligned_volume, version):
         response = (
             db.session.query(AnalysisTable)
@@ -103,9 +120,10 @@ class TableResource(Resource):
             logging.error(error)
             return abort(404)
 
-
 @mat_bp.route("/aligned_volumes/<aligned_volume>/<version>/<tablename>")
 class AnnotationResource(Resource):
+    @auth_required
+    @mat_bp.doc("get_top_materialized_annotations", security="apikey")
     def get(self, aligned_volume, version, tablename):
         db = get_db()
         sql_uri = format_version_db_uri(db, aligned_volume, version)
