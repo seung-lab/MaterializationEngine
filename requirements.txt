@@ -1,5 +1,4 @@
--e git+git://github.com/seung-lab/igneous.git#egg=igneous
--e git+git://github.com/seung-lab/PyChunkedGraph.git#egg=pychunkedgraph
+-e git+git://github.com/seung-lab/PyChunkedGraph.git@vminnie-57#egg=pychunkedgraph
 -e git+https://github.com/seung-lab/DynamicAnnotationDB.git@v2.1api#egg=dynamicannotationdb
 -e git+https://github.com/seung-lab/EMAnnotationSchemas.git@v2.1api#egg=emannotationschemas
 -e git+https://github.com/seung-lab/AnnotationFrameworkClient.git@authclient_fcc#egg=annotationframeworkclient
