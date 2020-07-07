@@ -1,5 +1,5 @@
 from flask_sqlalchemy import SQLAlchemy
-from flask import Flask, Blueprint
+from flask import Flask, Blueprint, jsonify
 from materializationengine.config import configure_app
 from materializationengine.admin import setup_admin
 from materializationengine.views import views_bp
@@ -50,7 +50,10 @@ def create_app(test_config=None):
         db.init_app(app)
         db.create_all()
         admin = setup_admin(app, db)
-
+   
+    @app.route("/health")
+    def health():
+        return jsonify("healthy"), 200
 
     return app
 
