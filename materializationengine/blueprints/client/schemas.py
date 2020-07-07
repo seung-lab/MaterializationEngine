@@ -1,4 +1,4 @@
-from marshmallow import fields, Schema, post_load
+from marshmallow import fields, Schema
 
 
 class Metadata(Schema):
@@ -7,21 +7,22 @@ class Metadata(Schema):
     reference_table = fields.Str(required=False)
 
 
-class SegmentationTableSchema(Schema):
+class SegmentationInfoSchema(Schema):
+    pcg_table_name = fields.Str(required=True)
+    pcg_version = fields.Int(required=True)
+
+
+class SegmentationTableSchema(SegmentationInfoSchema):
     table_name = fields.Str(order=0, required=True)
-    pcg_table_name = fields.Str(order=1, required=True)
-    pcg_version = fields.Int(default=2, required=True)
 
 
 class CreateTableSchema(SegmentationTableSchema):
-    metadata = fields.Nested(
-        Metadata, required=True, example={"description": "my description"}
-    )
+    metadata = fields.Nested(Metadata, required=True, example={"description": "my description"})
 
 
-class DeleteAnnotationSchema(Schema):
+class GetDeleteAnnotationSchema(SegmentationInfoSchema):
     annotation_ids = fields.List(fields.Int, required=True)
 
 
-class PutAnnotationSchema(Schema):
+class PostPutAnnotationSchema(SegmentationInfoSchema):
     annotations = fields.List(fields.Dict, required=True)
