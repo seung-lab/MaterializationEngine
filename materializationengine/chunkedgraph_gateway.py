@@ -16,7 +16,7 @@ class ChunkedGraphGateway(object):
     def __init__(self, table_id):
         assert table_id in chunkedgraph_version_mapping
         
-        self.cg = init_pcg(table_id)
+        self.cg = self.init_pcg(table_id)
 
     def init_pcg(self, table_id):
         if chunkedgraph_version_mapping[table_id] == 1:
