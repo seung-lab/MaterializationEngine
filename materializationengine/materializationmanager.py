@@ -1,8 +1,10 @@
 import json
 import functools
-
 from materializationengine.models import AnalysisTable, AnalysisVersion
-
+from materializationengine.errors import MaterializeAnnotationException, \
+                                         RootIDNotFoundException, \
+                                         AnnotationParseFailure
+from dynamicannotationdb.key_utils import build_table_id, build_segmentation_table_id                                         
 from emannotationschemas import models as em_models
 from emannotationschemas.flatten import flatten_dict
 from emannotationschemas import get_schema
@@ -12,16 +14,7 @@ import numpy as np
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 
-class MaterializeAnnotationException(Exception):
-    pass
 
-
-class RootIDNotFoundException(MaterializeAnnotationException):
-    pass
-
-
-class AnnotationParseFailure(MaterializeAnnotationException):
-    pass
 
 
 def create_new_version(sql_uri, dataset, time_stamp, version=None):
@@ -91,25 +84,30 @@ def lookup_sv_and_cg_bsp(cg,
 
 
 class MaterializationManager(object):
-    def __init__(self, dataset_name, schema_name,
-                 table_name, version = 1, version_id = None,
+    def __init__(self, aligned_volume, schema_name,
+                 table_name, version=1, version_id=None,
                  annotation_model=None,
-                 create_metadata = True, 
-                 sqlalchemy_database_uri=None):
-        self._dataset_name = dataset_name
+                 create_metadata=True,
+                 sqlalchemy_database_uri=None,
+                 with_crud_columns=False):
+        self._aligned_volume = aligned_volume
         self._schema_name = schema_name
         self._table_name = table_name
         self._version = version
         self._version_id = version_id
         self._sqlalchemy_database_uri = sqlalchemy_database_uri
-
-        em_models.make_dataset_models(dataset_name, [], version=self.version)
+        self.schema_and_tables = []
+        em_models.make_dataset_models(aligned_volume,
+                                      self.schema_and_tables,
+                                      version=self.version,
+                                      with_crud_columns=with_crud_columns)
 
         if annotation_model is not None:
             self._annotation_model = annotation_model
         else:
+            table_id = build_table_id(self._aligned_volume, self._table_name)
             self._annotation_model = em_models.make_annotation_model(
-                dataset_name, schema_name, table_name, version=self.version)
+                table_id, schema_name, version=self.version, with_crud_columns=with_crud_columns)
 
         if sqlalchemy_database_uri is not None:
             self._sqlalchemy_engine = create_engine(sqlalchemy_database_uri,
@@ -139,8 +137,8 @@ class MaterializationManager(object):
         return self._table_name
 
     @property
-    def dataset_name(self):
-        return self._dataset_name
+    def aligned_volume(self):
+        return self._aligned_volume
 
     @property
     def version(self):
@@ -189,15 +187,13 @@ class MaterializationManager(object):
         conn = self.sqlalchemy_engine.connect()
         ctx = MigrationContext.configure(conn)
         op = Operations(ctx)
-        
 
     def get_serialized_info(self):
         """ Puts all initialization parameters into a dict
 
         :return: dict
         """
-        #print(info)
-        return {"dataset_name": self.dataset_name,
+        return {"aligned_volume": self.aligned_volume,
                 "schema_name": self.schema_name,
                 "table_name": self.table_name,
                 "version": self.version,
@@ -205,7 +201,7 @@ class MaterializationManager(object):
 
     def _drop_table(self):
         """ Deletes the table in the database """
-        table_name = em_models.format_table_name(self._dataset_name,
+        table_name = em_models.format_table_name(self._aligned_volume,
                                                  self._table_name,
                                                  self._version)
         if table_name in em_models.Base.metadata.tables:
