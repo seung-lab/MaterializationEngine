@@ -12,6 +12,7 @@ from materializationengine.blueprints.client.schemas import (
     CreateTableSchema,
     PostPutAnnotationSchema,
     GetDeleteAnnotationSchema,
+    SegmentationDataSchema
 )
 from middle_auth_client import auth_required, auth_requires_permission
 import logging
@@ -29,6 +30,11 @@ authorizations = {
 client_bp = Namespace("Materialization Client",
                       authorizations=authorizations,
                       description="Materialization Client")
+
+annotation_parser = reqparse.RequestParser()
+annotation_parser.add_argument('annotation_ids', type=int, action='split', help='list of annotation ids')    
+annotation_parser.add_argument('pcg_table_name', type=str, help='name of pcg segmentation table')    
+annotation_parser.add_argument('pcg_version', default=0, type=int, help='PCG version')   
 
 
 def check_aligned_volume(aligned_volume):
@@ -69,23 +75,48 @@ class SegmentationTable(Resource):
 
 
 @client_bp.route(
+    "/aligned_volume/<string:aligned_volume_name>/table/<string:table_name>/segmentations"
+)
+class LinkedSegmentations(Resource):
+    @auth_required
+    @client_bp.doc("post linked annotations", security="apikey")
+    @accepts("PostPutAnnotationSchema", schema=PostPutAnnotationSchema, api=client_bp)
+    def post(self, aligned_volume_name: str, table_name: str, **kwargs):
+        """ Insert linked segmentations """
+        check_aligned_volume(aligned_volume_name)
+        data = request.parsed_obj
+        segmentations = data.get("segmentations")
+        pcg_table_name = data.get("pcg_table_name")
+        pcg_version = data.get("pcg_version")
+        db = get_db(aligned_volume_name)
+        try:
+            db.insert_linked_segmentation(table_name,
+                                          pcg_table_name,
+                                          pcg_version,
+                                          segmentations)
+        except Exception as error:
+            logging.error(f"INSERT FAILED {segmentations}")
+            abort(404, error)
+
+        return f"Inserted {len(segmentations)} annotations", 200
+@client_bp.route(
     "/aligned_volume/<string:aligned_volume_name>/table/<string:table_name>/annotations"
 )
-class MaterializedAnnotations(Resource):
+class LinkedAnnotations(Resource):
     @auth_required
     @client_bp.doc("get linked annotations", security="apikey")
-    @accepts("GetDeleteAnnotationSchema", schema=GetDeleteAnnotationSchema, api=client_bp)
+    @client_bp.expect(annotation_parser)
     def get(self, aligned_volume_name: str, table_name: str, **kwargs):
         """ Get annotations and segmentation from list of IDs"""
         check_aligned_volume(aligned_volume_name)
-        data = request.parsed_obj
-        ids = data.get("annotation_ids")
-        pcg_table_name = data.get("pcg_table_name")
-        pcg_version = data.get("pcg_version")
+        args = annotation_parser.parse_args()
+
+        ids = args["annotation_ids"]
+        pcg_table_name = args["pcg_table_name"]
+        pcg_version = args["pcg_version"]
 
         db = get_db(aligned_volume_name)
-        annotations = db.get_linked_annotations(aligned_volume_name,
-                                                table_name,
+        annotations = db.get_linked_annotations(table_name,
                                                 pcg_table_name,
                                                 pcg_version,
                                                 ids)
@@ -108,8 +139,7 @@ class MaterializedAnnotations(Resource):
         pcg_version = data.get("pcg_version")
         db = get_db(aligned_volume_name)
         try:
-            db.insert_linked_annotations(aligned_volume_name,
-                                         table_name,
+            db.insert_linked_annotations(table_name,
                                          pcg_table_name,
                                          pcg_version,
                                          annotations)
