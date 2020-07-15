@@ -26,3 +26,9 @@ class GetDeleteAnnotationSchema(SegmentationInfoSchema):
 
 class PostPutAnnotationSchema(SegmentationInfoSchema):
     annotations = fields.List(fields.Dict, required=True)
+
+
+class SegmentationDataSchema(Schema):
+    pcg_table_name = fields.Str(required=True)
+    pcg_version = fields.Int(required=True)
+    segmentations = fields.List(fields.Dict, required=True)
