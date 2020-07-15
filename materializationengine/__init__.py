@@ -8,15 +8,28 @@ from materializationengine.schemas import ma
 from materializationengine.blueprints.materialize.api import mat_bp
 from materializationengine.blueprints.client.api import client_bp
 from materializationengine.models import Base
-
+import numpy as np
 from celery.signals import after_setup_logger
 from flask_restx import Api
 import logging
+from datetime import date, datetime
+import json
 import sys
 
 __version__ = "0.2.35"
 
 db = SQLAlchemy(model_class=Base)
+
+
+class AEEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.uint64):
+            return int(obj)
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        return json.JSONEncoder.default(self, obj)
 
 
 def create_app(test_config=None):
@@ -28,6 +41,8 @@ def create_app(test_config=None):
                 template_folder="../templates")
     # load configuration (from test_config if passed)
     logging.basicConfig(level=logging.INFO)
+    app.json_encoder = AEEncoder
+    app.config["RESTX_JSON"] = {"cls": AEEncoder}
 
     if test_config is None:
         app = configure_app(app)
@@ -50,7 +65,7 @@ def create_app(test_config=None):
         db.init_app(app)
         db.create_all()
         admin = setup_admin(app, db)
-   
+
     @app.route("/health")
     def health():
         return jsonify("healthy"), 200
