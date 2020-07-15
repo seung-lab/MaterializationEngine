@@ -7,7 +7,7 @@ import json
 import requests
 import numpy as np
 import pychunkedgraph
-from pychunkedgraph.backend import chunkedgraph
+from pychunkedgraph.graph import chunkedgraph
 from multiwrapper import multiprocessing_utils as mu
 import cloudvolume
 from materializationengine import materializationmanager
@@ -26,7 +26,7 @@ SEGMENTATION_ADDRESS = current_app.config['SEGMENTATION_ENDPOINT']
 
 def _process_all_annotations_thread(args):
     """ Helper for process_all_annotations """
-    anno_id_start, anno_id_end, dataset_name, \
+    anno_id_start, anno_id_end, aligned_volume, \
         table_name, schema_name, version, \
         time_stamp, cg_table_id, serialized_amdb_info, \
         serialized_cg_info, serialized_mm_info, \
@@ -44,7 +44,7 @@ def _process_all_annotations_thread(args):
     for annotation_id in range(anno_id_start, anno_id_end):
         # Read annoation data from dynamicannotationdb
         annotation_data_b, bsps = amdb.get_annotation(
-            dataset_name, table_name, annotation_id, time_stamp=time_stamp)
+            aligned_volume, table_name, annotation_id, time_stamp=time_stamp)
 
         if annotation_data_b is None:
             continue
@@ -68,8 +68,6 @@ def _process_all_annotations_thread(args):
 
 def _materialize_root_ids_thread(args):
     root_ids, serialized_mm_info = args
-    model = em_models.make_cell_segment_model(serialized_mm_info["dataset_name"],
-                                              serialized_mm_info["version"])
     mm = materializationmanager.MaterializationManager(**serialized_mm_info,
                                                        annotation_model=model)
 
@@ -108,28 +106,28 @@ def _materialize_delta_annotation_thread(args):
     except Exception as e:
         logging.error(f"Failed to insert annotations: {e}")
 
-def find_max_root_id_before(cg,
-                            time_stamp,
-                            time_delta=datetime.timedelta(0),
-                            start_id=1,
-                            delta_id=100):
-    if (start_id <= 1):
-        return 1
-    rows = cg.read_node_id_row(start_id, columns=[chunkedgraph.column_keys.Hierarchy.Child])
-    cells = rows.get(chunkedgraph.column_keys.Hierarchy.Child, [])
-    if len(cells) > 0:
-        max_time = cells[0].timestamp
-        dt = time_stamp.replace(tzinfo=UTC) - max_time - time_delta
-        if (dt > datetime.timedelta(0)):
-            return start_id
-    seg_id = cg.get_segment_id(np.uint64(start_id))
-    seg_id -= np.uint64(delta_id)
-    new_id = cg.get_node_id(seg_id, cg.root_chunk_id)
-    return find_max_root_id_before(cg,
-                                   time_stamp,
-                                   time_delta,
-                                   start_id=new_id,
-                                   delta_id=delta_id)
+# def find_max_root_id_before(cg,
+#                             time_stamp,
+#                             time_delta=datetime.timedelta(0),
+#                             start_id=1,
+#                             delta_id=100):
+#     if (start_id <= 1):
+#         return 1
+#     rows = cg.read_node_id_row(start_id, columns=[chunkedgraph.column_keys.Hierarchy.Child])
+#     cells = rows.get(chunkedgraph.column_keys.Hierarchy.Child, [])
+#     if len(cells) > 0:
+#         max_time = cells[0].timestamp
+#         dt = time_stamp.replace(tzinfo=UTC) - max_time - time_delta
+#         if (dt > datetime.timedelta(0)):
+#             return start_id
+#     seg_id = cg.get_segment_id(np.uint64(start_id))
+#     seg_id -= np.uint64(delta_id)
+#     new_id = cg.get_node_id(seg_id, cg.root_chunk_id)
+#     return find_max_root_id_before(cg,
+#                                    time_stamp,
+#                                    time_delta,
+#                                    start_id=new_id,
+#                                    delta_id=delta_id)
 
 
 def _parse_url(old_url, new_url):
@@ -140,7 +138,7 @@ def _parse_url(old_url, new_url):
     return url.geturl()
 
 
-def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.dynamicannotationframework.com/info'):
+def get_segmentation_and_scales_from_infoservice(dataset, endpoint: str):
     url = endpoint + '/api/dataset/{}'.format(dataset)
     internal = False
     try:
@@ -166,7 +164,7 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
 
     return info['pychunkgraph_segmentation_source'], pixel_ratios
 
-# def update_root_id_all_annotations(cg_table_id, dataset_name, schema_name,
+# def update_root_id_all_annotations(cg_table_id, aligned_volume, schema_name,
 #                             table_name, old_version:int, new_version:int,
 #                             time_stamp=None,
 #                             sqlalchemy_database_uri=None,
@@ -174,13 +172,13 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
 #                             cg_client=None, cg_instance_id=None,
 #                             block_size=500, n_threads=1):
 #
-#     OldModel = em_models.make_annotation_model(dataset_name, schema_name,
+#     OldModel = em_models.make_annotation_model(aligned_volume, schema_name,
 #                                                table_name, version=old_version)
 #
-#     NewModel = em_models.make_annotation_model(dataset_name, schema_name,
+#     NewModel = em_models.make_annotation_model(aligned_volume, schema_name,
 #                                                table_name, version=new_version)
 #
-#     max_annotation_id = OldModel.get_max_annotation_id(dataset_name,
+#     max_annotation_id = OldModel.get_max_annotation_id(aligned_volume,
 #                                                    table_name)
 
     # if max_annotation_id == 0:
@@ -202,7 +200,7 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
     # multi_args = []
     # for i_id_chunk in range(len(id_chunks) - 1):
     #     multi_args.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1],
-    #                        dataset_name, table_name, schema_name, version,
+    #                        aligned_volume, table_name, schema_name, version,
     #                        time_stamp,
     #                        cg_table_id, amdb_info, cg_info,
     #                        mm.get_serialized_info(), cv_info, pixel_ratios])
@@ -227,7 +225,7 @@ def get_segmentation_and_scales_from_infoservice(dataset, endpoint='https://www.
     #     return anno_dict
 
 
-def process_all_annotations(cg_table_id, dataset_name, schema_name,
+def process_all_annotations(cg_table_id, aligned_volume, schema_name,
                             table_name, time_stamp=None, analysisversion=None,
                             sqlalchemy_database_uri=None,
                             amdb_client=None, amdb_instance_id=None,
@@ -235,7 +233,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
                             block_size=2500):
     """ Reads data from all annotations and acquires their mapping to root_ids
 
-    :param dataset_name: str
+    :param aligned_volume: str
     :param annotation_type: str
     :param cg_table_id: str
         In future, this will be read from some config
@@ -268,9 +266,9 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
         logging.error("Missing Instance ID")
 
     cv_path, pixel_ratios = get_segmentation_and_scales_from_infoservice(
-        dataset_name)
+        aligned_volume)
 
-    mm = materializationmanager.MaterializationManager(dataset_name=dataset_name,
+    mm = materializationmanager.MaterializationManager(aligned_volume=aligned_volume,
                                                        schema_name=schema_name,
                                                        table_name=table_name,
                                                        version=version,
@@ -281,7 +279,7 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     # through all smaller ids. However, there is no guarantee that any smaller
     # id exists, it is only a guarantee that no larger id exists at the time
     # the function is called.
-    max_annotation_id = amdb.get_max_annotation_id(dataset_name,
+    max_annotation_id = amdb.get_max_annotation_id(aligned_volume,
                                                    table_name)
 
     logging.info(f"Max annotation id: {max_annotation_id}")
@@ -314,14 +312,14 @@ def process_all_annotations(cg_table_id, dataset_name, schema_name,
     multi_args = []
     for i_id_chunk in range(len(id_chunks) - 1):
         multi_args.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1],
-                           dataset_name, table_name, schema_name, version,
+                           aligned_volume, table_name, schema_name, version,
                            time_stamp,
                            cg_table_id, amdb_info, cg_info,
                            mm.get_serialized_info(), cv_info, pixel_ratios])
     return multi_args
 
 def process_existing_annotations(cg_table_id,
-                                 dataset_name,
+                                 aligned_volume,
                                  schema_name,
                                  table_name,
                                  time_stamp=None,
@@ -335,7 +333,7 @@ def process_existing_annotations(cg_table_id,
     for root IDs which have expired between a base timestamp
     and another timestamp.
 
-    :param dataset_name: str
+    :param aligned_volume: str
         name of dataset
     :param schema_name: str
         type of annotation
@@ -373,9 +371,9 @@ def process_existing_annotations(cg_table_id,
         logging.error("Missing Instance ID")
 
     cv_path, pixel_ratios = get_segmentation_and_scales_from_infoservice(
-        dataset_name)
+        aligned_volume)
 
-    mm = materializationmanager.MaterializationManager(dataset_name=dataset_name,
+    mm = materializationmanager.MaterializationManager(aligned_volume=aligned_volume,
                                                        schema_name=schema_name,
                                                        table_name=table_name,
                                                        version=version,
@@ -387,7 +385,7 @@ def process_existing_annotations(cg_table_id,
     # through all smaller ids. However, there is no guarantee that any smaller
     # id exists, it is only a guarantee that no larger id exists at the time
     # the function is called.
-    max_annotation_id = amdb.get_max_annotation_id(dataset_name,
+    max_annotation_id = amdb.get_max_annotation_id(aligned_volume,
                                                    table_name)
 
     logging.info(f"Max annotation id: {max_annotation_id}")
@@ -419,7 +417,7 @@ def process_existing_annotations(cg_table_id,
     multi_args = []
     for i_id_chunk in range(len(id_chunks) - 1):
         multi_args.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1],
-                           dataset_name, table_name, schema_name, version,
+                           aligned_volume, table_name, schema_name, version,
                            time_stamp,
                            cg_table_id, amdb_info, cg_info,
                            mm.get_serialized_info(), cv_info, pixel_ratios])
@@ -447,7 +445,7 @@ def process_existing_annotations(cg_table_id,
 
 
 def materialize_root_ids_delta(cg_table_id,
-                               dataset_name,
+                               aligned_volume,
                                time_stamp,
                                time_stamp_base,
                                min_root_id=1,
@@ -478,9 +476,8 @@ def materialize_root_ids_delta(cg_table_id,
                                                         min_seg_id=min_root_id,
                                                         n_threads=n_threads)
 
-    model = em_models.make_cell_segment_model(dataset_name, version=version)
     mm = materializationmanager.MaterializationManager(
-        dataset_name=dataset_name, schema_name=em_models.root_model_name.lower(),
+        aligned_volume=aligned_volume, schema_name=em_models.root_model_name.lower(),
         table_name=em_models.root_model_name.lower(),
         version=version,
         version_id=version_id,
@@ -516,7 +513,7 @@ def materialize_root_ids_delta(cg_table_id,
 
 
 def materialize_annotations_delta(cg_table_id,
-                                  dataset_name,
+                                  aligned_volume,
                                   table_name,
                                   schema_name,
                                   old_roots,
@@ -536,13 +533,13 @@ def materialize_annotations_delta(cg_table_id,
     cg_info = cg.get_serialized_info()
     if n_threads > 1:
         del cg_info["credentials"]
-    model = em_models.make_annotation_model(dataset_name,
+    model = em_models.make_annotation_model(aligned_volume,
                                             schema_name,
                                             table_name,
                                             version=analysisversion.version)
 
     mm = materializationmanager.MaterializationManager(
-        dataset_name=dataset_name, schema_name=schema_name,
+        aligned_volume=aligned_volume, schema_name=schema_name,
         table_name=table_name,
         version=analysisversion.version,
         version_id=analysisversion.id,
@@ -590,7 +587,7 @@ def materialize_annotations_delta(cg_table_id,
     return multi_args
     
 
-def materialize_root_ids(cg_table_id, dataset_name,
+def materialize_root_ids(cg_table_id, aligned_volume,
                          time_stamp,
                          analysisversion=None,
                          sqlalchemy_database_uri=None, cg_client=None,
@@ -612,9 +609,8 @@ def materialize_root_ids(cg_table_id, dataset_name,
         version = analysisversion.version
         version_id = analysisversion.id
 
-    model = em_models.make_cell_segment_model(dataset_name, version=version)
     mm = materializationmanager.MaterializationManager(
-        dataset_name=dataset_name, schema_name=em_models.root_model_name.lower(),
+        aligned_volume=aligned_volume, schema_name=em_models.root_model_name.lower(),
         table_name=em_models.root_model_name.lower(),
         version=version,
         version_id=version_id,
@@ -652,7 +648,7 @@ def materialize_root_ids(cg_table_id, dataset_name,
    
 
 def materialize_all_annotations(cg_table_id,
-                                dataset_name,
+                                aligned_volume,
                                 schema_name,
                                 table_name,
                                 analysisversion: None,
@@ -667,7 +663,7 @@ def materialize_all_annotations(cg_table_id,
     """ Create a materialized pandas data frame
     of an annotation type
 
-    :param dataset_name: str
+    :param aligned_volume: str
         name of dataset
     :param schema_name: str
         type of annotation
@@ -688,7 +684,7 @@ def materialize_all_annotations(cg_table_id,
     """
 
     queued_annotations = process_all_annotations(cg_table_id,
-                            dataset_name=dataset_name,
+                            aligned_volume=aligned_volume,
                             schema_name=schema_name,
                             table_name=table_name,
                             analysisversion=analysisversion,
