@@ -42,37 +42,15 @@ mat_bp = Namespace("Materialization Engine",
                    authorizations=authorizations,
                    description="Materialization Engine")
 
-@mat_bp.route("/metadata/<aligned_volume>/<version>")
-class MetaDataResource(Resource):
-    @auth_required
-    @mat_bp.doc("get_materialized_metadata", security="apikey")
-    def get(self, aligned_volume, version):
-        from materializationengine.tasks import get_materialization_metadata
-
-        results = get_materialization_metadata(aligned_volume, version)
-        logging.info(f"Results are: {results}")
-        return results
-
-
-@mat_bp.route("/run/<string:aligned_volume>/<int:version>/<use_latest>")
+@mat_bp.route("/run/<string:aligned_volume>/<int:version>/")
 class RunMaterializeResource(Resource):
     @auth_required
     @mat_bp.doc("run updating materialization", security="apikey")
-    def get(self, aligned_volume, version, use_latest):
-        from materializationengine.tasks import run_materialization
-
-        run_materialization(aligned_volume, version, use_latest)
-        return jsonify({"Aligned Volume": aligned_volume, "Version": version}), 200
-
-@mat_bp.route("/new/<aligned_volume>/<version>")
-class NewMaterializeResource(Resource):
-    @auth_required
-    @mat_bp.doc("create new materialized version", security="apikey")
     def get(self, aligned_volume, version):
-        from materializationengine.tasks import new_materialization
+        from materializationengine.mat_tasks import start_materialization
 
-        new_materialization(aligned_volume, version)
-        return jsonify({"Aligned Volume": aligned_volume, "Version": version}), 200
+        message = start_materialization(aligned_volume, version)
+        return {"Aligned Volume": aligned_volume, "Version": version, "Message": message}, 200
 
 @mat_bp.route("/aligned_volumes")
 class DatasetResource(Resource):
@@ -81,7 +59,7 @@ class DatasetResource(Resource):
     def get(self):
         response = db.session.query(AnalysisVersion.dataset).distinct()
         aligned_volumes = [r._asdict() for r in response]
-        return jsonify(aligned_volumes)
+        return aligned_volumes
 
 @mat_bp.route("/aligned_volumes/<aligned_volume>")
 class VersionResource(Resource):
@@ -95,7 +73,7 @@ class VersionResource(Resource):
         versions, error = schema.dump(response)
         logging.info(versions)
         if versions:
-            return jsonify(versions), 200
+            return versions, 200
         else:
             logging.error(error)
             return abort(404)
@@ -115,7 +93,7 @@ class TableResource(Resource):
         schema = AnalysisTableSchema(many=True)
         tables, error = schema.dump(response)
         if tables:
-            return jsonify(tables), 200
+            return tables, 200
         else:
             logging.error(error)
             return abort(404)
@@ -137,6 +115,6 @@ class AnnotationResource(Resource):
         response = session.query(annotation_table).limit(10).all()
         annotations = [r._asdict() for r in response]
         if annotations:
-            return jsonify(annotations), 200
+            return annotations, 200
         else:
             return abort(404)
