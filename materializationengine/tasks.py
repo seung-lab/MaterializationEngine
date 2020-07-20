@@ -3,7 +3,7 @@ import logging
 
 import cloudvolume
 import numpy as np
-from annotationframeworkclient.annotationengine import AnnotationClient
+from annotationframeworkclient.annotationengine import AnnotationClient, AnnotationClientV2
 from annotationframeworkclient.infoservice import InfoServiceClient
 from celery import group
 
@@ -22,7 +22,8 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.sql import func
 from sqlalchemy.exc import ProgrammingError
 
-from pychunkedgraph.backend import chunkedgraph
+# from pychunkedgraph.graph import chunkedgraph
+from materializationengine.chunkedgraph_gateway import ChunkedGraphGateway
 
 SQL_URI = current_app.config['MATERIALIZATION_POSTGRES_URI']
 BIGTABLE = current_app.config['BIGTABLE_CONFIG']
@@ -33,15 +34,16 @@ CHUNKGRAPH_TABLE_ID = current_app.config['CHUNKGRAPH_TABLE_ID']
 INFOSERVICE_ADDRESS = current_app.config['INFOSERVICE_ENDPOINT']
 ANNO_ADDRESS = current_app.config['ANNO_ENDPOINT']
 
-BLACKLIST = ["pni_synapses", "pni_synapses_i2",  "is_chandelier"]
+# sql_uri_base/materiailzed_{str: aligned_volume}_{str: version}-> versioned materialized tables
 
 
-def get_missing_tables(session, dataset_name: str, dataset_version: int, server_address: str = None) -> list:
+def get_missing_tables(session, aligned_volume: str,
+                       dataset_version: int, server_address: str = None) -> list:
     """Get list of analysis tables from database. If there are blacklisted
     tables they will not be included.
 
     Arguments:
-        dataset_name {str} -- Name of dataset
+        aligned_volume {str} -- Name of aligned_volume
         analysisversion {int} -- Version of dataset to use
 
     Returns:
@@ -52,9 +54,9 @@ def get_missing_tables(session, dataset_name: str, dataset_version: int, server_
     logging.info(f"DATASET VERSION IS {dataset_version}")
 
     tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == dataset_version).all()
-
-    anno_client = AnnotationClient(dataset_name=dataset_name,
-                                   server_address=server_address)
+    anno_client = AnnotationClient(dateset_name=aligned_volume, server_address=server_address)
+    # anno_client = AnnotationClientV2(server_address=server_address,
+    # auth_header, api_version, endpoints, server_name, aligned_volume_name)
     all_tables = anno_client.get_tables()
     missing_tables_info = [t for t in all_tables
                            if (t['table_name'] not in [t.tablename for t in tables])
@@ -63,7 +65,7 @@ def get_missing_tables(session, dataset_name: str, dataset_version: int, server_
     return missing_tables_info
 
 
-def run_materialization(dataset_name: str, database_version: int,
+def run_materialization(aligned_volume: str, database_version: int,
                         use_latest: bool, server: str = None):
     """Start celery based materialization. A database and version are used as a
     base to update annotations. A series of tasks are chained in sequence passing
@@ -74,7 +76,7 @@ def run_materialization(dataset_name: str, database_version: int,
         database_version {int} -- Version of database to use to update from.
     """
     logging.info("STARTING MATERIALIZATION")
-    logging.info(f"DATASET_NAME: {dataset_name} | DATABASE_VERSION: {database_version}")
+    logging.info(f"DATASET_NAME: {aligned_volume} | DATABASE_VERSION: {database_version}")
     session, engine = create_session(SQL_URI)
     try:
         if use_latest:
@@ -83,7 +85,7 @@ def run_materialization(dataset_name: str, database_version: int,
             base_mat_version = session.query(AnalysisVersion).filter(AnalysisVersion.version==database_version).first()
         logging.info(f"CURRENT VERSION: {base_mat_version}")
         version = base_mat_version.version
-        ret = (get_materialization_metadata.s(dataset_name, version, base_mat_version, server) |
+        ret = (get_materialization_metadata.s(aligned_volume, version, base_mat_version, server) |
                create_database_from_template.s() |
                add_analysis_tables.s() |
                materialize_root_ids.s() |
@@ -93,39 +95,39 @@ def run_materialization(dataset_name: str, database_version: int,
         logging.info("NO TABLE EXISTS")
         version = database_version
         base_mat_version = None
-        ret = (get_materialization_metadata.s(dataset_name, version, base_mat_version, server) |
+        ret = (get_materialization_metadata.s(aligned_volume, version, base_mat_version, server) |
                setup_new_database.s() |
                materialize_root_ids.s() |
                materialize_annotations.s() |
                materialize_annotations_delta.s()).apply_async()
 
 
-def new_materialization(dataset_name: str, database_version: int):
+def new_materialization(aligned_volume: str, database_version: int):
     """Start celery based materialization. A database and version are used as a
     base to update annotations. A series of tasks are chained in sequence passing
     metadata between each task. Requires pickle celery serialization.
 
     Arguments:
-        dataset_name {str} -- Name of dataset to use as a base.
+        aligned_volume {str} -- Name of dataset to use as a base.
         database_version {int} -- Version of database to use to update from.
     """
     logging.info("STARTING MATERIALIZATION")
-    logging.info(f"DATASET_NAME: {dataset_name} | DATABASE_VERSION: {database_version}")
+    logging.info(f"DATASET_NAME: {aligned_volume} | DATABASE_VERSION: {database_version}")
 
-    ret = (get_materialization_metadata.s(dataset_name, database_version, None) |
+    ret = (get_materialization_metadata.s(aligned_volume, database_version, None) |
            setup_new_database.s() |
            materialize_annotations.s() |
            materialize_annotations_delta.s()).apply_async()
 
 
 @celery.task(name='process:materializationengine.tasks.get_materialization_metadata')
-def get_materialization_metadata(dataset_name: str, database_version: int,
+def get_materialization_metadata(aligned_volume: str, database_version: int,
                                  base_mat_version=None, server_address: str = None) -> dict:
     """Generate metadata for materialization, returns infoclient data and generates the template
     analysis database version for updating.
 
     Arguments:
-        dataset_name {str} -- Dataset name to use as template.
+        aligned_volume {str} -- Dataset name to use as template.
         database_version {int} -- Version to use as template.
 
     Keyword Arguments:
@@ -283,39 +285,39 @@ def add_analysis_tables(metadata: dict) -> dict:
     return metadata
 
 
-@celery.task(name='process:materializationengine.tasks.materialize_root_ids')
-def materialize_root_ids(metadata: dict) -> dict:
-    logging.info("MATERIALIZNG ROOT IDS")
-    base_mat_version_engine = create_engine(metadata['base_mat_version_db_uri'])
-    BaseMatVersionSession = sessionmaker(bind=base_mat_version_engine)
-    base_mat_version_session = BaseMatVersionSession()
-    Base.metadata.create_all(base_mat_version_engine)
-    root_model = em_models.make_cell_segment_model(metadata['dataset_name'],
-                                                   version=metadata['new_mat_version'].version)
-    try:
-        prev_max_id = int(base_mat_version_session.query(func.max(root_model.id).label('max_root_id')).first()[0])
-    except Exception as e:
-        logging.error(e)
-        prev_max_id = 1
-    cg = chunkedgraph.ChunkedGraph(table_id=metadata['cg_table_id'])
-    max_root_id = materialize.find_max_root_id_before(cg,
-                                                      metadata['base_mat_version'].time_stamp,
-                                                      2*chunkedgraph.LOCK_EXPIRED_TIME_DELTA,
-                                                      start_id=np.uint64(prev_max_id),
-                                                      delta_id=100)
-    max_seg_id = cg.get_segment_id(np.uint64(max_root_id))
-    multi_args, new_roots, old_roots = materialize.materialize_root_ids_delta(cg_table_id=metadata['cg_table_id'],
-                                                                              dataset_name=metadata['dataset_name'],
-                                                                              time_stamp=metadata['new_mat_version'].time_stamp,
-                                                                              time_stamp_base=metadata['base_mat_version'].time_stamp,
-                                                                              min_root_id=max_seg_id,
-                                                                              analysisversion=metadata['new_mat_version'],
-                                                                              sqlalchemy_database_uri=metadata['new_mat_version_db_uri'],
-                                                                              cg_instance_id=CG_INSTANCE_ID)
-    subtasks = [materialize_root_ids_subtask.s(args) for args in multi_args]
-    results = group(subtasks)()
-    metadata['old_roots'] = old_roots
-    return metadata
+# @celery.task(name='process:materializationengine.tasks.materialize_root_ids')
+# def materialize_root_ids(metadata: dict) -> dict:
+#     logging.info("MATERIALIZNG ROOT IDS")
+#     base_mat_version_engine = create_engine(metadata['base_mat_version_db_uri'])
+#     BaseMatVersionSession = sessionmaker(bind=base_mat_version_engine)
+#     base_mat_version_session = BaseMatVersionSession()
+#     Base.metadata.create_all(base_mat_version_engine)
+#     root_model = em_models.make_cell_segment_model(metadata['dataset_name'],
+#                                                    version=metadata['new_mat_version'].version)
+#     try:
+#         prev_max_id = int(base_mat_version_session.query(func.max(root_model.id).label('max_root_id')).first()[0])
+#     except Exception as e:
+#         logging.error(e)
+#         prev_max_id = 1
+#     cg = ChunkedGraphGateway(table_id=metadata['cg_table_id'])
+#     max_root_id = materialize.find_max_root_id_before(cg,
+#                                                       metadata['base_mat_version'].time_stamp,
+#                                                       2*chunkedgraph.LOCK_EXPIRED_TIME_DELTA,
+#                                                       start_id=np.uint64(prev_max_id),
+#                                                       delta_id=100)
+#     max_seg_id = cg.get_segment_id(np.uint64(max_root_id))
+#     multi_args, new_roots, old_roots = materialize.materialize_root_ids_delta(cg_table_id=metadata['cg_table_id'],
+#                                                                               dataset_name=metadata['dataset_name'],
+#                                                                               time_stamp=metadata['new_mat_version'].time_stamp,
+#                                                                               time_stamp_base=metadata['base_mat_version'].time_stamp,
+#                                                                               min_root_id=max_seg_id,
+#                                                                               analysisversion=metadata['new_mat_version'],
+#                                                                               sqlalchemy_database_uri=metadata['new_mat_version_db_uri'],
+#                                                                               cg_instance_id=CG_INSTANCE_ID)
+#     subtasks = [materialize_root_ids_subtask.s(args) for args in multi_args]
+#     results = group(subtasks)()
+#     metadata['old_roots'] = old_roots
+#     return metadata
 
 
 @celery.task(name='process:materializationengine.tasks.materialize_annotations')
@@ -397,7 +399,7 @@ def process_all_annotations_subtask(args):
 
     amdb = DynamicMaterializationClient(**serialized_amdb_info)
 
-    cg = chunkedgraph.ChunkedGraph(**serialized_cg_info)
+    cg = ChunkedGraphGateway(**serialized_cg_info)
 
     cv = cloudvolume.CloudVolume(**serialized_cv_info)
     mm = manager.MaterializationManager(**serialized_mm_info)
@@ -433,7 +435,7 @@ def process_all_annotations_subtask(args):
 def materialize_delta_annotation_subtask(args):
     """ Helper for materialize_annotations_delta """
     (block, col, time_stamp,  mm_info, cg_info) = args
-    cg = chunkedgraph.ChunkedGraph(**cg_info)
+    cg = ChunkedGraphGateway(**cg_info)
     mm = manager.MaterializationManager(**mm_info)
     annos_list = []
     for id_, sup_id in block:
