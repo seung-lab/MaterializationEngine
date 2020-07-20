@@ -1,12 +1,15 @@
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, engine
 from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from celery import Celery
 
 
 # create celery
-celery = Celery(include=['materializationengine.tasks'])
+celery = Celery(include=[
+    'materializationengine.tasks',
+    'materializationengine.mat_tasks'
+    ])
 
 
 def create_session(sql_uri: str = None):
