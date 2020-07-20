@@ -4,7 +4,7 @@ from flask_accepts import accepts, responds
 
 from materializationengine.models import AnalysisTable, AnalysisVersion
 from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
-from materializationengine.aligned_volume import get_aligned_volumes
+from materializationengine.info_client import get_aligned_volumes
 from materializationengine.database import get_db
 from materializationengine.blueprints.client.schemas import (
     Metadata,
@@ -80,7 +80,7 @@ class SegmentationTable(Resource):
 class LinkedSegmentations(Resource):
     @auth_required
     @client_bp.doc("post linked annotations", security="apikey")
-    @accepts("PostPutAnnotationSchema", schema=PostPutAnnotationSchema, api=client_bp)
+    @accepts("SegmentationDataSchema", schema=SegmentationDataSchema, api=client_bp)
     def post(self, aligned_volume_name: str, table_name: str, **kwargs):
         """ Insert linked segmentations """
         check_aligned_volume(aligned_volume_name)
