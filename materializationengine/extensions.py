@@ -7,7 +7,6 @@ from celery import Celery
 
 # create celery
 celery = Celery(include=[
-    'materializationengine.tasks',
     'materializationengine.mat_tasks'
     ])
 
