@@ -41,20 +41,21 @@ authorizations = {
 mat_bp = Namespace("Materialization Engine",
                    authorizations=authorizations,
                    description="Materialization Engine")
+# @mat_bp.route("/run/<string:aligned_volume>/<int:version>/")
 
-@mat_bp.route("/run/<string:aligned_volume>/<int:version>/")
+@mat_bp.route("/test_celerey/<string:aligned_volume>/")
 class RunMaterializeResource(Resource):
-    @auth_required
+    # @auth_required
     @mat_bp.doc("run updating materialization", security="apikey")
-    def get(self, aligned_volume, version):
-        from materializationengine.mat_tasks import start_materialization
+    def get(self, aligned_volume):
+        from materializationengine.workflows.live_materialization import start_materialization
 
-        message = start_materialization(aligned_volume, version)
-        return {"Aligned Volume": aligned_volume, "Version": version, "Message": message}, 200
+        start_materialization(aligned_volume)
+        return "STARTING", 200
 
 @mat_bp.route("/aligned_volumes")
 class DatasetResource(Resource):
-    @auth_required
+    # @auth_required
     @mat_bp.doc("get_aligned_volume_versions", security="apikey")
     def get(self):
         response = db.session.query(AnalysisVersion.dataset).distinct()
@@ -63,7 +64,7 @@ class DatasetResource(Resource):
 
 @mat_bp.route("/aligned_volumes/<aligned_volume>")
 class VersionResource(Resource):
-    @auth_required
+    # @auth_required
     @mat_bp.doc("get_analysis_versions", security="apikey")
     def get(self, aligned_volume):
         response = (
