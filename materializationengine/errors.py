@@ -18,3 +18,7 @@ class RootIDNotFoundException(MaterializeAnnotationException):
 
 class AnnotationParseFailure(MaterializeAnnotationException):
     pass
+
+
+class TaskFailure(Exception):
+   pass
