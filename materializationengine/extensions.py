@@ -7,7 +7,8 @@ from celery import Celery
 
 # create celery
 celery = Celery(include=[
-    'materializationengine.mat_tasks'
+    'materializationengine.workflows.live_materialization',
+    'materializationengine.workflows.flat_materialization'
     ])
 
 
