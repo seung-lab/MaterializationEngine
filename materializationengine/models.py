@@ -36,3 +36,4 @@ class AnalysisMetadata(Base):
     table_id = Column(String(100), nullable=False)
     valid = Column(Boolean)
     created = Column(DateTime, nullable=False)
+    last_updated = Column(DateTime, nullable=True)
