@@ -9,7 +9,6 @@ class Metadata(Schema):
 
 class SegmentationInfoSchema(Schema):
     pcg_table_name = fields.Str(required=True)
-    pcg_version = fields.Int(required=True)
 
 
 class SegmentationTableSchema(SegmentationInfoSchema):
@@ -30,5 +29,4 @@ class PostPutAnnotationSchema(SegmentationInfoSchema):
 
 class SegmentationDataSchema(Schema):
     pcg_table_name = fields.Str(required=True)
-    pcg_version = fields.Int(required=True)
     segmentations = fields.List(fields.Dict, required=True)
