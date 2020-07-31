@@ -34,7 +34,6 @@ client_bp = Namespace("Materialization Client",
 annotation_parser = reqparse.RequestParser()
 annotation_parser.add_argument('annotation_ids', type=int, action='split', help='list of annotation ids')    
 annotation_parser.add_argument('pcg_table_name', type=str, help='name of pcg segmentation table')    
-annotation_parser.add_argument('pcg_version', default=0, type=int, help='PCG version')   
 
 
 def check_aligned_volume(aligned_volume):
@@ -56,11 +55,9 @@ class SegmentationTable(Resource):
 
         annotation_table_name = data.get("table_name")
         pcg_table_name = data.get("pcg_table_name")
-        pcg_version = data.get("pcg_version")
 
         table_info = db.create_and_attach_seg_table(
-            annotation_table_name, pcg_table_name, pcg_version
-        )
+            annotation_table_name, pcg_table_name)
 
         return table_info, 200
 
@@ -87,12 +84,10 @@ class LinkedSegmentations(Resource):
         data = request.parsed_obj
         segmentations = data.get("segmentations")
         pcg_table_name = data.get("pcg_table_name")
-        pcg_version = data.get("pcg_version")
         db = get_db(aligned_volume_name)
         try:
             db.insert_linked_segmentation(table_name,
                                           pcg_table_name,
-                                          pcg_version,
                                           segmentations)
         except Exception as error:
             logging.error(f"INSERT FAILED {segmentations}")
@@ -113,12 +108,10 @@ class LinkedAnnotations(Resource):
 
         ids = args["annotation_ids"]
         pcg_table_name = args["pcg_table_name"]
-        pcg_version = args["pcg_version"]
 
         db = get_db(aligned_volume_name)
         annotations = db.get_linked_annotations(table_name,
                                                 pcg_table_name,
-                                                pcg_version,
                                                 ids)
 
         if annotations is None:
@@ -136,12 +129,10 @@ class LinkedAnnotations(Resource):
         data = request.parsed_obj
         annotations = data.get("annotations")
         pcg_table_name = data.get("pcg_table_name")
-        pcg_version = data.get("pcg_version")
         db = get_db(aligned_volume_name)
         try:
             db.insert_linked_annotations(table_name,
                                          pcg_table_name,
-                                         pcg_version,
                                          annotations)
         except Exception as error:
             logging.error(f"INSERT FAILED {annotations}")
@@ -158,7 +149,6 @@ class LinkedAnnotations(Resource):
         data = request.parsed_obj
         annotations = data.get("annotations")
         pcg_table_name = data.get("pcg_table_name")
-        pcg_version = data.get("pcg_version")
         db = get_db(aligned_volume_name)
 
         metadata = db.get_table_metadata(aligned_volume_name, table_name)
@@ -168,7 +158,6 @@ class LinkedAnnotations(Resource):
             for annotation in annotations:
                 db.update_linked_annotations(table_name,
                                              pcg_table_name,
-                                             pcg_version,
                                              annotations)
 
         return f"Updated {len(data)} annotations", 200
@@ -183,13 +172,11 @@ class LinkedAnnotations(Resource):
 
         ids = data.get("annotation_ids")
         pcg_table_name = data.get("pcg_table_name")
-        pcg_version = data.get("pcg_version")
         db = get_db(aligned_volume_name)
 
         for anno_id in ids:
             ann = db.delete_linked_annotation(table_name,
                                               pcg_table_name,
-                                              pcg_version,
                                               ids)
 
         if ann is None:
