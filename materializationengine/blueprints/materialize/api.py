@@ -17,6 +17,7 @@ from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSc
 from materializationengine.extensions import create_session
 from materializationengine.views import get_datasets
 from materializationengine.database import get_db
+from materializationengine.info_client import get_aligned_volumes
 from middle_auth_client import auth_required, auth_requires_permission
 import requests
 import logging
@@ -41,34 +42,41 @@ authorizations = {
 mat_bp = Namespace("Materialization Engine",
                    authorizations=authorizations,
                    description="Materialization Engine")
-# @mat_bp.route("/run/<string:aligned_volume>/<int:version>/")
 
-@mat_bp.route("/test_celerey/<string:aligned_volume>/")
+
+def check_aligned_volume(aligned_volume):
+    aligned_volumes = get_aligned_volumes()
+    if aligned_volume not in aligned_volumes:
+        abort(400, f"aligned volume: {aligned_volume} not valid")
+
+@mat_bp.route("/test_celerey/<string:aligned_volume_name>/")
 class RunMaterializeResource(Resource):
-    # @auth_required
+    @auth_required
     @mat_bp.doc("run updating materialization", security="apikey")
-    def get(self, aligned_volume):
+    def get(self, aligned_volume_name):
         from materializationengine.workflows.live_materialization import start_materialization
+        check_aligned_volume(aligned_volume_name)
 
-        start_materialization(aligned_volume)
+        start_materialization(aligned_volume_name)
         return "STARTING", 200
 
 @mat_bp.route("/aligned_volumes")
 class DatasetResource(Resource):
-    # @auth_required
+    @auth_required
     @mat_bp.doc("get_aligned_volume_versions", security="apikey")
     def get(self):
         response = db.session.query(AnalysisVersion.dataset).distinct()
         aligned_volumes = [r._asdict() for r in response]
         return aligned_volumes
 
-@mat_bp.route("/aligned_volumes/<aligned_volume>")
+@mat_bp.route("/aligned_volumes/<aligned_volume_name>")
 class VersionResource(Resource):
-    # @auth_required
+    @auth_required
     @mat_bp.doc("get_analysis_versions", security="apikey")
-    def get(self, aligned_volume):
+    def get(self, aligned_volume_name):
+        check_aligned_volume(aligned_volume_name)
         response = (
-            db.session.query(AnalysisVersion).filter(AnalysisVersion.dataset == aligned_volume).all()
+            db.session.query(AnalysisVersion).filter(AnalysisVersion.dataset == aligned_volume_name).all()
         )
         schema = AnalysisVersionSchema(many=True)
         versions, error = schema.dump(response)
@@ -79,16 +87,17 @@ class VersionResource(Resource):
             logging.error(error)
             return abort(404)
 
-@mat_bp.route("/aligned_volumes/<aligned_volume>/<version>")
+@mat_bp.route("/aligned_volumes/<aligned_volume_name>/<version>")
 class TableResource(Resource):
     @auth_required
     @mat_bp.doc("get_all_tables", security="apikey")
-    def get(self, aligned_volume, version):
+    def get(self, aligned_volume_name, version):
+        check_aligned_volume(aligned_volume_name)
         response = (
             db.session.query(AnalysisTable)
             .filter(AnalysisTable.analysisversion)
             .filter(AnalysisVersion.version == version)
-            .filter(AnalysisVersion.dataset == aligned_volume)
+            .filter(AnalysisVersion.dataset == aligned_volume_name)
             .all()
         )
         schema = AnalysisTableSchema(many=True)
@@ -99,13 +108,14 @@ class TableResource(Resource):
             logging.error(error)
             return abort(404)
 
-@mat_bp.route("/aligned_volumes/<aligned_volume>/<version>/<tablename>")
+@mat_bp.route("/aligned_volumes/<aligned_volume_name>/<version>/<tablename>")
 class AnnotationResource(Resource):
     @auth_required
     @mat_bp.doc("get_top_materialized_annotations", security="apikey")
-    def get(self, aligned_volume, version, tablename):
+    def get(self, aligned_volume_name, version, tablename):
+        check_aligned_volume(aligned_volume_name)
         db = get_db()
-        sql_uri = format_version_db_uri(db, aligned_volume, version)
+        sql_uri = format_version_db_uri(db, aligned_volume_name, version)
         session, engine = create_session(sql_uri)
         metadata = MetaData()
         try:
