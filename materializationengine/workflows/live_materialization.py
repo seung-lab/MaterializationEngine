@@ -26,6 +26,8 @@ from materializationengine.utils import make_root_id_column_name
 from typing import List
 from copy import deepcopy
 import time
+import requests
+import pandas as pd
 
 celery_logger = get_task_logger(__name__)
 
@@ -35,7 +37,7 @@ PROJECT_ID = BIGTABLE["project_id"]
 CG_INSTANCE_ID = BIGTABLE["instance_id"]
 AMDB_INSTANCE_ID = BIGTABLE["amdb_instance_id"]
 CHUNKGRAPH_TABLE_ID = current_app.config["CHUNKGRAPH_TABLE_ID"]
-INFOSERVICE_ADDRESS = current_app.config["INFOSERVICE_ENDPOINT"]
+INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
 ANNO_ADDRESS = current_app.config["ANNO_ENDPOINT"]
 SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
 
@@ -184,10 +186,30 @@ def aligned_volume_tables_task(self, aligned_volume: str) -> List[str]:
     List[str]
         [description]
     """
+    table_info = {}
+
+    url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{aligned_volume}"
+    try:
+        r = requests.get(url)
+        assert r.status_code == 200
+    except requests.exceptions.RequestException as e:
+        logging.error(f"ERROR {e}. Cannot connect to {endpoint}")
+
+    logging.info(url)
+    info = r.json()
+
+    img_cv = cloudvolume.CloudVolume(info["image_source"], mip=0)
+
+    pcg_seg_cv = cloudvolume.CloudVolume(info["pychunkgraph_segmentation_source"], mip=0)
+    scale_factor = img_cv.resolution / pcg_seg_cv.resolution
+    pixel_ratios = tuple(scale_factor)
+
+    table_info['pychunkgraph_segmentation_source'] = pcg_seg_cv
+    table_info['pixel_ratios'] = pixel_ratios
+
     db = get_db(aligned_volume)
     segmentation_table_ids = db.get_existing_segmentation_table_ids()
     tables_to_update = []
-    table_info = {}
     for seg_table_id in segmentation_table_ids:
         max_id = db._get_table_row_count(seg_table_id)
         table_name = seg_table_id.split("__")[-2]
@@ -285,37 +307,39 @@ def update_root_ids(self, chunks: List[int], segmentation_data: dict, time_stamp
     except Exception as e:
         raise self.retry(exc=e, countdown=3)
 
-
     if time_stamp is None:
         time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
 
-    root_id_data = {}
-    formatted_seg_data = []
+    root_id_dict = {}
+    root_column_names = []
 
     pcg_table_name = segmentation_data.get("pcg_table_name")
-    # cg = ChunkedGraphGateway(pcg_table_name)
+    cg = ChunkedGraphGateway(pcg_table_name)
 
     for columns, values in supervoxel_id_data.items():
-        celery_logger.info(columns)
-        celery_logger.info(len(values))
-
-        supervoxel_data = np.asarray(values, dtype=np.uint64)
-        pk = supervoxel_data[:, 0].tolist()
-
         col = make_root_id_column_name(columns)
-        celery_logger.info(col)
+        root_column_names.append(col)
+        supervoxel_data = np.asarray(values, dtype=np.uint64)
+        pk = supervoxel_data[:, 0]
 
-        # root_ids = cg.get_roots(supervoxel_data[:, 1], time_stamp=time_stamp)
-        root_ids = supervoxel_data[:, 1].tolist()
-        root_id_data[col] = root_ids
-        celery_logger.info(root_id_data)
-        # segs = [SegmentationModel(**segmentation_data)
-        #                 for segmentation_data in formatted_seg_data]
+        root_ids = cg.get_roots(supervoxel_data[:, 1], time_stamp=time_stamp)
 
-    # self.session.add_all(segs)
-    # self.session.commit()
-    self.session.close()
-    return root_id_data
+        root_id_dict['id'] = pk
+        root_id_dict[col] = root_ids
+
+    root_column_names.append('id')
+    df = pd.DataFrame(root_id_dict)
+    data = df.to_dict('records')
+
+    try:
+        self.session.bulk_update_mappings(SegmentationModel, data)
+        self.session.commit()
+    except Exception as e:
+        self.cached_session.rollback()
+        celery_logger.error(f"SQL Error: {e}")
+    finally:
+        self.session.close()
+
 
 @celery.task(bind=True, name="threads:get_root_ids_task")
 def get_root_ids_task(
