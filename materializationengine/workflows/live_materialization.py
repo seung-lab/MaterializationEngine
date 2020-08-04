@@ -28,9 +28,12 @@ from copy import deepcopy
 import time
 import requests
 import pandas as pd
+from middle_auth_client import auth_required, auth_requires_permission
 
 celery_logger = get_task_logger(__name__)
 
+
+import random
 
 BIGTABLE = current_app.config["BIGTABLE_CONFIG"]
 PROJECT_ID = BIGTABLE["project_id"]
@@ -68,47 +71,37 @@ Materialization Modes
 """
 
 
-def start_materialization(aligned_volume: str):
+def start_materialization(aligned_volume_name: str, aligned_volume_info: dict):
     """Base live materialization 
 
-    Parameters
-    ----------
-    aligned_volume : str
-        name of aligned volume database to target
+    Workflow paths: 
+        check if supervoxel column is empty:
+            if last_updated is NULL:
+                -> workflow : find missing supervoxels > cloudvolume lookup supervoxels > get root ids > 
+                            find missing root_ids > lookup supervoxel ids from sql > get root_ids > merge root_ids list > insert root_ids
+            else:
+                -> find missing supervoxels > cloudvolume lookup |
+                    - > find new root_ids between time stamps  ---> merge root_ids list > upsert root_ids
 
-    Returns
-    -------
-    [type]
-        [description]
     """
 
-    matadata_result = aligned_volume_tables_task.s(aligned_volume).delay()
+    matadata_result = aligned_volume_tables_metadata.s(aligned_volume_name, aligned_volume_info).delay()
     table_matadata = matadata_result.get()
     for metadata in table_matadata:
         result = chunk_supervoxel_ids_task.s(metadata).delay()
-        chunks = result.get()
+        chunk_ends = result.get()
 
-        supervoxel_root_id_lookup_workflow = chord(
-            [update_root_ids.s(chunk, metadata) for chunk in chunks], collect.si()
+        process_chunks_workflow = chain(
+            chord(
+                [
+                    chain(get_sql_supervoxel_ids.s(chunk, metadata), get_root_ids_from_supervoxels.s(metadata), update_root_ids.s(metadata))
+                    for chunk in chunk_ends
+                ],
+                fin.s(),
+            )
         )
-        supervoxel_root_id_lookup_workflow.apply_async()        
 
-@celery.task(name="threads:collect")
-def collect(*args, **kwargs):
-    return True
-
-
-@celery.task(name="threads:lookup_supervoxels")
-def lookup_supervoxels(data, table):
-    if data:
-        tasks = []
-        for d in data:
-            celery_logger.info(d)
-            tasks.append(get_supervoxel_ids_task.s(chunks=d, segmentation_data=table))
-        return group(tasks)()
-
-    else:
-        raise TaskFailure("No data to process")
+        process_chunks_workflow.apply_async()
 
 
 class SqlAlchemyTask(celery.Task):
@@ -139,9 +132,7 @@ class SqlAlchemyTask(celery.Task):
     def session(self):
         if self._session is None:
             try:
-                self.Session = scoped_session(
-                    sessionmaker(bind=self.engine)
-                )
+                self.Session = scoped_session(sessionmaker(bind=self.engine))
                 self._session = self.Session()
                 return self._session
             except Exception as e:
@@ -170,7 +161,7 @@ class SqlAlchemyTask(celery.Task):
 
 
 @celery.task(bind=True, name="threads:aligned_volume_tables_task")
-def aligned_volume_tables_task(self, aligned_volume: str) -> List[str]:
+def aligned_volume_tables_metadata(self, aligned_volume: str, aligned_volume_info: dict) -> List[str]:
     """Initialize materialization by aligned volume. Iterates
     thorugh all tables and checks if they are below a table row count
     size. The list of tables are passed to workers for root_id updating
@@ -186,42 +177,27 @@ def aligned_volume_tables_task(self, aligned_volume: str) -> List[str]:
     List[str]
         [description]
     """
-    table_info = {}
-
-    url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{aligned_volume}"
-    try:
-        r = requests.get(url)
-        assert r.status_code == 200
-    except requests.exceptions.RequestException as e:
-        logging.error(f"ERROR {e}. Cannot connect to {endpoint}")
-
-    logging.info(url)
-    info = r.json()
-
-    img_cv = cloudvolume.CloudVolume(info["image_source"], mip=0)
-
-    pcg_seg_cv = cloudvolume.CloudVolume(info["pychunkgraph_segmentation_source"], mip=0)
-    scale_factor = img_cv.resolution / pcg_seg_cv.resolution
-    pixel_ratios = tuple(scale_factor)
-
-    table_info['pychunkgraph_segmentation_source'] = pcg_seg_cv
-    table_info['pixel_ratios'] = pixel_ratios
-
     db = get_db(aligned_volume)
     segmentation_table_ids = db.get_existing_segmentation_table_ids()
-    tables_to_update = []
+
+    table_info = {}
+    tables_to_update = []    
     for seg_table_id in segmentation_table_ids:
         max_id = db._get_table_row_count(seg_table_id)
         table_name = seg_table_id.split("__")[-2]
-        table_info['schema'] = db.get_table_schema(aligned_volume, table_name)
+        table_info["schema"] = db.get_table_schema(aligned_volume, table_name)
         table_info["max_id"] = int(max_id)
         table_info["segmentation_table_id"] = str(seg_table_id)
-        table_info['annotation_table_id'] = f'{seg_table_id.split("__")[0]}__{aligned_volume}__{seg_table_id.split("__")[-2]}'
+        table_info["annotation_table_id"] = f'{seg_table_id.split("__")[0]}__{aligned_volume}__{seg_table_id.split("__")[-2]}'
         table_info["aligned_volume"] = str(aligned_volume)
         table_info["pcg_table_name"] = str(seg_table_id.split("__")[-1])
-
+        table_info['segmentation_source'] = aligned_volume_info['segmentation_source']
         tables_to_update.append(table_info.copy())
     return tables_to_update
+
+@celery.task(bine=True, name="threads:chunk_supervoxel_ids_task")
+def get_missing_supervoxel_id_indices() -> dict:
+    pass
 
 
 @celery.task(bine=True, name="threads:chunk_supervoxel_ids_task")
@@ -250,15 +226,83 @@ def chunk_supervoxel_ids_task(segmentation_data: dict, block_size: int = 2500) -
         chunk_ends.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1]])
     return chunk_ends
 
+@celery.task(base=SqlAlchemyTask, name="threads:get_spatial_points_in_chunk", bind=True, autoretry_for=(Exception,), max_retries=3)
+def get_spatial_points_in_chunk(self, chunks: List[int], segmentation_data: dict) -> List[int]:
+    """Iterates over columns with 'supervoxel_id' present in the name and
+    returns supervoxel ids between start and stop ids.
 
-@celery.task(
-    base=SqlAlchemyTask,
-    name="threads:update_root_ids",
-    bind=True,
-    autoretry_for=(Exception,),
-    max_retries=3,
-)
-def update_root_ids(self, chunks: List[int], segmentation_data: dict, time_stamp = None) -> List[int]:
+    Parameters
+    ----------
+    segmentation_table_info: dict
+        name of database to target
+    start_id : int
+        start index for querying
+    end_id : int
+        end index for querying
+
+    Returns
+    -------
+    List[int]
+        list of supervoxel ids between 'start_id' and 'end_id'
+    """
+
+    aligned_volume = segmentation_data.get("aligned_volume")
+    segmentation_source = segmentation_data.get("segmentation_source")
+    annotation_table_id = segmentation_data.get("annotation_table_id")
+    schema_type = segmentation_data.get("schema")
+   
+    seg_table_id = segmentation_data.get("segmentation_table_id")
+    if seg_table_id in self.models:
+        SegmentationModel = self.models[seg_table_id]
+    else:
+        SegmentationModel = em_models.make_segmentation_model(
+            annotation_table_id, schema_type, seg_table_id.split("__")[-1]
+        )
+        self.models[seg_table_id] = SegmentationModel
+
+        
+    if annotation_table_id in self.models:
+        AnnotationModel = self.models[annotation_table_id]
+    else:
+        AnnotationModel = em_models.make_annotation_model(annotation_table_id, schema_type)
+
+
+    try:
+        logging.info(f"MODEL: {SegmentationModel}")
+
+        columns = [column.name for column in SegmentationModel.__table__.columns]
+        supervoxel_id_columns = [column for column in columns if "supervoxel_id" in column]
+        logging.info(f"COLUMNS: {supervoxel_id_columns}")
+
+        supervoxel_id_data = {}
+        for supervoxel_id_column in supervoxel_id_columns:
+            supervoxel_id_data[supervoxel_id_column] = [
+                data
+                for data in self.session.query(
+                    SegmentationModel.id, getattr(SegmentationModel, supervoxel_id_column)
+                ).filter(
+                    or_(SegmentationModel.annotation_id).between(int(chunks[0]), int(chunks[1]))
+                )
+            ]
+        return supervoxel_id_data
+    except Exception as e:
+        raise self.retry(exc=e, countdown=3)
+
+@celery.task(base=SqlAlchemyTask, name="threads:get_spatial_points_in_chunk", bind=True, autoretry_for=(Exception,), max_retries=3)
+def get_cloudvolume_supervoxel_ids(self, spatial_points, segmentation_data: dict):
+    segmentation_source = segmentation_data.get("segmentation_source")
+
+    pcg_seg_cv = cloudvolume.CloudVolume(segmentation_source, mip=0)
+
+    for k, row in nuc_df.iterrows():
+        if np.isnan(nuc_df.loc[k, 'svid']):
+            svid=np.squeeze(cv.download_point(row.ctr_pt,size=1))
+            nuc_df.loc[k, 'svid'] = np.uint64(svid)
+        if k%1000==0:
+            print(k)
+
+@celery.task(base=SqlAlchemyTask, name="threads:get_sql_supervoxel_ids", bind=True, autoretry_for=(Exception,), max_retries=3)
+def get_sql_supervoxel_ids(self, chunks: List[int], segmentation_data: dict) -> List[int]:
     """Iterates over columns with 'supervoxel_id' present in the name and
     returns supervoxel ids between start and stop ids.
 
@@ -279,13 +323,13 @@ def update_root_ids(self, chunks: List[int], segmentation_data: dict, time_stamp
     self.aligned_volume = segmentation_data.get("aligned_volume")
     seg_table_id = segmentation_data.get("segmentation_table_id")
     annotation_table_id = segmentation_data.get("annotation_table_id")
-    schema_type = segmentation_data.get('schema')
+    schema_type = segmentation_data.get("schema")
     if seg_table_id in self.models:
         SegmentationModel = self.models[seg_table_id]
     else:
-        SegmentationModel = em_models.make_segmentation_model(annotation_table_id,
-                                                              schema_type,
-                                                              seg_table_id.split("__")[-1])                                                   
+        SegmentationModel = em_models.make_segmentation_model(
+            annotation_table_id, schema_type, seg_table_id.split("__")[-1]
+        )
         self.models[seg_table_id] = SegmentationModel
     try:
         logging.info(f"MODEL: {SegmentationModel}")
@@ -304,9 +348,40 @@ def update_root_ids(self, chunks: List[int], segmentation_data: dict, time_stamp
                     or_(SegmentationModel.annotation_id).between(int(chunks[0]), int(chunks[1]))
                 )
             ]
+        return supervoxel_id_data
     except Exception as e:
         raise self.retry(exc=e, countdown=3)
 
+
+@celery.task(name="threads:get_root_ids_from_supervoxels", bind=True, autoretry_for=(Exception,), max_retries=3)
+def get_expired_root_ids(last_updated_time, segmentation_data, time_stamp=None):
+    if time_stamp is None:
+        time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
+
+    root_id_dict = {}
+    root_column_names = []
+
+    pcg_table_name = segmentation_data.get("pcg_table_name")
+    cg = ChunkedGraphGateway(pcg_table_name)
+    old_roots, new_roots = cg.get_proofread_root_ids(last_updated_time, time_stamp)
+    # for columns, values in supervoxel_id_data.items():
+    #     col = make_root_id_column_name(columns)
+    #     root_column_names.append(col)
+    #     supervoxel_data = np.asarray(values, dtype=np.uint64)
+    #     pk = supervoxel_data[:, 0]
+
+    #     root_ids = cg.get_roots(supervoxel_data[:, 1], time_stamp=time_stamp)
+
+    #     root_id_dict["id"] = pk
+    #     root_id_dict[col] = root_ids
+
+    root_column_names.append("id")
+    df = pd.DataFrame(root_id_dict)
+    data = df.to_dict("records")
+    return data
+
+@celery.task(name="threads:get_root_ids_from_supervoxels", bind=True, autoretry_for=(Exception,), max_retries=3)
+def get_root_ids_from_supervoxels(supervoxel_id_data, segmentation_data, time_stamp=None):
     if time_stamp is None:
         time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
 
@@ -324,88 +399,37 @@ def update_root_ids(self, chunks: List[int], segmentation_data: dict, time_stamp
 
         root_ids = cg.get_roots(supervoxel_data[:, 1], time_stamp=time_stamp)
 
-        root_id_dict['id'] = pk
+        root_id_dict["id"] = pk
         root_id_dict[col] = root_ids
 
-    root_column_names.append('id')
+    root_column_names.append("id")
     df = pd.DataFrame(root_id_dict)
-    data = df.to_dict('records')
+    data = df.to_dict("records")
+    return data
 
+@celery.task(base=SqlAlchemyTask, name="threads:update_root_ids", bind=True, autoretry_for=(Exception,), max_retries=3)
+def update_root_ids(self, root_id_data, segmentation_data):
+    self.aligned_volume = segmentation_data.get("aligned_volume")
+    seg_table_id = segmentation_data.get("segmentation_table_id")
+    annotation_table_id = segmentation_data.get("annotation_table_id")
+    schema_type = segmentation_data.get("schema")
+    if seg_table_id in self.models:
+        SegmentationModel = self.models[seg_table_id]
+    else:
+        SegmentationModel = em_models.make_segmentation_model(
+            annotation_table_id, schema_type, seg_table_id.split("__")[-1]
+        )
+        self.models[seg_table_id] = SegmentationModel
     try:
-        self.session.bulk_update_mappings(SegmentationModel, data)
+        self.session.bulk_update_mappings(SegmentationModel, root_id_data)
         self.session.commit()
     except Exception as e:
         self.cached_session.rollback()
         celery_logger.error(f"SQL Error: {e}")
     finally:
         self.session.close()
-
-
-@celery.task(bind=True, name="threads:get_root_ids_task")
-def get_root_ids_task(
-    supervoxel_id_data: List[int],
-    segmentation_data: dict,
-    time_stamp: datetime.datetime = None,
-    pixel_ratios: List[int] = [4, 4, 40],
-):
-    """[summary]
-
-    Parameters
-    ----------
-    supervoxel_data : dict
-        name of database to target
-    segmentation_data : list
-        list of supervoxel ids for root_id lookup
-    end_id : int
-        [description]
-    time_stamp : datetime.datetime
-        [description]
-
-    Returns
-    -------
-    [type]
-        [description]
-    """
-    pcg_table_name = segmentation_data.get("pcg_table_name")
-    # cg = ChunkedGraphGateway(pcg_table_name)
-
-    if time_stamp is None:
-        time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
-
-    root_id_data = {}
-    try:
-        for data in supervoxel_id_data:
-            celery_logger.info(data)
-            # supervoxel_data = np.asarray(supervoxels, dtype=np.uint64)
-            # col = make_root_id_column_name(column_name)
-            # # root_ids = cg.get_roots(supervoxel_data[:, 1], time_stamp=time_stamp)
-            # root_ids = supervoxel_data
-            # root_id_data[col] = root_ids
-    except Exception as e:
-        raise AnnotationParseFailure(e)
-
-    # return root_id_data
     return True
 
-@celery.task(bind=True, name="threads:update_root_ids_task")
-def update_root_ids_task(
-    segmentation_data: dict, start_id: int, end_id: int, time_stamp: datetime.datetime = None
-):
-
-    seg_table_id = segmentation_data.get("segmentation_table_id")
-    aligned_volume = segmentation_data.get("aligned_volume")
-    db = get_db(aligned_volume)
-    mat_session = db.cached_session
-
-    try:
-        for supervoxel_id_column in supervoxel_id_columns:
-            supervoxel_id_data[supervoxel_id_column] = [
-                data
-                for data in mat_session.query(
-                    getattr(SegmentationModel, supervoxel_id_column)
-                ).filter(
-                    or_(SegmentationModel.annotation_id).between(int(chunks[0]), int(chunks[1]))
-                )
-            ]
-    except Exception as e:
-        raise e
+@celery.task(name="threads:fin", acks_late=True)
+def fin(*args, **kwargs):
+    return True
