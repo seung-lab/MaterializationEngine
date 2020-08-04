@@ -56,9 +56,21 @@ class RunMaterializeResource(Resource):
     def get(self, aligned_volume_name):
         from materializationengine.workflows.live_materialization import start_materialization
         check_aligned_volume(aligned_volume_name)
+        INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
 
-        start_materialization(aligned_volume_name)
-        return "STARTING", 200
+        url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{aligned_volume_name}"
+        try:
+            r = requests.get(url)
+            r.raise_for_status()
+            logging.info(url)
+            aligned_volume_info = r.json()
+            start_materialization(aligned_volume_name, aligned_volume_info)
+            return "STARTING", 200
+        except requests.exceptions.RequestException as e:
+            logging.error(f"ERROR {e}. Cannot connect to {endpoint}")
+
+
+
 
 @mat_bp.route("/aligned_volumes")
 class DatasetResource(Resource):
