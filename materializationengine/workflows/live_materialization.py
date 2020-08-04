@@ -17,6 +17,11 @@ from dynamicannotationdb.key_utils import (
     build_segmentation_table_id,
     get_table_name_from_table_id,
 )
+from geoalchemy2.shape import to_shape
+from marshmallow import INCLUDE
+from geoalchemy2.types import WKBElement, WKTElement
+from sqlalchemy.sql import func
+
 from emannotationschemas import models as em_models
 from materializationengine.celery_worker import celery
 from materializationengine.database import get_db
@@ -67,7 +72,6 @@ Materialization Modes
     query db for NULL root_id rows
                 {prefix}_missing_root_ids = session.query.(SegmentationModel).filter((SegmentationModel.{prefix}_root_id.is_(None)) 
                 send list of ids to be query pcg for root_ids
-
 """
 
 
@@ -196,11 +200,6 @@ def aligned_volume_tables_metadata(self, aligned_volume: str, aligned_volume_inf
     return tables_to_update
 
 @celery.task(bine=True, name="threads:chunk_supervoxel_ids_task")
-def get_missing_supervoxel_id_indices() -> dict:
-    pass
-
-
-@celery.task(bine=True, name="threads:chunk_supervoxel_ids_task")
 def chunk_supervoxel_ids_task(segmentation_data: dict, block_size: int = 2500) -> dict:
     """[summary]
 
@@ -226,8 +225,67 @@ def chunk_supervoxel_ids_task(segmentation_data: dict, block_size: int = 2500) -
         chunk_ends.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1]])
     return chunk_ends
 
+@celery.task(base=SqlAlchemyTask, bine=True, name="threads:collect_missing_supervoxel_ids")
+def collect_missing_supervoxel_ids(self, chunk, segmentation_data: dict) -> dict:
+
+    segmentation_table_id = segmentation_data.get("segmentation_table_id")
+    annotation_table_id = segmentation_data.get("annotation_table_id")
+    schema_type = segmentation_data.get("schema")
+
+    if segmentation_table_id in self.models:
+        SegmentationModel = self.models[segmentation_table_id]
+    else:
+        SegmentationModel = em_models.make_segmentation_model(
+            annotation_table_id, schema_type, segmentation_table_id.split("__")[-1])
+        self.models[segmentation_table_id] = SegmentationModel
+
+    if annotation_table_id in self.models:
+        AnnotationModel = self.models[annotation_table_id]
+    else:
+        AnnotationModel = em_models.make_annotation_model(annotation_table_id, schema_type)
+        self.models[annotation_table_id] = AnnotationModel
+
+    seg_columns = [column.name for column in SegmentationModel.__table__.columns]
+    anno_columns = [column.name for column in AnnotationModel.__table__.columns]
+
+    matches = set()
+    for column in seg_columns:
+        prefix = (column.split("_")[0])
+        for anno_col in anno_columns:
+            if anno_col.startswith(prefix):
+                matches.add(anno_col)
+
+    # id is present in both tables, we dont need that for querying missing supervoxels
+    matches.remove('id')
+    spatial_points = {}
+
+    for anno_column in matches:
+        column_prefix = anno_column.rsplit("_", 1)[0]
+        supervoxel_column = f"{column_prefix}_supervoxel_id"
+        spatial_points[anno_column] = [
+            data
+            for data in self.session.query(
+                getattr(AnnotationModel, anno_column)).join(SegmentationModel).
+            filter(or_(SegmentationModel.annotation_id).between(int(chunk[0]), int(chunk[1]))).\
+            filter(or_(getattr(SegmentationModel, supervoxel_column) == None)).all()
+        ]
+
+    points = []
+    annotation_data = {}
+    for column, wkb_points in spatial_points.items():
+        points = [get_geom_from_wkb(wkb_point[0]) for wkb_point in wkb_points]
+        annotation_data[column] = points
+    return annotation_data
+
+
+def get_geom_from_wkb(wkb):
+    wkb_element = to_shape(wkb)
+    if wkb_element.has_z:
+        return [wkb_element.xy[0][0], wkb_element.xy[1][0], wkb_element.z]
+
+
 @celery.task(base=SqlAlchemyTask, name="threads:get_spatial_points_in_chunk", bind=True, autoretry_for=(Exception,), max_retries=3)
-def get_spatial_points_in_chunk(self, chunks: List[int], segmentation_data: dict) -> List[int]:
+def get_spatial_points_in_chunk(self, chunk: List[int], segmentation_data: dict) -> List[int]:
     """Iterates over columns with 'supervoxel_id' present in the name and
     returns supervoxel ids between start and stop ids.
 
@@ -281,7 +339,7 @@ def get_spatial_points_in_chunk(self, chunks: List[int], segmentation_data: dict
                 for data in self.session.query(
                     SegmentationModel.id, getattr(SegmentationModel, supervoxel_id_column)
                 ).filter(
-                    or_(SegmentationModel.annotation_id).between(int(chunks[0]), int(chunks[1]))
+                    or_(SegmentationModel.annotation_id).between(int(chunk[0]), int(chunk[1]))
                 )
             ]
         return supervoxel_id_data
@@ -433,3 +491,4 @@ def update_root_ids(self, root_id_data, segmentation_data):
 @celery.task(name="threads:fin", acks_late=True)
 def fin(*args, **kwargs):
     return True
+
