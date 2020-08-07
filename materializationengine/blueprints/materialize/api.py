@@ -29,6 +29,7 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy.exc import NoSuchTableError
 
+
 __version__ = "0.2.35"
 
 authorizations = {
@@ -49,7 +50,7 @@ def check_aligned_volume(aligned_volume):
     if aligned_volume not in aligned_volumes:
         abort(400, f"aligned volume: {aligned_volume} not valid")
 
-@mat_bp.route("/test_celerey/<string:aligned_volume_name>/")
+@mat_bp.route("/test_celery/<string:aligned_volume_name>/")
 class RunMaterializeResource(Resource):
     @auth_required
     @mat_bp.doc("run updating materialization", security="apikey")
@@ -57,7 +58,6 @@ class RunMaterializeResource(Resource):
         from materializationengine.workflows.live_materialization import start_materialization
         check_aligned_volume(aligned_volume_name)
         INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
-
         url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{aligned_volume_name}"
         try:
             r = requests.get(url)
@@ -67,7 +67,7 @@ class RunMaterializeResource(Resource):
             start_materialization(aligned_volume_name, aligned_volume_info)
             return "STARTING", 200
         except requests.exceptions.RequestException as e:
-            logging.error(f"ERROR {e}. Cannot connect to {endpoint}")
+            logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
 
 
 
