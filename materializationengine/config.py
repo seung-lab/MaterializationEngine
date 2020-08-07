@@ -30,12 +30,12 @@ class BaseConfig:
     REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
     CELERY_BROKER_URL = REDIS_URL
     CELERY_RESULT_BACKEND = REDIS_URL
-    ANNO_ENDPOINT = "http://minniev1.microns-daf.com/annotation/"
-    INFOSERVICE_ENDPOINT = "http://globalv1.daf-apis.com/info"
-    AUTH_URI = "https://globalv1.daf-apis.com/auth"
-    GLOBAL_SERVER = "https://globalv1.daf-apis.com/auth"
-    SCHEMA_SERVICE_ENDPOINT = "https://globalv1.daf-apis.com/schema/"
-    SEGMENTATION_ENDPOINT = "https://globalv1.daf-apis.com/"
+    ANNO_ENDPOINT = "https://minniev1.microns-daf.com/annotation/"
+    INFOSERVICE_ENDPOINT = "https://global.daf-apis.com/info"
+    AUTH_URI = "https://global.daf-apis.com/auth"
+    GLOBAL_SERVER = "https://global.daf-apis.com"
+    SCHEMA_SERVICE_ENDPOINT = "https://global.daf-apis.com/schema/"
+    SEGMENTATION_ENDPOINT = "https://global.daf-apis.com/"
 
 
 class DevConfig(BaseConfig):
