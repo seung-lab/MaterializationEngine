@@ -60,7 +60,8 @@ class RunMaterializeResource(Resource):
         INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
         url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{aligned_volume_name}"
         try:
-            r = requests.get(url)
+            auth_header = {"Authorization": f"Bearer {current_app.config['AUTH_TOKEN']}"}
+            r = requests.get(url, headers=auth_header)
             r.raise_for_status()
             logging.info(url)
             aligned_volume_info = r.json()
