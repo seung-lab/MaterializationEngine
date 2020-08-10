@@ -3,6 +3,7 @@ import os
 import logging
 from emannotationschemas.models import Base
 from flask_sqlalchemy import SQLAlchemy
+import json
 
 
 class BaseConfig:
@@ -37,6 +38,11 @@ class BaseConfig:
     SCHEMA_SERVICE_ENDPOINT = "https://global.daf-apis.com/schema/"
     SEGMENTATION_ENDPOINT = "https://global.daf-apis.com/"
 
+    if os.environ.get("DAF_CREDENTIALS", None) is not None:
+        with open(os.environ.get("DAF_CREDENTIALS"), "r") as f:
+            AUTH_TOKEN = json.load(f)["token"]
+    else:
+        AUTH_TOKEN = ""
 
 class DevConfig(BaseConfig):
     DEBUG = True
