@@ -215,7 +215,7 @@ def aligned_volume_tables_metadata(self, aligned_volume: str,
         list of dicts containing metadata for each table
     """
     db = get_db(aligned_volume)
-   annotation_table_ids = db._get_existing_table_ids()
+    annotation_table_ids = db._get_existing_table_ids()
 
     metadata = []
     for annotation_table_id in annotation_table_ids:
@@ -231,7 +231,7 @@ def aligned_volume_tables_metadata(self, aligned_volume: str,
             'annotation_table_id': annotation_table_id,
             'pcg_table_name': pcg_table_name,
             'table_name': table_name,
-            'segmentation_source':  'foo', # aligned_volume_info.get('segmentation_source'),
+            'segmentation_source': aligned_volume_info.get('segmentation_source'),
             'last_updated_time_stamp': segmentation_metadata.get('last_updated')
         }
         metadata.append(table_metadata.copy())
@@ -252,7 +252,6 @@ def create_missing_segmentation_tables(self, metadata: dict) -> dict:
         dict: Materialization metadata
     """
     SegmentationModel = self.generate_segmentation_model(metadata)
-    AnnotationModel = self.generate_annotation_model(metadata)
 
     segmentation_table_id = metadata.get('segmentation_table_id')
 
@@ -326,24 +325,24 @@ def get_annotations_with_missing_supervoxel_ids(self, metadata: dict,
     dict
         dict of annotation and segmentation data
     """
-    AnnotationModel = generate_annotation_model(metadata)
-    SegmentationModel = generate_segmentation_model(metadata)
-    
+    AnnotationModel = self.generate_annotation_model(metadata)
+    SegmentationModel = self.generate_segmentation_model(metadata)
+
     anno_model_cols, seg_model_cols = get_query_columns_by_suffix(AnnotationModel, SegmentationModel, 'supervoxel_id')
-    
+
     # query valid annotations between chunk range
     annotation_data = [
-        anno_id for anno_id in  session.query(*anno_model_cols).\
+        anno_id for anno_id in self.session.query(*anno_model_cols).\
         filter(AnnotationModel.id.between(chunk[0], chunk[1])).filter(AnnotationModel.valid==True)
     ]
-    
+
     # get annotation ids to lookup supervoxels
     anno_ids = [x[-1] for x in annotation_data]
-    
+
     # query supervoxel ids from annotation ids
-    supervoxels_data = [data for data in session.query(*seg_model_cols).\
-        filter(or_(SegmentationModel.annotation_id.in_(anno_ids)))]   
-    
+    supervoxels_data = [data for data in self.session.query(*seg_model_cols).\
+        filter(or_(SegmentationModel.annotation_id.in_(anno_ids)))]
+
     annotation_dataframe = pd.DataFrame(annotation_data, dtype=object)
     wkb_data = annotation_dataframe.loc[:, annotation_dataframe.columns.str.endswith("position")]
 
@@ -353,22 +352,23 @@ def get_annotations_with_missing_supervoxel_ids(self, metadata: dict,
         annotation_dict[column] = [get_geom_from_wkb(wkb_point) for wkb_point in wkb_points]
     for key,value in annotation_dict.items():
         annotation_dataframe.loc[:, key] = value
-        
+
+    segmatation_col_list = ['segmentation_id' if col == "id" else col for col in supervoxels_data[0].keys()]
+
     # rename segmentation id column for later updates
     if supervoxels_data:
-        segmatation_col_list = ['segmentation_id' if col == "id" else col for col in supervoxels_data[0].keys()]
         segmentation_dataframe = pd.DataFrame(supervoxels_data, columns=segmatation_col_list, dtype=object).fillna(value=np.nan)
         # fill with range of annotation_ids where there are none
         merged_dataframe = pd.merge(segmentation_dataframe, annotation_dataframe, how='outer', left_on='annotation_id', right_on='id')
         return merged_dataframe.to_dict(orient='list')
     else:
         # if there are no supervoxels create an empty dataframe to fill from cloudvolume
-        supervoxel_columns.extend(['annotation_id', 'segmentation_id'])
-        segmentation_dataframe = pd.DataFrame(columns=supervoxel_columns, dtype=object)
+        segmatation_col_list.extend(['annotation_id', 'segmentation_id'])
+        segmentation_dataframe = pd.DataFrame(columns=segmatation_col_list, dtype=object)
         segmentation_dataframe = segmentation_dataframe.fillna(value=np.nan)
         merged_dataframe = pd.concat((segmentation_dataframe, annotation_dataframe), axis=1)
         return merged_dataframe.to_dict(orient='list')
-    
+
 
 def get_geom_from_wkb(wkb):
     wkb_element = to_shape(wkb)
@@ -397,10 +397,9 @@ def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, metadata: d
     """
     mat_df = pd.DataFrame(materialization_data, dtype=object)
 
-    segmentation_source = mdata.get("segmentation_source")
+    segmentation_source = metadata.get("segmentation_source")
     cv = cloudvolume.CloudVolume(segmentation_source, mip=0)
 
-    supervoxel_data = mat_df.loc[:, mat_df.columns.str.endswith("supervoxel_id")]
     position_data = mat_df.loc[:, mat_df.columns.str.endswith("position")]
     for k, row in mat_df.iterrows():
         for col, data in position_data.items():
@@ -485,7 +484,7 @@ def get_root_ids_from_supervoxels(self, materialization_data: dict, metadata: di
     frames = []
     columns = []
 
-    for column_name, supervoxel_data in supervoxel_id_data.items():
+    for column_name, supervoxel_data in materialization_data.items():
         columns.append(column_name)
         supervoxel_df = pd.DataFrame(supervoxel_data,  columns=['id', 'supervoxel_id'])
         frames.append(supervoxel_df)
@@ -556,8 +555,8 @@ def get_expired_root_ids(self, metadata):
              base=SqlAlchemyTask, bind=True,
              autoretry_for=(Exception,),
              max_retries=3)
-def update_root_ids(self, materialization_data: dict, metadata:: dict) -> bool:
-    """Update sql databse with updated root ids 
+def update_root_ids(self, materialization_data: dict, metadata: dict) -> bool:
+    """Update sql databse with updated root ids
 
     Parameters
     ----------
@@ -604,14 +603,14 @@ def update_supervoxel_rows(self, materialization_data: dict, metadata: dict) -> 
         [description]
     """
     SegmentationModel = self.generate_segmentation_model(metadata, self)
-
+    schema_name = metadata.get('schema')
     segmentations = []
     for k, v in materialization_data.items():
         for row in v:
             row[k] = row.pop('supervoxel_id')
             segmentations.append(row)
 
-    schema_type = self.get_schema(schema_type)
+    schema_type = self.get_schema(schema_name)
 
     __, flat_segmentation_schema = em_models.split_annotation_schema(schema_type)
 
