@@ -196,21 +196,23 @@ def get_query_columns_by_suffix(AnnotationModel, SegmentationModel, suffix):
 @celery.task(name="threads:aligned_volume_tables_metadata", bind=True)
 def aligned_volume_tables_metadata(self, aligned_volume: str,
                                          pcg_table_name: str,
-                                         aligned_volume_info: dict) -> List[str]:
-    """Initialize materialization by aligned volume. Iterates
-    thorugh all tables and checks if they are below a table row count
-    size. The list of tables are passed to workers for root_id updating
-    based on supervoxel_id value and timestamp.
+                                         aligned_volume_info: dict) -> List[dict]:
+    """Initialize materialization by an aligned volume name. Iterates thorugh all
+    tables in a aligned volume database and gathers metadata for each table. The list
+    of tables are passed to workers for materialization.
 
     Parameters
     ----------
     aligned_volume : str
-        [description]
-
+        name of aligned volume
+    pcg_table_name: str
+        cg_table_name
+    aligned_volume_info:
+        infoservice data
     Returns
     -------
-    List[str]
-        [description]
+    List[dict]
+        list of dicts containing metadata for each table
     """
     db = get_db(aligned_volume)
    annotation_table_ids = db._get_existing_table_ids()
@@ -238,7 +240,17 @@ def aligned_volume_tables_metadata(self, aligned_volume: str,
 
 @celery.task(name='threads:create_missing_segmentation_tables', base=SqlAlchemyTask, bind=True)
 def create_missing_segmentation_tables(self, metadata: dict) -> dict:
+    """Create missing segmentation tables associated with an annotation table if it 
+    does not already exist.
 
+    Parameters
+    ----------
+    metadata : dict
+        Materialization metadata
+
+    Returns:
+        dict: Materialization metadata
+    """
     SegmentationModel = self.generate_segmentation_model(metadata)
     AnnotationModel = self.generate_annotation_model(metadata)
 
@@ -269,8 +281,8 @@ def create_missing_segmentation_tables(self, metadata: dict) -> dict:
 
 
 @celery.task(name="threads:chunk_supervoxel_ids_task", bind=True)
-def chunk_supervoxel_ids_task(self, metadata: dict, block_size: int = 2500) -> dict:
-    """[summary]
+def chunk_supervoxel_ids_task(self, metadata: dict, block_size: int = 2500) -> List[List]:
+    """Creates list of chunks with start:end index for chunking queries for materialziation.
 
     Parameters
     ----------
@@ -281,8 +293,8 @@ def chunk_supervoxel_ids_task(self, metadata: dict, block_size: int = 2500) -> d
 
     Returns
     -------
-    List[int]
-        [description]
+    List[List]
+        list of list containg start and end indices
     """
     max_id = metadata["max_id"]
     n_parts = int(max(1, max_id / block_size))
