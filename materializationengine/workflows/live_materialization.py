@@ -96,7 +96,6 @@ class SqlAlchemyTask(celery.Task):
     _engine = None
 
     def __call__(self, *args, **kwargs):
-        celery_logger.info(f"{args} >>>>>>>>>>>>>>>>>>> {kwargs}")
         aligned_volume = args[0].get("aligned_volume")
         sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
         self.sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
