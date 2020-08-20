@@ -10,9 +10,6 @@ class BaseConfig:
     HOME = os.path.expanduser("~")
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
     # Statement for enabling the development environment
-    DEBUG = True
-
-    INFOSERVICE_ENDPOINT = "http://info-service/info"
     BIGTABLE_CONFIG = {
         "instance_id": "pychunkedgraph",
         "amdb_instance_id": "pychunkedgraph",
