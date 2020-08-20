@@ -22,3 +22,7 @@ class AnnotationParseFailure(MaterializeAnnotationException):
 
 class TaskFailure(Exception):
    pass
+
+
+class WrongModelType(KeyError):
+    pass
