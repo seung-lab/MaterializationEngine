@@ -84,8 +84,7 @@ def create_celery(app=None, celery=None):
     celery.conf.update({'task_routes': ('materializationengine.task_router.TaskRouter'),
                         'task_serializer': 'json',
                         'result_serializer': 'json',
-                        'accept_content': ['json'],
-                        'optimization': 'fair'})
+                        'accept_content': ['json']})
     celery.conf.update(app.config)
     TaskBase = celery.Task
 
