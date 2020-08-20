@@ -1,13 +1,19 @@
 import datetime
+import logging
 import numpy as np
 from flask import current_app
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, MetaData
 from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.sql import or_
 from sqlalchemy.engine.url import make_url
+from sqlalchemy.ext.automap import automap_base
+from sqlalchemy.pool import NullPool
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.exc import SQLAlchemyError
 from celery.utils.log import get_task_logger
+
 import cloudvolume
-from celery import group, chain, chord, subtask, chunks
+from celery import group, chain, chord, subtask, chunks, Task
 from dynamicannotationdb.key_utils import (
     build_table_id,
     build_segmentation_table_id,
@@ -18,15 +24,15 @@ from geoalchemy2.shape import to_shape
 from emannotationschemas import models as em_models
 from materializationengine.celery_worker import celery
 from materializationengine.database import get_db
-from materializationengine.errors import AnnotationParseFailure, TaskFailure
+from materializationengine.extensions import create_session
+from materializationengine.errors import AnnotationParseFailure, TaskFailure, WrongModelType
 from materializationengine.chunkedgraph_gateway import ChunkedGraphGateway
 from materializationengine.utils import make_root_id_column_name
 from typing import List
 from copy import deepcopy
 import pandas as pd
-
+from functools import lru_cache
 celery_logger = get_task_logger(__name__)
-
 
 BIGTABLE = current_app.config["BIGTABLE_CONFIG"]
 PROJECT_ID = BIGTABLE["project_id"]
@@ -58,144 +64,53 @@ def start_materialization(aligned_volume_name: str, pcg_table_name: str, aligned
         [description]
     """
 
-    matadata_result = aligned_volume_tables_metadata.s(aligned_volume_name, pcg_table_name, aligned_volume_info).delay()
-    table_matadata = matadata_result.get()
-    for metadata in table_matadata:
-        print(metadata)
-        result = chunk_supervoxel_ids_task.s(metadata).delay()
+    result = get_materialization_info.s(aligned_volume_name, pcg_table_name, aligned_volume_info).delay()
+    mat_info = result.get()
+    for mat_metadata in mat_info:
+        result = chunk_supervoxel_ids_task.s(mat_metadata).delay()
         supervoxel_chunks = result.get()
-        # process_chunks_workflow = chain(
-            # collect_data.s())
+
         process_chunks_workflow = chain(
-            create_missing_segmentation_tables.s(metadata),
-            chord(
-                [
-                    chain(
-                        get_annotations_with_missing_supervoxel_ids.s(chunk),
-                        get_cloudvolume_supervoxel_ids.s(metadata),
-                        get_root_ids_from_supervoxels.s(metadata),
-                        collect_data.s(metadata),
-                    )
-                    for chunk in supervoxel_chunks
-                ],
-                collect_data.s(),
-            ),)
-            # chain(
-        #         get_cloudvolume_supervoxel_ids.s(metadata),
-        #         get_root_ids_from_supervoxels.s(metadata),
-        #     ),
-        # )
+            create_missing_segmentation_tables.s(mat_metadata),
+            chord([
+                chain(
+                    get_annotations_with_missing_supervoxel_ids.s(chunk),
+                    get_cloudvolume_supervoxel_ids.s(metadata),
+                    get_root_ids_from_supervoxels.s(metadata),
+                    ) for chunk in supervoxel_chunks],
+                    fin.si()), # return here is required for chords
+                    fin.si() # final task which will process a return status/timing etc...
+                )
+
         process_chunks_workflow.apply_async()
 
+class SqlAlchemyCache:
 
-
-class SqlAlchemyTask(celery.Task):
-
-    _models = None
-    _session = None
-    _engine = None
-
-    def __call__(self, *args, **kwargs):
-        aligned_volume = args[0].get("aligned_volume")
-        sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
-        self.sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-
-        return super().__call__(*args, **kwargs)
+    def __init__(self):
+        self._engine = None
+        self._sessions = {}
 
     @property
     def engine(self):
-        if self._engine is None:
-            try:
-                self._engine = create_engine(self.sql_uri)
-                return self._engine
-            except Exception as e:
-                celery_logger.error(e)
-        else:
-            return self._engine
+        return self._engine
 
-    @property
-    def session(self):
-        if self._session is None:
-            try:
-                self.Session = scoped_session(sessionmaker(bind=self.engine))
-                self._session = self.Session()
-                return self._session
-            except Exception as e:
-                celery_logger.error(e)
-        else:
-            return self._session
+    def get(self, aligned_volume):
+        if aligned_volume not in self._sessions:
+            sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
+            sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
+            self._engine = create_engine(sql_uri, pool_recycle=3600,
+                                                  pool_size=20,
+                                                  max_overflow=50)
+            Session = scoped_session(sessionmaker(bind=self._engine))
+            self._sessions[aligned_volume] = Session
+        return self._sessions[aligned_volume]
 
-    @property
-    def models(self):
-        if self._models is None:
-            try:
-                self._models = {}
-                return self._models
-            except Exception as e:
-                celery_logger.error(e)
-        else:
-            return self._models
+sqlalchemy_cache = SqlAlchemyCache()
 
-    def generate_segmentation_model(self, metadata):
-        seg_table_id = metadata.get("segmentation_table_id")
-        annotation_table_id = metadata.get("annotation_table_id")
-        schema_type = metadata.get("schema")
-        if seg_table_id in self.models:
-            SegmentationModel = self.models[seg_table_id]
-        else:
-            SegmentationModel = em_models.make_segmentation_model(
-                annotation_table_id, schema_type, seg_table_id.split("__")[-1]
-            )
-            self.models[seg_table_id] = SegmentationModel
-        return SegmentationModel
-
-    def generate_annotation_model(self, metadata):
-        annotation_table_id = metadata.get("annotation_table_id")
-        schema_type = metadata.get("schema")
-        if annotation_table_id in self.models:
-            AnnotationModel = self.models[annotation_table_id]
-        else:
-            AnnotationModel = em_models.make_annotation_model(annotation_table_id, schema_type)
-            self.models[annotation_table_id] = AnnotationModel
-        return AnnotationModel
-
-    def after_return(self, *args, **kwargs):
-        if self._session is not None:
-            self.Session.remove()
-        # if self._models is not None:
-        #     self._models = None
-        if self._engine is not None:
-            self._engine.dispose()
-
-
-def get_query_columns_by_suffix(AnnotationModel, SegmentationModel, suffix):
-    seg_columns = [column.name for column in SegmentationModel.__table__.columns]
-    anno_columns = [column.name for column in AnnotationModel.__table__.columns]
-
-    matched_columns = set()
-    for column in seg_columns:
-        prefix = (column.split("_")[0])
-        for anno_col in anno_columns:
-            if anno_col.startswith(prefix):
-                matched_columns.add(anno_col)
-    matched_columns.remove('id')
-
-    supervoxel_columns =  [f"{col.rsplit('_', 1)[0]}_{suffix}" for col in matched_columns]
-
-    # create model columns for querying
-    anno_model_cols = [getattr(AnnotationModel, name) for name in matched_columns]
-    anno_model_cols.append(AnnotationModel.id)
-    seg_model_cols = [getattr(SegmentationModel, name) for name in supervoxel_columns]
-
-    # add id columns to lookup
-    seg_model_cols.extend([SegmentationModel.annotation_id, SegmentationModel.id])
-    return anno_model_cols, seg_model_cols
-
-
-@celery.task(name="threads:aligned_volume_tables_metadata", bind=True)
-def aligned_volume_tables_metadata(self, aligned_volume: str,
-                                         pcg_table_name: str,
-                                         aligned_volume_info: dict) -> List[dict]:
+@celery.task(name="process:get_materialization_info", bind=True)
+def get_materialization_info(self, aligned_volume: str,
+                                   pcg_table_name: str,
+                                   aligned_volume_info: dict) -> List[dict]:
     """Initialize materialization by an aligned volume name. Iterates thorugh all
     tables in a aligned volume database and gathers metadata for each table. The list
     of tables are passed to workers for materialization.
@@ -237,54 +152,57 @@ def aligned_volume_tables_metadata(self, aligned_volume: str,
     return metadata
 
 
-@celery.task(name='threads:create_missing_segmentation_tables', base=SqlAlchemyTask, bind=True)
-def create_missing_segmentation_tables(self, metadata: dict) -> dict:
+@celery.task(name='threads:create_missing_segmentation_tables',
+             bind=True)
+def create_missing_segmentation_tables(self, mat_metadata: dict) -> dict:
     """Create missing segmentation tables associated with an annotation table if it 
     does not already exist.
 
     Parameters
     ----------
-    metadata : dict
+    mat_metadata : dict
         Materialization metadata
 
     Returns:
         dict: Materialization metadata
     """
-    SegmentationModel = self.generate_segmentation_model(metadata)
+    segmentation_table_id = mat_metadata.get('segmentation_table_id')
+    aligned_volume = mat_metadata.get('aligned_volume')
 
-    segmentation_table_id = metadata.get('segmentation_table_id')
-
-    if not self.session.query(SegmentationMetadata).filter(SegmentationMetadata.table_id==segmentation_table_id).scalar():
-        SegmentationModel.__table__.create(bind=self.engine, checkfirst=True)
+    SegmentationModel = create_segmentation_model(mat_metadata)
+ 
+    session = sqlalchemy_cache.get(aligned_volume)
+    engine = sqlalchemy_cache.engine
+    
+    if not session.query(SegmentationMetadata).filter(SegmentationMetadata.table_id==segmentation_table_id).scalar():
+        SegmentationModel.create(bind=engine, checkfirst=True)
         creation_time = datetime.datetime.utcnow()
         metadata_dict = {
-            'annotation_table': metadata.get('annotation_table_id'),
-            'schema_type': metadata.get('schema'),
+            'annotation_table': mat_metadata.get('annotation_table_id'),
+            'schema_type': mat_metadata.get('schema'),
             'table_id': segmentation_table_id,
             'valid': True,
             'created': creation_time,
-            'pcg_table_name': metadata.get('pcg_table_name')
+            'pcg_table_name': mat_metadata.get('pcg_table_name')
         }
 
         seg_metadata = SegmentationMetadata(**metadata_dict)
         try:
-            self.session.add(seg_metadata)
-            self.session.commit()
+            session.add(seg_metadata)
+            session.commit()
         except Exception as e:
             celery_logger.error(f"SQL ERROR: {e}")
-            self.Session.rollback()
-        finally:
-            self.session.close()
-    return metadata
+            session.rollback()
+    return mat_metadata
 
 
-@celery.task(name="threads:chunk_supervoxel_ids_task", bind=True)
-def chunk_supervoxel_ids_task(self, metadata: dict, block_size: int = 2500) -> List[List]:
+@celery.task(name="process:chunk_supervoxel_ids_task", bind=True)
+def chunk_supervoxel_ids_task(self, mat_metadata: dict, block_size: int = 2500) -> List[List]:
     """Creates list of chunks with start:end index for chunking queries for materialziation.
 
     Parameters
     ----------
-    metadata : dict
+    mat_metadata : dict
         Materialization metadata
     block_size : int, optional
         [description], by default 2500
@@ -294,7 +212,7 @@ def chunk_supervoxel_ids_task(self, metadata: dict, block_size: int = 2500) -> L
     List[List]
         list of list containg start and end indices
     """
-    max_id = metadata["max_id"]
+    max_id = mat_metadata["max_id"]
     n_parts = int(max(1, max_id / block_size))
     n_parts += 1
     id_chunks = np.linspace(1, max_id, num=n_parts, dtype=np.int64).tolist()
@@ -304,17 +222,18 @@ def chunk_supervoxel_ids_task(self, metadata: dict, block_size: int = 2500) -> L
     return chunk_ends
 
 
-@celery.task(name="threads:get_annotations_with_missing_supervoxel_ids",
-             base=SqlAlchemyTask,
-             bind=True)
-def get_annotations_with_missing_supervoxel_ids(self, metadata: dict,
+@celery.task(name="process:get_annotations_with_missing_supervoxel_ids",
+             bind=True,
+             autoretry_for=(Exception,),
+             max_retries=3)
+def get_annotations_with_missing_supervoxel_ids(self, mat_metadata: dict,
                                                       chunk: List[int]) -> dict:
     """Get list of valid annotation and their ids to lookup existing supervoxel ids. If there
     are missing supervoxels they will be set as None for cloudvolume lookup.
 
     Parameters
     ----------
-    metadata : dict
+    mat_metadata : dict
         Materialization metadata
     chunk : list
         chunked range to for sql id query
@@ -324,62 +243,55 @@ def get_annotations_with_missing_supervoxel_ids(self, metadata: dict,
     dict
         dict of annotation and segmentation data
     """
-    AnnotationModel = self.generate_annotation_model(metadata)
-    SegmentationModel = self.generate_segmentation_model(metadata)
-
-    anno_model_cols, seg_model_cols = get_query_columns_by_suffix(AnnotationModel, SegmentationModel, 'supervoxel_id')
-
-    # query valid annotations between chunk range
-    annotation_data = [
-        anno_id for anno_id in self.session.query(*anno_model_cols).\
-        filter(AnnotationModel.id.between(chunk[0], chunk[1])).filter(AnnotationModel.valid==True)
-    ]
-
-    # get annotation ids to lookup supervoxels
-    anno_ids = [x[-1] for x in annotation_data]
-
-    # query supervoxel ids from annotation ids
-    supervoxels_data = [data for data in self.session.query(*seg_model_cols).\
-        filter(or_(SegmentationModel.annotation_id.in_(anno_ids)))]
+    
+    aligned_volume = mat_metadata.get("aligned_volume")
+    SegmentationModel = create_segmentation_model(mat_metadata)
+    AnnotationModel = create_annotation_model(mat_metadata)
+    
+    session = sqlalchemy_cache.get(aligned_volume)
+    anno_model_cols, seg_model_cols, supervoxel_columns = get_query_columns_by_suffix(
+        AnnotationModel, SegmentationModel, 'supervoxel_id')
+    try:
+        annotation_data = [
+            anno_id for anno_id in session.query(*anno_model_cols).\
+            filter(AnnotationModel.id.between(chunk[0], chunk[1])).filter(AnnotationModel.valid==True)
+        ]
+        anno_ids = [x[-1] for x in annotation_data]
+        supervoxel_data = [data for data in session.query(*seg_model_cols).\
+            filter(or_(SegmentationModel.annotation_id.in_(anno_ids)))]  
+        session.close()
+    except SQLAlchemyError as e:
+        session.rollback()
+        raise self.retry(exc=e, countdown=3)
 
     annotation_dataframe = pd.DataFrame(annotation_data, dtype=object)
+
     wkb_data = annotation_dataframe.loc[:, annotation_dataframe.columns.str.endswith("position")]
 
-    # convert each row of wkb point positions to python list of ints
+
     annotation_dict = {}
     for column, wkb_points in wkb_data.items():
         annotation_dict[column] = [get_geom_from_wkb(wkb_point) for wkb_point in wkb_points]
-    for key,value in annotation_dict.items():
+    for key, value in annotation_dict.items():
         annotation_dataframe.loc[:, key] = value
 
-    segmatation_col_list = ['segmentation_id' if col == "id" else col for col in supervoxels_data[0].keys()]
-
-    # rename segmentation id column for later updates
-    if supervoxels_data:
-        segmentation_dataframe = pd.DataFrame(supervoxels_data, columns=segmatation_col_list, dtype=object).fillna(value=np.nan)
-        # fill with range of annotation_ids where there are none
+    if supervoxel_data:
+        segmatation_col_list = ['segmentation_id' if col == "id" else col for col in supervoxel_data[0].keys()]
+        segmentation_dataframe = pd.DataFrame(supervoxel_data, columns=segmatation_col_list, dtype=object).fillna(value=np.nan)
         merged_dataframe = pd.merge(segmentation_dataframe, annotation_dataframe, how='outer', left_on='annotation_id', right_on='id')
-        return merged_dataframe.to_dict(orient='list')
     else:
-        # if there are no supervoxels create an empty dataframe to fill from cloudvolume
-        segmatation_col_list.extend(['annotation_id', 'segmentation_id'])
-        segmentation_dataframe = pd.DataFrame(columns=segmatation_col_list, dtype=object)
+        supervoxel_columns.extend(['annotation_id', 'segmentation_id'])
+        segmentation_dataframe = pd.DataFrame(columns=supervoxel_columns, dtype=object)
         segmentation_dataframe = segmentation_dataframe.fillna(value=np.nan)
         merged_dataframe = pd.concat((segmentation_dataframe, annotation_dataframe), axis=1)
-        return merged_dataframe.to_dict(orient='list')
 
-
-def get_geom_from_wkb(wkb):
-    wkb_element = to_shape(wkb)
-    if wkb_element.has_z:
-        return [int(wkb_element.xy[0][0]), int(wkb_element.xy[1][0]), int(wkb_element.z)]
-
+    return merged_dataframe.to_dict(orient='list')
 
 @celery.task(name="threads:get_cloudvolume_supervoxel_ids",
              bind=True,
              autoretry_for=(Exception,),
              max_retries=3)
-def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, metadata: dict) -> dict:
+def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
     """Lookup missing supervoxel ids.
 
     Parameters
@@ -396,7 +308,7 @@ def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, metadata: d
     """
     mat_df = pd.DataFrame(materialization_data, dtype=object)
 
-    segmentation_source = metadata.get("segmentation_source")
+    segmentation_source = mat_metadata.get("segmentation_source")
     cv = cloudvolume.CloudVolume(segmentation_source, mip=0)
 
     position_data = mat_df.loc[:, mat_df.columns.str.endswith("position")]
@@ -412,11 +324,10 @@ def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, metadata: d
 
 
 @celery.task(name="threads:get_sql_supervoxel_ids",
-             base=SqlAlchemyTask,
              bind=True,
              autoretry_for=(Exception,),
              max_retries=3)
-def get_sql_supervoxel_ids(self, chunks: List[int], metadata: dict) -> List[int]:
+def get_sql_supervoxel_ids(self, chunks: List[int], mat_metadata: dict) -> List[int]:
     """Iterates over columns with 'supervoxel_id' present in the name and
     returns supervoxel ids between start and stop ids.
 
@@ -424,7 +335,7 @@ def get_sql_supervoxel_ids(self, chunks: List[int], metadata: dict) -> List[int]
     ----------
     chunks: dict
         name of database to target
-    metadata : dict
+    mat_metadata : dict
         Materialization metadata
 
     Returns
@@ -432,7 +343,7 @@ def get_sql_supervoxel_ids(self, chunks: List[int], metadata: dict) -> List[int]
     List[int]
         list of supervoxel ids between 'start_id' and 'end_id'
     """
-    SegmentationModel = self.generate_segmentation_model(metadata)
+    SegmentationModel = create_segmentation_model(mat_metadata)
     try:
         columns = [column.name for column in SegmentationModel.__table__.columns]
         supervoxel_id_columns = [column for column in columns if "supervoxel_id" in column]
@@ -455,16 +366,17 @@ def get_sql_supervoxel_ids(self, chunks: List[int], metadata: dict) -> List[int]
              bind=True,
              autoretry_for=(Exception,),
              max_retries=3)
-def get_root_ids_from_supervoxels(self, materialization_data: dict, metadata: dict) -> dict:
+def get_root_ids_from_supervoxels(self, materialization_data: dict, mat_metadata: dict) -> dict:
     """Lookup root ids. First checks if root id columns exist. If there are existing
     root_ids present in the table, update them from last timestap if it is not None.
-    Otherwise look up the list of root_ids from the supervoxel data present in 
+    Otherwise look up the list of root_ids from the supervoxel data present in the
+    database.
 
     Parameters
     ----------
     materialization_data : dict
         dict of annotation and segmentation data
-    metadata : dict
+    mat_metadata : dict
         Materialization metadata
 
 
@@ -473,8 +385,9 @@ def get_root_ids_from_supervoxels(self, materialization_data: dict, metadata: di
     dict
         dict of annotation and with updated supervoxel and root id data
     """
-    pcg_table_name = metadata.get("pcg_table_name")
+    pcg_table_name = mat_metadata.get("pcg_table_name")
     cg = ChunkedGraphGateway(pcg_table_name)
+    
 
     time_stamp = None
     if time_stamp is None:
@@ -511,12 +424,12 @@ def get_root_ids_from_supervoxels(self, materialization_data: dict, metadata: di
              bind=True,
              autoretry_for=(Exception,),
              max_retries=3)
-def get_expired_root_ids(self, metadata):
+def get_expired_root_ids(self, mat_metadata):
     """deprecated
 
     Parameters
     ----------
-    metadata : dict
+    mat_metadata : dict
         Materialization metadata
 
     Returns
@@ -526,23 +439,23 @@ def get_expired_root_ids(self, metadata):
     """
     if time_stamp is None:
         time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
-
+    last_updated_time_stamp = mat_metadata.get('last_updated_time_stamp')
     root_id_dict = {}
     root_column_names = []
 
-    pcg_table_name = metadata.get("pcg_table_name")
+    pcg_table_name = mat_metadata.get("pcg_table_name")
     cg = ChunkedGraphGateway(pcg_table_name)
-    old_roots, new_roots = cg.get_proofread_root_ids(last_updated_time, time_stamp)
-    # for columns, values in supervoxel_id_data.items():
-    #     col = make_root_id_column_name(columns)
-    #     root_column_names.append(col)
-    #     supervoxel_data = np.asarray(values, dtype=np.uint64)
-    #     pk = supervoxel_data[:, 0]
+    old_roots, new_roots = cg.get_proofread_root_ids(last_updated_time_stamp, time_stamp)
+    for columns, values in supervoxel_id_data.items():
+        col = make_root_id_column_name(columns)
+        root_column_names.append(col)
+        supervoxel_data = np.asarray(values, dtype=np.uint64)
+        pk = supervoxel_data[:, 0]
 
-    #     root_ids = cg.get_roots(supervoxel_data[:, 1], time_stamp=time_stamp)
+        root_ids = cg.get_roots(supervoxel_data[:, 1], time_stamp=time_stamp)
 
-    #     root_id_dict["id"] = pk
-    #     root_id_dict[col] = root_ids
+        root_id_dict["id"] = pk
+        root_id_dict[col] = root_ids
 
     root_column_names.append("id")
     df = pd.DataFrame(root_id_dict)
@@ -551,10 +464,10 @@ def get_expired_root_ids(self, metadata):
 
 
 @celery.task(name="threads:update_root_ids",
-             base=SqlAlchemyTask, bind=True,
+             bind=True,
              autoretry_for=(Exception,),
              max_retries=3)
-def update_root_ids(self, materialization_data: dict, metadata: dict) -> bool:
+def update_root_ids(self, materialization_data: dict, mat_metadata: dict) -> bool:
     """Update sql databse with updated root ids
 
     Parameters
@@ -569,7 +482,7 @@ def update_root_ids(self, materialization_data: dict, metadata: dict) -> bool:
     bool
         True is update was successful
     """
-    SegmentationModel = self.generate_segmentation_model(metadata, self)
+    SegmentationModel = create_segmentation_model(mat_metadata)
     try:
         self.session.bulk_update_mappings(SegmentationModel, root_id_data)
         self.session.commit()
@@ -582,10 +495,9 @@ def update_root_ids(self, materialization_data: dict, metadata: dict) -> bool:
 
 
 @celery.task(name="threads:update_supervoxel_rows",
-             base=SqlAlchemyTask,
              bind=True,
              acks_late=True)
-def update_supervoxel_rows(self, materialization_data: dict, metadata: dict) -> bool:
+def update_supervoxel_rows(self, materialization_data: dict, mat_metadata: dict) -> bool:
     """Update supervoxel ids in database
 
     Parameters
@@ -601,8 +513,8 @@ def update_supervoxel_rows(self, materialization_data: dict, metadata: dict) -> 
     bool
         [description]
     """
-    SegmentationModel = self.generate_segmentation_model(metadata, self)
-    schema_name = metadata.get('schema')
+    SegmentationModel = create_segmentation_model(mat_metadata)
+    schema_name = mat_metadata.get('schema')
     segmentations = []
     for k, v in materialization_data.items():
         for row in v:
@@ -640,3 +552,46 @@ def fin(*args, **kwargs):
 @celery.task(name="threads:collect_data", acks_late=True)
 def collect_data(*args, **kwargs):
     return args, kwargs
+
+
+def create_segmentation_model(mat_metadata):
+    annotation_table_id = mat_metadata.get('annotation_table_id')
+    schema_type = mat_metadata.get("schema")
+    pcg_table_name = mat_metadata.get("pcg_table_name")
+
+    SegmentationModel = em_models.make_segmentation_model(annotation_table_id, schema_type, pcg_table_name)
+    return SegmentationModel
+
+def create_annotation_model(mat_metadata):
+    annotation_table_id = mat_metadata.get('annotation_table_id')
+    schema_type = mat_metadata.get("schema")
+
+    AnnotationModel = em_models.make_annotation_model(annotation_table_id, schema_type)
+    return AnnotationModel
+
+def get_geom_from_wkb(wkb):
+    wkb_element = to_shape(wkb)
+    if wkb_element.has_z:
+        return [int(wkb_element.xy[0][0]), int(wkb_element.xy[1][0]), int(wkb_element.z)]
+
+def get_query_columns_by_suffix(AnnotationModel, SegmentationModel, suffix):
+    seg_columns = [column.name for column in SegmentationModel.__table__.columns]
+    anno_columns = [column.name for column in AnnotationModel.__table__.columns]
+
+    matched_columns = set()
+    for column in seg_columns:
+        prefix = (column.split("_")[0])
+        for anno_col in anno_columns:
+            if anno_col.startswith(prefix):
+                matched_columns.add(anno_col)
+    matched_columns.remove('id')
+
+    supervoxel_columns =  [f"{col.rsplit('_', 1)[0]}_{suffix}" for col in matched_columns if col != 'annotation_id']
+    # # create model columns for querying
+    anno_model_cols = [getattr(AnnotationModel, name) for name in matched_columns]
+    anno_model_cols.append(AnnotationModel.id)
+    seg_model_cols = [getattr(SegmentationModel, name) for name in supervoxel_columns]
+
+    # add id columns to lookup
+    seg_model_cols.extend([SegmentationModel.annotation_id, SegmentationModel.id])
+    return anno_model_cols, seg_model_cols, supervoxel_columns
