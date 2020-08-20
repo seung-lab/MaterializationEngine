@@ -152,7 +152,7 @@ def get_materialization_info(self, aligned_volume: str,
     return metadata
 
 
-@celery.task(name='threads:create_missing_segmentation_tables',
+@celery.task(name='process:create_missing_segmentation_tables',
              bind=True)
 def create_missing_segmentation_tables(self, mat_metadata: dict) -> dict:
     """Create missing segmentation tables associated with an annotation table if it 
@@ -287,7 +287,7 @@ def get_annotations_with_missing_supervoxel_ids(self, mat_metadata: dict,
 
     return merged_dataframe.to_dict(orient='list')
 
-@celery.task(name="threads:get_cloudvolume_supervoxel_ids",
+@celery.task(name="process:get_cloudvolume_supervoxel_ids",
              bind=True,
              autoretry_for=(Exception,),
              max_retries=3)
@@ -323,7 +323,7 @@ def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, mat_metadat
     return mat_df.to_dict(orient='list')
 
 
-@celery.task(name="threads:get_sql_supervoxel_ids",
+@celery.task(name="process:get_sql_supervoxel_ids",
              bind=True,
              autoretry_for=(Exception,),
              max_retries=3)
@@ -362,7 +362,7 @@ def get_sql_supervoxel_ids(self, chunks: List[int], mat_metadata: dict) -> List[
         raise self.retry(exc=e, countdown=3)
 
 
-@celery.task(name="threads:get_root_ids_from_supervoxels",
+@celery.task(name="process:get_root_ids_from_supervoxels",
              bind=True,
              autoretry_for=(Exception,),
              max_retries=3)
@@ -420,7 +420,7 @@ def get_root_ids_from_supervoxels(self, materialization_data: dict, mat_metadata
     return data.apply(lambda x: [x.dropna().to_dict()], axis=1).sum()
 
 
-@celery.task(name="threads:get_expired_root_ids", 
+@celery.task(name="process:get_expired_root_ids", 
              bind=True,
              autoretry_for=(Exception,),
              max_retries=3)
@@ -463,7 +463,7 @@ def get_expired_root_ids(self, mat_metadata):
     return data
 
 
-@celery.task(name="threads:update_root_ids",
+@celery.task(name="process:update_root_ids",
              bind=True,
              autoretry_for=(Exception,),
              max_retries=3)
@@ -494,7 +494,7 @@ def update_root_ids(self, materialization_data: dict, mat_metadata: dict) -> boo
     return True
 
 
-@celery.task(name="threads:update_supervoxel_rows",
+@celery.task(name="process:update_supervoxel_rows",
              bind=True,
              acks_late=True)
 def update_supervoxel_rows(self, materialization_data: dict, mat_metadata: dict) -> bool:
@@ -544,12 +544,12 @@ def update_supervoxel_rows(self, materialization_data: dict, mat_metadata: dict)
         self.session.close()
 
 
-@celery.task(name="threads:fin", acks_late=True)
+@celery.task(name="process:fin", acks_late=True)
 def fin(*args, **kwargs):
     return True
 
 
-@celery.task(name="threads:collect_data", acks_late=True)
+@celery.task(name="process:collect_data", acks_late=True)
 def collect_data(*args, **kwargs):
     return args, kwargs
 
