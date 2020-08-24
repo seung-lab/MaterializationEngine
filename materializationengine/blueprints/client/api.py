@@ -64,10 +64,10 @@ class SegmentationTable(Resource):
     @auth_required
     @client_bp.doc("get_aligned_volume_tables", security="apikey")
     def get(self, aligned_volume_name: str):
-        """ Get list of annotation tables for a aligned_volume"""
+        """ Get list of segmentation tables for an aligned_volume"""
         check_aligned_volume(aligned_volume_name)
         db = get_db(aligned_volume_name)
-        tables = db._get_existing_table_ids_by_name()
+        tables = db.get_existing_segmentation_table_ids()
         return tables, 200
 
 
