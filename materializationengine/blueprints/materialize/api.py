@@ -50,22 +50,23 @@ def check_aligned_volume(aligned_volume):
     if aligned_volume not in aligned_volumes:
         abort(400, f"aligned volume: {aligned_volume} not valid")
     
-@mat_bp.route("/test_celery/<string:aligned_volume_name>/<string:pcg_table_name>")
+@mat_bp.route("/test_celery/<string:datastack_name>/<string:pcg_table_name>")
 class RunMaterializeResource(Resource):
     @auth_required
     @mat_bp.doc("run updating materialization", security="apikey")
-    def get(self, aligned_volume_name, pcg_table_name):
+    def get(self, datastack_name, pcg_table_name):
         from materializationengine.workflows.live_materialization import start_materialization
-        check_aligned_volume(aligned_volume_name)
         INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
-        url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{aligned_volume_name}"
+        url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{datastack_name}"
         try:
             auth_header = {"Authorization": f"Bearer {current_app.config['AUTH_TOKEN']}"}
             r = requests.get(url, headers=auth_header)
             r.raise_for_status()
             logging.info(url)
-            aligned_volume_info = r.json()
-            start_materialization(aligned_volume_name, pcg_table_name, aligned_volume_info)
+            datastack_info = r.json()
+            aligned_volume_name = datastack_info['aligned_volume'].get('name')
+            pcg_table_name = datastack_info['segmentation_source'].split("/")[-1]
+            start_materialization(aligned_volume_name, pcg_table_name, datastack_info)
             return "STARTING", 200
         except requests.exceptions.RequestException as e:
             logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
