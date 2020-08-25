@@ -140,7 +140,7 @@ def get_materialization_info(self, aligned_volume: str,
         table_metadata = {
             'aligned_volume': str(aligned_volume),
             'schema': db.get_table_schema(aligned_volume, table_name),
-            'max_id': int(db._get_table_row_count(annotation_table_id)),
+            'max_id': int(db.get_max_id_value(annotation_table_id)),
             'segmentation_table_id': segmentation_table_id,
             'annotation_table_id': annotation_table_id,
             'pcg_table_name': pcg_table_name,
