@@ -134,8 +134,6 @@ def get_materialization_info(self, aligned_volume: str,
     for annotation_table_id in annotation_table_ids:
         table_name = annotation_table_id.split("__")[-1]
         segmentation_table_id = f"{annotation_table_id}__{pcg_table_name}"
-        segmentation_metadata = db.get_segmentation_table_metadata(aligned_volume, table_name, pcg_table_name)
-
         try:
             segmentation_metadata = db.get_segmentation_table_metadata(aligned_volume, table_name, pcg_table_name)
         except AttributeError as e:
