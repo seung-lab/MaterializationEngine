@@ -110,7 +110,7 @@ sqlalchemy_cache = SqlAlchemyCache()
 @celery.task(name="process:get_materialization_info", bind=True)
 def get_materialization_info(self, aligned_volume: str,
                                    pcg_table_name: str,
-                                   aligned_volume_info: dict) -> List[dict]:
+                                   datastack_info: dict) -> List[dict]:
     """Initialize materialization by an aligned volume name. Iterates thorugh all
     tables in a aligned volume database and gathers metadata for each table. The list
     of tables are passed to workers for materialization.
@@ -136,6 +136,13 @@ def get_materialization_info(self, aligned_volume: str,
         segmentation_table_id = f"{annotation_table_id}__{pcg_table_name}"
         segmentation_metadata = db.get_segmentation_table_metadata(aligned_volume, table_name, pcg_table_name)
 
+        try:
+            segmentation_metadata = db.get_segmentation_table_metadata(aligned_volume, table_name, pcg_table_name)
+        except AttributeError as e:
+            celery_logger.error(f"TABLE DOES NOT EXIST: {e}")
+            db.cached_session.close()
+            segmentation_metadata = {}
+
         table_metadata = {
             'aligned_volume': str(aligned_volume),
             'schema': db.get_table_schema(aligned_volume, table_name),
@@ -144,8 +151,8 @@ def get_materialization_info(self, aligned_volume: str,
             'annotation_table_id': annotation_table_id,
             'pcg_table_name': pcg_table_name,
             'table_name': table_name,
-            'segmentation_source': aligned_volume_info.get('segmentation_source'),
-            'last_updated_time_stamp': segmentation_metadata.get('last_updated')
+            'segmentation_source': datastack_info.get('segmentation_source'),
+            'last_updated_time_stamp': segmentation_metadata.get('last_updated', None)
         }
         metadata.append(table_metadata.copy())
     return metadata
