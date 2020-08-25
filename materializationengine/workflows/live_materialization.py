@@ -76,7 +76,7 @@ def start_materialization(aligned_volume_name: str, pcg_table_name: str, aligned
                 chain(
                     get_annotations_with_missing_supervoxel_ids.s(chunk),
                     get_cloudvolume_supervoxel_ids.s(mat_metadata),
-                    # get_root_ids_from_supervoxels.s(mat_metadata),
+                    get_root_ids.s(mat_metadata),
                     ) for chunk in supervoxel_chunks],
                     fin.si()), # return here is required for chords
                     fin.si() # final task which will process a return status/timing etc...
@@ -130,7 +130,6 @@ def get_materialization_info(self, aligned_volume: str,
     """
     db = get_db(aligned_volume)
     annotation_table_ids = db._get_existing_table_ids()
-
     metadata = []
     for annotation_table_id in annotation_table_ids:
         table_name = annotation_table_id.split("__")[-1]
@@ -193,11 +192,13 @@ def create_missing_segmentation_tables(self, mat_metadata: dict) -> dict:
         except Exception as e:
             celery_logger.error(f"SQL ERROR: {e}")
             session.rollback()
+    else:
+        session.close()
     return mat_metadata
 
 
 @celery.task(name="process:chunk_supervoxel_ids_task", bind=True)
-def chunk_supervoxel_ids_task(self, mat_metadata: dict, block_size: int = 2500) -> List[List]:
+def chunk_supervoxel_ids_task(self, mat_metadata: dict, block_size: int = 10000) -> List[List]:
     """Creates list of chunks with start:end index for chunking queries for materialziation.
 
     Parameters
@@ -263,6 +264,9 @@ def get_annotations_with_missing_supervoxel_ids(self, mat_metadata: dict,
     except SQLAlchemyError as e:
         session.rollback()
         raise self.retry(exc=e, countdown=3)
+
+    if not anno_ids:
+        self.request.callbacks = None
 
     annotation_dataframe = pd.DataFrame(annotation_data, dtype=object)
 
@@ -344,6 +348,8 @@ def get_sql_supervoxel_ids(self, chunks: List[int], mat_metadata: dict) -> List[
         list of supervoxel ids between 'start_id' and 'end_id'
     """
     SegmentationModel = create_segmentation_model(mat_metadata)
+    aligned_volume = mat_metadata.get("aligned_volume")
+    session = sqlalchemy_cache.get(aligned_volume)
     try:
         columns = [column.name for column in SegmentationModel.__table__.columns]
         supervoxel_id_columns = [column for column in columns if "supervoxel_id" in column]
@@ -351,16 +357,87 @@ def get_sql_supervoxel_ids(self, chunks: List[int], mat_metadata: dict) -> List[
         for supervoxel_id_column in supervoxel_id_columns:
             supervoxel_id_data[supervoxel_id_column] = [
                 data
-                for data in self.session.query(
+                for data in session.query(
                     SegmentationModel.id, getattr(SegmentationModel, supervoxel_id_column)
                 ).filter(
                     or_(SegmentationModel.annotation_id).between(int(chunks[0]), int(chunks[1]))
                 )
             ]
+        session.close()
         return supervoxel_id_data
     except Exception as e:
         raise self.retry(exc=e, countdown=3)
 
+
+@celery.task(name="process:get_root_ids",
+             bind=True,
+             autoretry_for=(Exception,),
+             max_retries=3)
+def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
+    pcg_table_name = mat_metadata.get("pcg_table_name")
+    aligned_volume = mat_metadata.get("aligned_volume")
+    last_updated_time_stamp = mat_metadata.get("last_updated_time_stamp")
+    
+    mat_df = pd.DataFrame(materialization_data, dtype=object)
+    
+    AnnotationModel = create_annotation_model(mat_metadata)
+    SegmentationModel = create_segmentation_model(mat_metadata)
+    
+    session = sqlalchemy_cache.get(aligned_volume)
+
+    __, seg_model_cols, __ = get_query_columns_by_suffix(AnnotationModel, SegmentationModel, 'root_id')
+
+    anno_ids = mat_df['annotation_id'].to_list()
+
+    # get current root ids from database
+    try:
+        current_root_ids =  [data for data in session.query(*seg_model_cols).\
+                filter(or_(SegmentationModel.annotation_id.in_(anno_ids)))]   
+        session.close()
+    except Exception as e:
+        raise self.retry(exc=e, countdown=3)
+
+    root_ids_df = pd.DataFrame(current_root_ids, dtype=object)
+    del root_ids_df['id']
+
+    if not last_updated_time_stamp:
+        time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
+
+    cg = ChunkedGraphGateway(pcg_table_name)
+    old_roots, new_roots = cg.get_proofread_root_ids(last_updated_time_stamp, time_stamp)
+    
+    root_id_map = dict(zip(old_roots, new_roots))
+
+    for col in root_ids_df:
+        mask = root_ids_df[col].isin(root_id_map.keys())
+        root_ids_df.loc[mask, col] = root_ids_df.loc[mask, col].map(root_id_map)
+    
+    # merge with existing data
+    dataframe_with_root_ids = pd.merge(mat_df, root_ids_df, how='outer', left_on='annotation_id', right_on='annotation_id')
+    dataframe_with_root_ids.sort_values(by='segmentation_id', inplace=True)
+    # get data by column type
+    supervoxel_data = dataframe_with_root_ids.loc[:, dataframe_with_root_ids.columns.str.endswith("supervoxel_id")]
+    
+    root_id_data = dataframe_with_root_ids.loc[:, dataframe_with_root_ids.columns.str.endswith("root_id")]
+
+    # get mask of missing root_ids for lookup
+    missing_values = root_id_data.isna()
+    
+    missing_roots = dataframe_with_root_ids[missing_values.any(axis=1)]
+
+    supervoxels_array = supervoxel_data.to_numpy(dtype=np.uint64)
+    supervoxel_columns = [column for column in dataframe_with_root_ids.columns if 'supervoxel_id' in column]
+    
+    root_ids_dict = {}
+    
+    for col_name, supervoxels_ids in supervoxel_data.items():
+        root_id_col_name = make_root_id_column_name(col_name)
+        supervoxels_array =  np.array(supervoxels_ids, dtype=np.uint64)
+        root_id_array = cg.get_roots(supervoxels_array, time_stamp=last_updated_time_stamp)
+        root_ids_dict[root_id_col_name] = root_id_array
+        
+    dataframe_with_root_ids.update(root_ids_dict)
+    return dataframe_with_root_ids.to_dict(orient='list')
 
 @celery.task(name="process:get_root_ids_from_supervoxels",
              bind=True,
