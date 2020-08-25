@@ -1,5 +1,5 @@
 -e git+git://github.com/seung-lab/PyChunkedGraph.git@vminnie-67#egg=pychunkedgraph
--e git+https://github.com/seung-lab/DynamicAnnotationDB.git@v2.1api#egg=dynamicannotationdb
+-e git+https://github.com/seung-lab/DynamicAnnotationDB.git@mat_updates#egg=dynamicannotationdb
 -e git+https://github.com/seung-lab/EMAnnotationSchemas.git@v2.1api#egg=emannotationschemas
 -e git+https://github.com/seung-lab/AnnotationFrameworkClient.git@authclient_fcc#egg=annotationframeworkclient
 cloud-volume
