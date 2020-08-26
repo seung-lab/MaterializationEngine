@@ -50,11 +50,11 @@ def check_aligned_volume(aligned_volume):
     if aligned_volume not in aligned_volumes:
         abort(400, f"aligned volume: {aligned_volume} not valid")
     
-@mat_bp.route("/test_celery/<string:datastack_name>/<string:pcg_table_name>")
+@mat_bp.route("/test_celery/<string:datastack_name>")
 class RunMaterializeResource(Resource):
     @auth_required
     @mat_bp.doc("run updating materialization", security="apikey")
-    def get(self, datastack_name, pcg_table_name):
+    def get(self, datastack_name):
         from materializationengine.workflows.live_materialization import start_materialization
         INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
         url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{datastack_name}"
@@ -64,7 +64,7 @@ class RunMaterializeResource(Resource):
             r.raise_for_status()
             logging.info(url)
             datastack_info = r.json()
-            aligned_volume_name = datastack_info['aligned_volume'].get('name')
+            aligned_volume_name = datastack_info['aligned_volume']['name']
             pcg_table_name = datastack_info['segmentation_source'].split("/")[-1]
             start_materialization(aligned_volume_name, pcg_table_name, datastack_info)
             return "STARTING", 200
