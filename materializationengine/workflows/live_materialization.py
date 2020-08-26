@@ -179,7 +179,7 @@ def create_missing_segmentation_tables(self, mat_metadata: dict) -> dict:
     engine = sqlalchemy_cache.engine
     
     if not session.query(SegmentationMetadata).filter(SegmentationMetadata.table_id==segmentation_table_id).scalar():
-        SegmentationModel.create(bind=engine, checkfirst=True)
+        SegmentationModel.__table__.create(bind=engine, checkfirst=True)
         creation_time = datetime.datetime.utcnow()
         metadata_dict = {
             'annotation_table': mat_metadata.get('annotation_table_id'),
