@@ -318,7 +318,7 @@ def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, mat_metadat
     mat_df = pd.DataFrame(materialization_data, dtype=object)
 
     segmentation_source = mat_metadata.get("segmentation_source")
-    cv = cloudvolume.CloudVolume(segmentation_source, mip=0)
+    cv = cloudvolume.CloudVolume(segmentation_source, mip=0, use_https=True)
 
     position_data = mat_df.loc[:, mat_df.columns.str.endswith("position")]
     for k, row in mat_df.iterrows():
