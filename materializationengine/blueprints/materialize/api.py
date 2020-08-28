@@ -66,7 +66,8 @@ class RunMaterializeResource(Resource):
             datastack_info = r.json()
             aligned_volume_name = datastack_info['aligned_volume']['name']
             pcg_table_name = datastack_info['segmentation_source'].split("/")[-1]
-            start_materialization(aligned_volume_name, pcg_table_name, datastack_info)
+            segmentation_source = datastack_info.get('segmentation_source')
+            start_materialization(aligned_volume_name, pcg_table_name, segmentation_source)
             return "STARTING", 200
         except requests.exceptions.RequestException as e:
             logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")

@@ -67,22 +67,23 @@ def start_materialization(aligned_volume_name: str, pcg_table_name: str, aligned
     result = get_materialization_info.s(aligned_volume_name, pcg_table_name, aligned_volume_info).delay()
     mat_info = result.get()
     for mat_metadata in mat_info:
-        result = chunk_supervoxel_ids_task.s(mat_metadata).delay()
-        supervoxel_chunks = result.get()
+        if mat_metadata:
+            result = chunk_supervoxel_ids_task.s(mat_metadata).delay()
+            supervoxel_chunks = result.get()
 
-        process_chunks_workflow = chain(
-            create_missing_segmentation_tables.s(mat_metadata),
-            chord([
-                chain(
-                    get_annotations_with_missing_supervoxel_ids.s(chunk),
-                    get_cloudvolume_supervoxel_ids.s(mat_metadata),
-                    get_root_ids.s(mat_metadata),
-                    ) for chunk in supervoxel_chunks],
-                    fin.si()), # return here is required for chords
-                    fin.si() # final task which will process a return status/timing etc...
-                )
+            process_chunks_workflow = chain(
+                create_missing_segmentation_tables.s(mat_metadata),
+                chord([
+                    chain(
+                        get_annotations_with_missing_supervoxel_ids.s(chunk),
+                        get_cloudvolume_supervoxel_ids.s(mat_metadata),
+                        get_root_ids.s(mat_metadata),
+                        ) for chunk in supervoxel_chunks],
+                        fin.si()), # return here is required for chords
+                        fin.si() # final task which will process a return status/timing etc...
+                    )
 
-        process_chunks_workflow.apply_async()
+            process_chunks_workflow.apply_async()
 
 class SqlAlchemyCache:
 
@@ -110,7 +111,7 @@ sqlalchemy_cache = SqlAlchemyCache()
 @celery.task(name="process:get_materialization_info", bind=True)
 def get_materialization_info(self, aligned_volume: str,
                                    pcg_table_name: str,
-                                   datastack_info: dict) -> List[dict]:
+                                   segmentation_source: str) -> List[dict]:
     """Initialize materialization by an aligned volume name. Iterates thorugh all
     tables in a aligned volume database and gathers metadata for each table. The list
     of tables are passed to workers for materialization.
@@ -129,30 +130,36 @@ def get_materialization_info(self, aligned_volume: str,
         list of dicts containing metadata for each table
     """
     db = get_db(aligned_volume)
-    annotation_table_ids = db._get_existing_table_ids()
+    annotation_table_ids = db.get_valid_table_ids()
     metadata = []
     for annotation_table_id in annotation_table_ids:
-        table_name = annotation_table_id.split("__")[-1]
-        segmentation_table_id = f"{annotation_table_id}__{pcg_table_name}"
-        try:
-            segmentation_metadata = db.get_segmentation_table_metadata(aligned_volume, table_name, pcg_table_name)
-        except AttributeError as e:
-            celery_logger.error(f"TABLE DOES NOT EXIST: {e}")
-            db.cached_session.close()
-            segmentation_metadata = {}
-
-        table_metadata = {
-            'aligned_volume': str(aligned_volume),
-            'schema': db.get_table_schema(aligned_volume, table_name),
-            'max_id': int(db.get_max_id_value(annotation_table_id)),
-            'segmentation_table_id': segmentation_table_id,
-            'annotation_table_id': annotation_table_id,
-            'pcg_table_name': pcg_table_name,
-            'table_name': table_name,
-            'segmentation_source': datastack_info.get('segmentation_source'),
-            'last_updated_time_stamp': segmentation_metadata.get('last_updated', None)
-        }
-        metadata.append(table_metadata.copy())
+        max_id = db.get_max_id_value(annotation_table_id)
+        if max_id:
+            table_name = annotation_table_id.split("__")[-1]
+            segmentation_table_id = f"{annotation_table_id}__{pcg_table_name}"
+            
+            try:
+                segmentation_metadata = db.get_segmentation_table_metadata(aligned_volume,
+                                                                           table_name,
+                                                                           pcg_table_name)
+            except AttributeError as e:
+                celery_logger.error(f"TABLE DOES NOT EXIST: {e}")
+                segmentation_metadata = {'last_updated': None}
+                db.cached_session.close()
+            
+            table_metadata = {
+                'aligned_volume': str(aligned_volume),
+                'schema': db.get_table_schema(aligned_volume, table_name),
+                'max_id': int(max_id),
+                'segmentation_table_id': segmentation_table_id,
+                'annotation_table_id': annotation_table_id,
+                'pcg_table_name': pcg_table_name,
+                'table_name': table_name,
+                'segmentation_source': 'segmentation_source',
+                'last_updated_time_stamp': segmentation_metadata.get('last_updated', None)
+            }
+            metadata.append(table_metadata.copy())
+    db.cached_session.close()   
     return metadata
 
 
@@ -286,12 +293,12 @@ def get_annotations_with_missing_supervoxel_ids(self, mat_metadata: dict,
 
     if supervoxel_data:
         segmatation_col_list = ['segmentation_id' if col == "id" else col for col in supervoxel_data[0].keys()]
-        segmentation_dataframe = pd.DataFrame(supervoxel_data, columns=segmatation_col_list, dtype=object).fillna(value=np.nan)
+        segmentation_dataframe = pd.DataFrame(supervoxel_data, columns=segmatation_col_list, dtype=object)
         merged_dataframe = pd.merge(segmentation_dataframe, annotation_dataframe, how='outer', left_on='annotation_id', right_on='id')
     else:
         supervoxel_columns.extend(['annotation_id', 'segmentation_id'])
         segmentation_dataframe = pd.DataFrame(columns=supervoxel_columns, dtype=object)
-        segmentation_dataframe = segmentation_dataframe.fillna(value=np.nan)
+        segmentation_dataframe = segmentation_dataframe
         merged_dataframe = pd.concat((segmentation_dataframe, annotation_dataframe), axis=1)
 
     return merged_dataframe.to_dict(orient='list')
@@ -321,15 +328,17 @@ def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, mat_metadat
     cv = cloudvolume.CloudVolume(segmentation_source, mip=0, use_https=True)
 
     position_data = mat_df.loc[:, mat_df.columns.str.endswith("position")]
-    for k, row in mat_df.iterrows():
-        for col, data in position_data.items():
-            suprvoxel_column = f"{col.rsplit('_', 1)[0]}_supervoxel_id"
-            if np.isnan(mat_df.loc[k, suprvoxel_column]):
-                svid = np.squeeze(cv.download_point(data, size=1))
-                mat_df.loc[k, 'annotation_id'] = row.id
-                mat_df.loc[k, suprvoxel_column] = svid
-    mat_df.loc[:, mat_df.columns.str.endswith("supervoxel_id")] = mat_df.loc[:, mat_df.columns.str.endswith("supervoxel_id")].astype('uint64')
+    for data in mat_df.itertuples():
+        for col in list(position_data):
+            supervoxel_column = f"{col.rsplit('_', 1)[0]}_supervoxel_id"
+            if getattr(data, supervoxel_column) is None:
+                segmentation_id = data.segmentation_id
+                pos_data = getattr(data, col)
+                pos_array = np.asarray(pos_data)
+                svid = np.squeeze(cv.download_point(pos_array, size=1))
+                mat_df.loc[mat_df.segmentation_id == segmentation_id, supervoxel_column] =  svid
     return mat_df.to_dict(orient='list')
+
 
 
 @celery.task(name="process:get_sql_supervoxel_ids",
