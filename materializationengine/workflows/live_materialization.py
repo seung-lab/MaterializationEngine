@@ -139,11 +139,13 @@ def get_materialization_info(self, aligned_volume: str,
             segmentation_table_id = f"{annotation_table_id}__{pcg_table_name}"
             
             try:
-                segmentation_metadata = db.get_segmentation_table_metadata(aligned_volume, table_name, pcg_table_name)
+                segmentation_metadata = db.get_segmentation_table_metadata(aligned_volume,
+                                                                           table_name,
+                                                                           pcg_table_name)
             except AttributeError as e:
                 celery_logger.error(f"TABLE DOES NOT EXIST: {e}")
-                db.cached_session.close()
                 segmentation_metadata = {'last_updated': None}
+                db.cached_session.close()
             
             table_metadata = {
                 'aligned_volume': str(aligned_volume),
@@ -330,8 +332,8 @@ def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, mat_metadat
         for col in list(position_data):
             supervoxel_column = f"{col.rsplit('_', 1)[0]}_supervoxel_id"
             if getattr(data, supervoxel_column) is None:
-                pos_data = getattr(data, col)
                 segmentation_id = data.segmentation_id
+                pos_data = getattr(data, col)
                 pos_array = np.asarray(pos_data)
                 svid = np.squeeze(cv.download_point(pos_array, size=1))
                 mat_df.loc[mat_df.segmentation_id == segmentation_id, supervoxel_column] =  svid
