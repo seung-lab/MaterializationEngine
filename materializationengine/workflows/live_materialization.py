@@ -155,7 +155,7 @@ def get_materialization_info(self, aligned_volume: str,
                 'annotation_table_id': annotation_table_id,
                 'pcg_table_name': pcg_table_name,
                 'table_name': table_name,
-                'segmentation_source': 'segmentation_source',
+                'segmentation_source': segmentation_source,
                 'last_updated_time_stamp': segmentation_metadata.get('last_updated', None)
             }
             metadata.append(table_metadata.copy())
