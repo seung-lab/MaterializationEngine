@@ -77,7 +77,7 @@ def start_materialization(aligned_volume_name: str, pcg_table_name: str, aligned
                     chain(
                         get_annotations_with_missing_supervoxel_ids.s(chunk),
                         get_cloudvolume_supervoxel_ids.s(mat_metadata),
-                        get_root_ids.s(mat_metadata),
+                        # get_root_ids.s(mat_metadata),
                         ) for chunk in supervoxel_chunks],
                         fin.si()), # return here is required for chords
                         fin.si() # final task which will process a return status/timing etc...
@@ -156,6 +156,7 @@ def get_materialization_info(self, aligned_volume: str,
                 'pcg_table_name': pcg_table_name,
                 'table_name': table_name,
                 'segmentation_source': segmentation_source,
+                'coord_resolution': [4,4,40],
                 'last_updated_time_stamp': segmentation_metadata.get('last_updated', None)
             }
             metadata.append(table_metadata.copy())
@@ -325,17 +326,20 @@ def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, mat_metadat
     mat_df = pd.DataFrame(materialization_data, dtype=object)
 
     segmentation_source = mat_metadata.get("segmentation_source")
-    cv = cloudvolume.CloudVolume(segmentation_source, mip=0, use_https=True)
+    coord_resolution = mat_metadata.get("coord_resolution")
+
+    cv = cloudvolume.CloudVolume(segmentation_source, mip=0, use_https=True, bounded=False, fill_missing=True)
 
     position_data = mat_df.loc[:, mat_df.columns.str.endswith("position")]
     for data in mat_df.itertuples():
         for col in list(position_data):
             supervoxel_column = f"{col.rsplit('_', 1)[0]}_supervoxel_id"
-            if getattr(data, supervoxel_column) is None:
+            if np.isnan(getattr(data, supervoxel_column)):
                 segmentation_id = data.segmentation_id
                 pos_data = getattr(data, col)
                 pos_array = np.asarray(pos_data)
-                svid = np.squeeze(cv.download_point(pt=pos_array, size=1, mip=0))
+                svid = np.squeeze(cv.download_point(pt=pos_array, size=1, coord_resolution=coord_resolution))
+                celery_logger.info(f"SVID : {svid}")
                 mat_df.loc[mat_df.segmentation_id == segmentation_id, supervoxel_column] =  svid
     return mat_df.to_dict(orient='list')
 
