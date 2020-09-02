@@ -2,7 +2,7 @@ import datetime
 import logging
 import numpy as np
 from flask import current_app
-from sqlalchemy import create_engine, MetaData
+from sqlalchemy import create_engine, MetaData, text, func, and_
 from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.sql import or_
 from sqlalchemy.engine.url import make_url
@@ -211,7 +211,7 @@ def create_missing_segmentation_tables(self, mat_metadata: dict) -> dict:
 
 
 @celery.task(name="process:chunk_supervoxel_ids_task", bind=True)
-def chunk_supervoxel_ids_task(self, mat_metadata: dict, block_size: int = 10000) -> List[List]:
+def chunk_supervoxel_ids_task(self, mat_metadata: dict, chunk_size: int = 2500) -> List[List]:
     """Creates list of chunks with start:end index for chunking queries for materialziation.
 
     Parameters
@@ -226,14 +226,38 @@ def chunk_supervoxel_ids_task(self, mat_metadata: dict, block_size: int = 10000)
     List[List]
         list of list containg start and end indices
     """
-    max_id = mat_metadata["max_id"]
-    n_parts = int(max(1, max_id / block_size))
-    n_parts += 1
-    id_chunks = np.linspace(1, max_id, num=n_parts, dtype=np.int64).tolist()
-    chunk_ends = []
-    for i_id_chunk in range(len(id_chunks) - 1):
-        chunk_ends.append([id_chunks[i_id_chunk], id_chunks[i_id_chunk + 1]])
-    return chunk_ends
+    AnnotationModel = create_annotation_model(mat_metadata)
+
+    chunked_ids = chunk_ids(mat_metadata, AnnotationModel.id, chunk_size)
+
+    return [chunk for chunk in chunked_ids]
+   
+def query_id_range(column, start_id: int, end_id: int):
+        if end_id:
+            return and_(column >= start_id, column < end_id)
+        else:
+            return column >= start_id
+
+def chunk_ids(mat_metadata, model, chunk_size: int):
+    aligned_volume = mat_metadata.get('aligned_volume')
+    session = sqlalchemy_cache.get(aligned_volume)
+
+    q = session.query(
+        model, func.row_number().over(order_by=model).label("row_count")
+    ).from_self(model)
+
+    if chunk_size > 1:
+        q = q.filter(text("row_count %% %d=1" % chunk_size))
+
+    chunks = [id for id, in q]
+
+    while chunks:
+        chunk_start = chunks.pop(0)
+        if chunks:
+            chunk_end = chunks[0]
+        else:
+            chunk_end = None
+        yield [chunk_start, chunk_end]
 
 
 @celery.task(name="process:get_annotations_with_missing_supervoxel_ids",
@@ -266,11 +290,14 @@ def get_annotations_with_missing_supervoxel_ids(self, mat_metadata: dict,
     anno_model_cols, seg_model_cols, supervoxel_columns = get_query_columns_by_suffix(
         AnnotationModel, SegmentationModel, 'supervoxel_id')
     try:
-        annotation_data = [
-            anno_id for anno_id in session.query(*anno_model_cols).\
-            filter(AnnotationModel.id.between(chunk[0], chunk[1])).filter(AnnotationModel.valid==True)
-        ]
-        anno_ids = [x[-1] for x in annotation_data]
+        query = session.query(*anno_model_cols)
+        chunked_id_query = query_id_range(AnnotationModel.id, chunk[0], chunk[1])
+        annotation_data = [data for data in query.filter(chunked_id_query).order_by(
+            AnnotationModel.id).filter(AnnotationModel.valid == True)]
+
+        annotation_dataframe = pd.DataFrame(annotation_data, dtype=object)
+        anno_ids = annotation_dataframe['id'].tolist()
+        
         supervoxel_data = [data for data in session.query(*seg_model_cols).\
             filter(or_(SegmentationModel.annotation_id.in_(anno_ids)))]  
         session.close()
@@ -281,10 +308,7 @@ def get_annotations_with_missing_supervoxel_ids(self, mat_metadata: dict,
     if not anno_ids:
         self.request.callbacks = None
 
-    annotation_dataframe = pd.DataFrame(annotation_data, dtype=object)
-
     wkb_data = annotation_dataframe.loc[:, annotation_dataframe.columns.str.endswith("position")]
-
 
     annotation_dict = {}
     for column, wkb_points in wkb_data.items():
@@ -294,14 +318,14 @@ def get_annotations_with_missing_supervoxel_ids(self, mat_metadata: dict,
 
     if supervoxel_data:
         segmatation_col_list = ['segmentation_id' if col == "id" else col for col in supervoxel_data[0].keys()]
-        segmentation_dataframe = pd.DataFrame(supervoxel_data, columns=segmatation_col_list, dtype=object)
+        segmentation_dataframe = pd.DataFrame(supervoxel_data, columns=segmatation_col_list, dtype=object).fillna(value=np.nan)
         merged_dataframe = pd.merge(segmentation_dataframe, annotation_dataframe, how='outer', left_on='annotation_id', right_on='id')
     else:
         supervoxel_columns.extend(['annotation_id', 'segmentation_id'])
         segmentation_dataframe = pd.DataFrame(columns=supervoxel_columns, dtype=object)
-        segmentation_dataframe = segmentation_dataframe
+        segmentation_dataframe = segmentation_dataframe.fillna(value=np.nan)
         merged_dataframe = pd.concat((segmentation_dataframe, annotation_dataframe), axis=1)
-
+        merged_dataframe['annotation_id'] = merged_dataframe['id']
     return merged_dataframe.to_dict(orient='list')
 
 @celery.task(name="process:get_cloudvolume_supervoxel_ids",
@@ -335,12 +359,11 @@ def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, mat_metadat
         for col in list(position_data):
             supervoxel_column = f"{col.rsplit('_', 1)[0]}_supervoxel_id"
             if np.isnan(getattr(data, supervoxel_column)):
-                segmentation_id = data.segmentation_id
+                annotation_id = data.annotation_id
                 pos_data = getattr(data, col)
                 pos_array = np.asarray(pos_data)
                 svid = np.squeeze(cv.download_point(pt=pos_array, size=1, coord_resolution=coord_resolution))
-                celery_logger.info(f"SVID : {svid}")
-                mat_df.loc[mat_df.segmentation_id == segmentation_id, supervoxel_column] =  svid
+                mat_df.loc[mat_df.annotation_id == annotation_id, supervoxel_column] =  svid
     return mat_df.to_dict(orient='list')
 
 
