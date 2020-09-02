@@ -233,10 +233,10 @@ def chunk_supervoxel_ids_task(self, mat_metadata: dict, chunk_size: int = 2500) 
     return [chunk for chunk in chunked_ids]
    
 def query_id_range(column, start_id: int, end_id: int):
-        if end_id:
-            return and_(column >= start_id, column < end_id)
-        else:
-            return column >= start_id
+    if end_id:
+        return and_(column >= start_id, column < end_id)
+    else:
+        return column >= start_id
 
 def chunk_ids(mat_metadata, model, chunk_size: int):
     aligned_volume = mat_metadata.get('aligned_volume')
