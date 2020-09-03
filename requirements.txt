@@ -3,7 +3,7 @@
 -e git+https://github.com/seung-lab/EMAnnotationSchemas.git@v2.1api#egg=emannotationschemas
 -e git+https://github.com/seung-lab/AnnotationFrameworkClient.git@authclient_fcc#egg=annotationframeworkclient
 cloud-volume==1.21.1
-cloud-files==0.11.1
+cloud-files==0.12.1
 argschema<2.0.1
 pandas
 Flask
