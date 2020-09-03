@@ -412,20 +412,21 @@ def get_sql_supervoxel_ids(self, chunks: List[int], mat_metadata: dict) -> List[
 
 @celery.task(name="process:get_root_ids",
              bind=True,
-             autoretry_for=(Exception,),
+             autoretry_for=(SQLAlchemyError,),
              max_retries=3)
 def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
     pcg_table_name = mat_metadata.get("pcg_table_name")
     aligned_volume = mat_metadata.get("aligned_volume")
+    segmentation_table_id = mat_metadata.get("segmentation_table_id")
     last_updated_time_stamp = mat_metadata.get("last_updated_time_stamp")
     
+    session = sqlalchemy_cache.get(aligned_volume)
+
     mat_df = pd.DataFrame(materialization_data, dtype=object)
     
     AnnotationModel = create_annotation_model(mat_metadata)
     SegmentationModel = create_segmentation_model(mat_metadata)
     
-    session = sqlalchemy_cache.get(aligned_volume)
-
     __, seg_model_cols, __ = get_query_columns_by_suffix(AnnotationModel, SegmentationModel, 'root_id')
 
     anno_ids = mat_df['annotation_id'].to_list()
@@ -434,51 +435,48 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
     try:
         current_root_ids =  [data for data in session.query(*seg_model_cols).\
                 filter(or_(SegmentationModel.annotation_id.in_(anno_ids)))]   
-        session.close()
-    except Exception as e:
+    except SQLAlchemyError as e:
+        session.rollback()
         raise self.retry(exc=e, countdown=3)
-
-    root_ids_df = pd.DataFrame(current_root_ids, dtype=object)
-    del root_ids_df['id']
-
-    if not last_updated_time_stamp:
-        time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
-
+    finally:
+        session.close()
+    
     cg = ChunkedGraphGateway(pcg_table_name)
-    old_roots, new_roots = cg.get_proofread_root_ids(last_updated_time_stamp, time_stamp)
-    
-    root_id_map = dict(zip(old_roots, new_roots))
 
-    for col in root_ids_df:
-        mask = root_ids_df[col].isin(root_id_map.keys())
-        root_ids_df.loc[mask, col] = root_ids_df.loc[mask, col].map(root_id_map)
     
-    # merge with existing data
-    dataframe_with_root_ids = pd.merge(mat_df, root_ids_df, how='outer', left_on='annotation_id', right_on='annotation_id')
-    dataframe_with_root_ids.sort_values(by='segmentation_id', inplace=True)
-    # get data by column type
-    supervoxel_data = dataframe_with_root_ids.loc[:, dataframe_with_root_ids.columns.str.endswith("supervoxel_id")]
-    
-    root_id_data = dataframe_with_root_ids.loc[:, dataframe_with_root_ids.columns.str.endswith("root_id")]
-
-    # get mask of missing root_ids for lookup
-    missing_values = root_id_data.isna()
-    
-    missing_roots = dataframe_with_root_ids[missing_values.any(axis=1)]
-
-    supervoxels_array = supervoxel_data.to_numpy(dtype=np.uint64)
-    supervoxel_columns = [column for column in dataframe_with_root_ids.columns if 'supervoxel_id' in column]
-    
-    root_ids_dict = {}
-    
-    for col_name, supervoxels_ids in supervoxel_data.items():
-        root_id_col_name = make_root_id_column_name(col_name)
-        supervoxels_array =  np.array(supervoxels_ids, dtype=np.uint64)
-        root_id_array = cg.get_roots(supervoxels_array, time_stamp=last_updated_time_stamp)
-        root_ids_dict[root_id_col_name] = root_id_array
+    if current_root_ids:
+        root_ids_df = pd.DataFrame(current_root_ids, dtype=object)
+        # merge root_id df with supervoxel df
+        time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
         
-    dataframe_with_root_ids.update(root_ids_dict)
-    return dataframe_with_root_ids.to_dict(orient='list')
+        if not last_updated_time_stamp:
+            last_updated_time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=120)
+        
+        old_roots, new_roots = cg.get_proofread_root_ids(last_updated_time_stamp, time_stamp)
+        # lookup expired roots
+        # update dataframe
+        # collect missing root_ids
+        # if root_ids are missing lookup....else return df
+    else:
+        supervoxels = mat_df.loc[:, mat_df.columns.str.endswith("supervoxel_id")]
+        col_names = list(supervoxels)
+        root_id_columns = [col_name.replace('supervoxel_id','root_id') for col_name in col_names if 'supervoxel_id' in col_name]        
+        root_id_dataframe = pd.DataFrame(columns=root_id_columns, dtype=object)
+        root_id_dataframe = root_id_dataframe.fillna(value=np.nan)
+        mat_df = pd.concat((mat_df, root_id_dataframe), axis=1)
+
+    supervoxels = mat_df.loc[:, mat_df.columns.str.endswith("supervoxel_id")]
+    col_names = list(supervoxels)
+    supervoxel_data = mat_df.loc[:, col_names]
+    
+    for col_name in supervoxel_data:
+        if 'supervoxel_id' in col_name:
+            root_id_name = col_name.replace('supervoxel_id','root_id')
+            data = mat_df.loc[:, col_name].tolist()
+            root_id_array = np.squeeze(cg.get_roots(data, time_stamp=last_updated_time_stamp))
+            mat_df[root_id_name] = root_id_array
+
+    return mat_df.to_dict(orient='list')
 
 
 @celery.task(name="process:update_root_ids",
