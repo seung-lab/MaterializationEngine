@@ -1,39 +1,40 @@
 import datetime
 import logging
-import numpy as np
-from flask import current_app
-from sqlalchemy import create_engine, MetaData, text, func, and_
-from sqlalchemy.orm import scoped_session, sessionmaker
-from sqlalchemy.sql import or_
-from sqlalchemy.engine.url import make_url
-from sqlalchemy.ext.automap import automap_base
-from sqlalchemy.pool import NullPool
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.exc import SQLAlchemyError, IntegrityError
-from celery.utils.log import get_task_logger
-from itertools import islice, takewhile, repeat, groupby
+from copy import deepcopy
+from functools import lru_cache, partial
+from itertools import groupby, islice, repeat, takewhile
+from operator import itemgetter
+from typing import List
 
 import cloudvolume
-from celery import group, chain, chord, subtask, chunks, Task
-from dynamicannotationdb.key_utils import (
-    build_table_id,
-    build_segmentation_table_id,
-    get_table_name_from_table_id,
-)
-from dynamicannotationdb.models import SegmentationMetadata
+import numpy as np
+import pandas as pd
+from celery import Task, chain, chord, chunks, group, subtask
+from celery.utils.log import get_task_logger
+from flask import current_app
 from geoalchemy2.shape import to_shape
+from sqlalchemy import MetaData, and_, create_engine, func, text
+from sqlalchemy.engine.url import make_url
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.ext.automap import automap_base
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import scoped_session, sessionmaker
+from sqlalchemy.pool import NullPool
+from sqlalchemy.sql import or_
+
+from dynamicannotationdb.key_utils import (build_segmentation_table_id,
+                                           build_table_id,
+                                           get_table_name_from_table_id)
+from dynamicannotationdb.models import SegmentationMetadata
 from emannotationschemas import models as em_models
 from materializationengine.celery_worker import celery
-from materializationengine.database import get_db
-from materializationengine.extensions import create_session
-from materializationengine.errors import AnnotationParseFailure, TaskFailure, WrongModelType
 from materializationengine.chunkedgraph_gateway import ChunkedGraphGateway
+from materializationengine.database import get_db
+from materializationengine.errors import (AnnotationParseFailure, TaskFailure,
+                                          WrongModelType)
+from materializationengine.extensions import create_session
 from materializationengine.utils import make_root_id_column_name
-from typing import List
-from copy import deepcopy
-import pandas as pd
-from functools import lru_cache, partial
-from operator import itemgetter
+
 celery_logger = get_task_logger(__name__)
 
 BIGTABLE = current_app.config["BIGTABLE_CONFIG"]
@@ -610,4 +611,3 @@ def upsert(session, data, model, chunksize=None):
                 else:
                     celery_logger.error(e)
                     raise SQLAlchemyError
-                    
