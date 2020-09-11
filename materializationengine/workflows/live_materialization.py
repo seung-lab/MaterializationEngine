@@ -81,6 +81,7 @@ def start_materialization(aligned_volume_name: str, pcg_table_name: str, aligned
                         get_annotations_with_missing_supervoxel_ids.s(chunk),
                         get_cloudvolume_supervoxel_ids.s(mat_metadata),
                         get_root_ids.s(mat_metadata),
+                        update_segmentation_table.s(mat_metadata)
                         ) for chunk in supervoxel_chunks],
                         fin.si()), # return here is required for chords
                         fin.si() # final task which will process a return status/timing etc...
