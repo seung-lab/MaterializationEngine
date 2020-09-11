@@ -323,9 +323,9 @@ def get_annotations_with_missing_supervoxel_ids(self, mat_metadata: dict,
     if supervoxel_data:
         segmatation_col_list = ['segmentation_id' if col == "id" else col for col in supervoxel_data[0].keys()]
         segmentation_dataframe = pd.DataFrame(supervoxel_data, columns=segmatation_col_list, dtype=object).fillna(value=np.nan)
-        merged_dataframe = pd.merge(segmentation_dataframe, annotation_dataframe, how='outer', left_on='annotation_id', right_on='id')
+        merged_dataframe = pd.merge(segmentation_dataframe, annotation_dataframe, how='outer', left_on='id', right_on='annotation_id')
     else:
-        supervoxel_columns.extend(['annotation_id', 'segmentation_id'])
+        supervoxel_columns.extend(['annotation_id'])
         segmentation_dataframe = pd.DataFrame(columns=supervoxel_columns, dtype=object)
         segmentation_dataframe = segmentation_dataframe.fillna(value=np.nan)
         merged_dataframe = pd.concat((segmentation_dataframe, annotation_dataframe), axis=1)
