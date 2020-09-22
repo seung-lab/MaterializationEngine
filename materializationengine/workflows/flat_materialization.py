@@ -16,9 +16,7 @@ from emannotationschemas import get_schema
 from emannotationschemas.flatten import create_flattened_schema
 from emannotationschemas.models import Base, create_table_dict, format_version_db_uri
 from dynamicannotationdb.key_utils import (
-    build_table_id,
-    build_segmentation_table_id,
-    get_table_name_from_table_id,
+    build_segmentation_table_name,
 )
 from materializationengine import materializationmanager as manager
 from materializationengine import materialize
@@ -49,7 +47,7 @@ def create_flat_materialization(aligned_volume: str):
     """
     # mat_db_sql_uri = create_materialized_database(aligned_volume, version)
     # create_materialized_tables.s(aligned_volume, mat_db_sql_uri).apply_async()
-
+    pass
 
 def create_materialized_database(aligned_volume: str) -> str:
     """Create a new database to store materialized annotation tables
@@ -140,28 +138,27 @@ def create_materialized_tables(aligned_volume: str, mat_sql_uri: str):
     for table in tables:
         # only create table if marked as valid in the metadata table
         if table.valid:
-            table_name = get_table_name_from_table_id(table.table_id)
+            table_name = table.table_name
             # create name of table to be materialized
-            mat_table_id = build_materailized_table_id(aligned_volume, table_name)
-            if not mat_engine.dialect.has_table(mat_engine, mat_table_id):
+            mat_table_name = build_materailized_table_id(table_name)
+            if not mat_engine.dialect.has_table(mat_engine, mat_table_name):
                 schema_name = anno_db.get_table_schema(aligned_volume, table_name)
                 anno_schema = get_schema(schema_name)
                 flat_schema = create_flattened_schema(anno_schema)
                 # construct dict of sqlalchemy columns
                 annotation_dict = create_table_dict(
-                    table_id=mat_table_id,
+                    table_name=mat_table_name,
                     Schema=flat_schema,
                     table_metadata=None,
-                    version=None,
                     with_crud_columns=False,
                 )
                 creation_time = datetime.datetime.now()
 
-                mat_table = type(mat_table_id, (materialize_base,), annotation_dict)
+                mat_table = type(mat_table_name, (materialize_base,), annotation_dict)
                 mat_table.__table__.create(bind=mat_engine)
                 analysis_metadata_dict = {
                     "schema": schema_name,
-                    "table_id": mat_table_id,
+                    "table_name": mat_table_name,
                     "valid": True,
                     "created": creation_time,
                 }
@@ -173,7 +170,7 @@ def create_materialized_tables(aligned_volume: str, mat_sql_uri: str):
                     session.rollback()
                     logging.error(e)
                 finally:
-                    materialized_tables.append(mat_table_id)
+                    materialized_tables.append(mat_table_name)
                     session.close()
                 logging.info(
                     f"Table: {table_name} created using {mat_table} \
@@ -231,16 +228,16 @@ def get_missing_tables(
     for table in analysis_tables:
         if table.valid:
             if table.annotation_table not in analysis_tables:
-                table_name = get_table_name_from_table_id(table.table_id)
+                table_name = table.table_name
                 # create name of table to be materialized
-                mat_table_id = build_materailized_table_id(aligned_volume, table_name)
-                if not mat_engine.dialect.has_table(mat_engine, mat_table_id):
+                mat_table_name = build_materailized_table_id(table_name)
+                if not mat_engine.dialect.has_table(mat_engine, mat_table_name):
                     schema_name = anno_db.get_table_schema(aligned_volume, table_name)
                     anno_schema = get_schema(schema_name)
                     flat_schema = create_flattened_schema(anno_schema)
                     # construct dict of sqlalchemy columns
                     annotation_dict = create_table_dict(
-                        table_id=mat_table_id,
+                        table_name=mat_table_name,
                         Schema=flat_schema,
                         table_metadata=None,
                         version=None,
@@ -248,11 +245,11 @@ def get_missing_tables(
                     )
                     creation_time = datetime.datetime.now()
 
-                    mat_table = type(mat_table_id, (materialize_base,), annotation_dict)
+                    mat_table = type(mat_table_name, (materialize_base,), annotation_dict)
                     mat_table.__table__.create(bind=mat_engine)
                     analysis_metadata_dict = {
                         "schema": schema_name,
-                        "table_id": mat_table_id,
+                        "table_name": mat_table_name,
                         "valid": True,
                         "created": creation_time,
                     }
@@ -264,10 +261,10 @@ def get_missing_tables(
                         session.rollback()
                         logging.error(e)
                     finally:
-                        missing_tables.append(mat_table_id)
+                        missing_tables.append(mat_table_name)
                         session.close()
     return missing_tables
 
 
-def build_materailized_table_id(aligned_volume: str, table_name: str) -> str:
-    return f"mat__{aligned_volume}__{table_name}"
+def build_materailized_table_id(table_name: str) -> str:
+    return f"mat__{table_name}"
