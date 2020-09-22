@@ -304,7 +304,7 @@ def get_annotations_with_missing_supervoxel_ids(self, mat_metadata: dict,
         anno_ids = annotation_dataframe['id'].tolist()
         
         supervoxel_data = [data for data in session.query(*seg_model_cols).\
-            filter(or_(SegmentationModel.annotation_id.in_(anno_ids)))]  
+            filter(or_(SegmentationModel.id.in_(anno_ids)))]  
         session.close()
     except SQLAlchemyError as e:
         session.rollback()
@@ -322,15 +322,13 @@ def get_annotations_with_missing_supervoxel_ids(self, mat_metadata: dict,
         annotation_dataframe.loc[:, key] = value
 
     if supervoxel_data:
-        segmatation_col_list = ['segmentation_id' if col == "id" else col for col in supervoxel_data[0].keys()]
+        segmatation_col_list = [col for col in supervoxel_data[0].keys()]
         segmentation_dataframe = pd.DataFrame(supervoxel_data, columns=segmatation_col_list, dtype=object).fillna(value=np.nan)
-        merged_dataframe = pd.merge(segmentation_dataframe, annotation_dataframe, how='outer', left_on='id', right_on='annotation_id')
+        merged_dataframe = pd.merge(segmentation_dataframe, annotation_dataframe, how='outer', left_on='id', right_on='id')
     else:
-        supervoxel_columns.extend(['annotation_id'])
         segmentation_dataframe = pd.DataFrame(columns=supervoxel_columns, dtype=object)
         segmentation_dataframe = segmentation_dataframe.fillna(value=np.nan)
         merged_dataframe = pd.concat((segmentation_dataframe, annotation_dataframe), axis=1)
-        merged_dataframe['annotation_id'] = merged_dataframe['id']
     return merged_dataframe.to_dict(orient='list')
 
 @celery.task(name="process:get_cloudvolume_supervoxel_ids",
@@ -364,11 +362,10 @@ def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, mat_metadat
         for col in list(position_data):
             supervoxel_column = f"{col.rsplit('_', 1)[0]}_supervoxel_id"
             if np.isnan(getattr(data, supervoxel_column)):
-                annotation_id = data.annotation_id
                 pos_data = getattr(data, col)
                 pos_array = np.asarray(pos_data)
                 svid = np.squeeze(cv.download_point(pt=pos_array, size=1, coord_resolution=coord_resolution))
-                mat_df.loc[mat_df.annotation_id == annotation_id, supervoxel_column] =  svid
+                mat_df.loc[mat_df.id == data.id, supervoxel_column] =  svid
     return mat_df.to_dict(orient='list')
 
 
@@ -425,21 +422,22 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
     aligned_volume = mat_metadata.get("aligned_volume")
 
     supervoxel_df = pd.DataFrame(materialization_data, dtype=object)
-    supervoxel_df = supervoxel_df.drop(['pt_position', 'id'], 1)
-    supervoxel_df = supervoxel_df.rename(columns={'segmentation_id': 'id'})
+    drop_col_names = list(
+        supervoxel_df.loc[:, supervoxel_df.columns.str.endswith("position")])
+    supervoxel_df = supervoxel_df.drop(drop_col_names, 1)
 
     AnnotationModel = create_annotation_model(mat_metadata)
     SegmentationModel = create_segmentation_model(mat_metadata)
 
     __, seg_model_cols, __ = get_query_columns_by_suffix(
         AnnotationModel, SegmentationModel, 'root_id')
-    anno_ids = supervoxel_df['annotation_id'].to_list()
+    anno_ids = supervoxel_df['id'].to_list()
 
     # get current root ids from database
     try:
         session = sqlalchemy_cache.get(aligned_volume)
         current_root_ids = [data for data in session.query(*seg_model_cols).
-                            filter(or_(SegmentationModel.annotation_id.in_(anno_ids)))]
+                            filter(or_(SegmentationModel.id.in_(anno_ids)))]
     except SQLAlchemyError as e:
         session.rollback()
         raise self.retry(exc=e, countdown=3)
@@ -472,9 +470,12 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
     root_id_map = dict(zip(old_roots, new_roots))
 
     cols = [x for x in root_ids_df.columns if "root_id" in x]
+
+    updated_rows = 0
     for col in cols:
         for old_root_id, new_root_id in root_id_map.items():
             root_ids_df.loc[root_ids_df[col] == old_root_id, col] = new_root_id
+            updated_rows += 1
 
     # filter missing root_ids and lookup root_ids if missing
     mask = np.logical_and.reduce([root_ids_df[col].isna() for col in cols])
@@ -487,7 +488,12 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
                 data = missing_root_rows.loc[:, col_name]
                 root_id_array = np.squeeze(cg.get_roots(data.to_list()))
                 root_ids_df.loc[data.index, root_id_name] = root_id_array
+                updated_rows += 1
 
+    if updated_rows == 0:
+        self.request.callbacks = None
+        return
+        
     return root_ids_df.to_dict(orient='records')
 
 
