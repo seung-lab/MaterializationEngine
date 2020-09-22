@@ -4,7 +4,7 @@ from materializationengine.models import AnalysisTable, AnalysisVersion
 from materializationengine.errors import MaterializeAnnotationException, \
                                          RootIDNotFoundException, \
                                          AnnotationParseFailure
-from dynamicannotationdb.key_utils import build_table_id, build_segmentation_table_id                                         
+from dynamicannotationdb.key_utils import build_segmentation_table_name                                         
 from emannotationschemas import models as em_models
 from emannotationschemas.flatten import flatten_dict
 from emannotationschemas import get_schema
@@ -105,9 +105,8 @@ class MaterializationManager(object):
         if annotation_model is not None:
             self._annotation_model = annotation_model
         else:
-            table_id = build_table_id(self._aligned_volume, self._table_name)
             self._annotation_model = em_models.make_annotation_model(
-                table_id, schema_name, version=self.version, with_crud_columns=with_crud_columns)
+                table_name, schema_name, version=self.version, with_crud_columns=with_crud_columns)
 
         if sqlalchemy_database_uri is not None:
             self._sqlalchemy_engine = create_engine(sqlalchemy_database_uri,
