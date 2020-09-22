@@ -22,9 +22,7 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.pool import NullPool
 from sqlalchemy.sql import or_
 
-from dynamicannotationdb.key_utils import (build_segmentation_table_id,
-                                           build_table_id,
-                                           get_table_name_from_table_id)
+from dynamicannotationdb.key_utils import build_segmentation_table_name
 from dynamicannotationdb.models import SegmentationMetadata
 from emannotationschemas import models as em_models
 from materializationengine.celery_worker import celery
@@ -83,7 +81,7 @@ def start_materialization(aligned_volume_name: str, pcg_table_name: str, aligned
                         get_root_ids.s(mat_metadata),
                         update_segmentation_table.s(mat_metadata)
                         ) for chunk in supervoxel_chunks],
-                        fin.si()), # return here is required for chords
+                        update_metadata.s()), # return here is required for chords
                         fin.si() # final task which will process a return status/timing etc...
                     )
 
@@ -134,34 +132,37 @@ def get_materialization_info(self, aligned_volume: str,
         list of dicts containing metadata for each table
     """
     db = get_db(aligned_volume)
-    annotation_table_ids = db.get_valid_table_ids()
+    annotation_tables = db.get_valid_table_names()
     metadata = []
-    for annotation_table_id in annotation_table_ids:
-        max_id = db.get_max_id_value(annotation_table_id)
+    for annotation_table in annotation_tables:
+        max_id = db.get_max_id_value(annotation_table)
         if max_id:
-            table_name = annotation_table_id.split("__")[-1]
-            segmentation_table_id = f"{annotation_table_id}__{pcg_table_name}"
-            
+            segmentation_table_name = build_segmentation_table_name(annotation_table, pcg_table_name)
             try:
-                segmentation_metadata = db.get_segmentation_table_metadata(aligned_volume,
-                                                                           table_name,
+                segmentation_metadata = db.get_segmentation_table_metadata(annotation_table,
                                                                            pcg_table_name)
             except AttributeError as e:
                 celery_logger.error(f"TABLE DOES NOT EXIST: {e}")
                 segmentation_metadata = {'last_updated': None}
                 db.cached_session.close()
+
+            last_updated_time_stamp = segmentation_metadata.get('last_updated')
+            materialization_timestamp = datetime.datetime.utcnow() 
             
+            if not last_updated_time_stamp:
+                last_updated_time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=90)
+
             table_metadata = {
                 'aligned_volume': str(aligned_volume),
-                'schema': db.get_table_schema(aligned_volume, table_name),
+                'schema': db.get_table_schema(annotation_table),
                 'max_id': int(max_id),
-                'segmentation_table_id': segmentation_table_id,
-                'annotation_table_id': annotation_table_id,
+                'segmentation_table_name': segmentation_table_name,
+                'annotation_table_name': annotation_table,
                 'pcg_table_name': pcg_table_name,
-                'table_name': table_name,
                 'segmentation_source': segmentation_source,
                 'coord_resolution': [4,4,40],
-                'last_updated_time_stamp': segmentation_metadata.get('last_updated', None)
+                'last_updated_time_stamp': last_updated_time_stamp,
+                'materialization_time_stamp': materialization_timestamp
             }
             metadata.append(table_metadata.copy())
     db.cached_session.close()   
@@ -182,7 +183,7 @@ def create_missing_segmentation_tables(self, mat_metadata: dict) -> dict:
     Returns:
         dict: Materialization metadata
     """
-    segmentation_table_id = mat_metadata.get('segmentation_table_id')
+    segmentation_table_name = mat_metadata.get('segmentation_table_name')
     aligned_volume = mat_metadata.get('aligned_volume')
 
     SegmentationModel = create_segmentation_model(mat_metadata)
@@ -190,13 +191,13 @@ def create_missing_segmentation_tables(self, mat_metadata: dict) -> dict:
     session = sqlalchemy_cache.get(aligned_volume)
     engine = sqlalchemy_cache.engine
     
-    if not session.query(SegmentationMetadata).filter(SegmentationMetadata.table_id==segmentation_table_id).scalar():
+    if not session.query(SegmentationMetadata).filter(SegmentationMetadata.table_name==segmentation_table_name).scalar():
         SegmentationModel.__table__.create(bind=engine, checkfirst=True)
         creation_time = datetime.datetime.utcnow()
         metadata_dict = {
-            'annotation_table': mat_metadata.get('annotation_table_id'),
+            'annotation_table': mat_metadata.get('annotation_table_name'),
             'schema_type': mat_metadata.get('schema'),
-            'table_id': segmentation_table_id,
+            'table_name': segmentation_table_name,
             'valid': True,
             'created': creation_time,
             'pcg_table_name': mat_metadata.get('pcg_table_name')
@@ -463,10 +464,8 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
                           dtype=object).fillna(value=np.nan)
         root_ids_df = pd.concat((supervoxel_df, df), axis=1)
 
-    if not last_updated_time_stamp:
-        time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
-        last_updated_time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=90)
-
+    # get time stamp from 5 mins ago
+    time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
     # lookup expired roots
     old_roots, new_roots = cg.get_proofread_root_ids(
         last_updated_time_stamp, time_stamp)
@@ -505,6 +504,7 @@ def update_segmentation_table(self, materialization_data: dict, mat_metadata: di
     except SQLAlchemyError as e:
         raise e
 
+
 @celery.task(name="process:fin", acks_late=True)
 def fin(*args, **kwargs):
     return True
@@ -516,18 +516,18 @@ def collect_data(*args, **kwargs):
 
 
 def create_segmentation_model(mat_metadata):
-    annotation_table_id = mat_metadata.get('annotation_table_id')
+    annotation_table_name = mat_metadata.get('annotation_table_name')
     schema_type = mat_metadata.get("schema")
     pcg_table_name = mat_metadata.get("pcg_table_name")
 
-    SegmentationModel = em_models.make_segmentation_model(annotation_table_id, schema_type, pcg_table_name)
+    SegmentationModel = em_models.make_segmentation_model(annotation_table_name, schema_type, pcg_table_name)
     return SegmentationModel
 
 def create_annotation_model(mat_metadata):
-    annotation_table_id = mat_metadata.get('annotation_table_id')
+    annotation_table_name = mat_metadata.get('annotation_table_name')
     schema_type = mat_metadata.get("schema")
 
-    AnnotationModel = em_models.make_annotation_model(annotation_table_id, schema_type)
+    AnnotationModel = em_models.make_annotation_model(annotation_table_name, schema_type)
     return AnnotationModel
 
 def get_geom_from_wkb(wkb):
