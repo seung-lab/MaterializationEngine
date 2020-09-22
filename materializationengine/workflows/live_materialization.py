@@ -504,6 +504,27 @@ def update_segmentation_table(self, materialization_data: dict, mat_metadata: di
     except SQLAlchemyError as e:
         raise e
 
+@celery.task(name="process:update_metadata",
+             bind=True,
+             autoretry_for=(Exception,),
+             max_retries=3)
+def update_metadata(self, mat_metadata: dict) -> List[int]:
+    aligned_volume = mat_metadata['aligned_volume']
+    segmentation_table_name = mat_metadata['segmentation_table_name']
+
+    session = sqlalchemy_cache.get(aligned_volume)
+    last_updated_timestamp = mat_metadata['materialization_time_stamp']
+    
+    try:
+        seg_metadata = session.query(SegmentationMetadata).filter(
+            SegmentationMetadata.table_name == segmentation_table_name).one()
+        seg_metadata.last_updated = last_updated_timestamp
+        session.commit()
+    except Exception as e:
+        celery_logger.error(f"SQL ERROR: {e}")
+        session.rollback()
+    finally:
+        session.close()
 
 @celery.task(name="process:fin", acks_late=True)
 def fin(*args, **kwargs):
