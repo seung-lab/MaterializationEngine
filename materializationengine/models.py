@@ -22,7 +22,7 @@ class AnalysisTable(Base):
     id = Column(Integer, primary_key=True)
     aligned_volume = Column(String(100), nullable=False)
     schema = Column(String(100), nullable=False)
-    table_id = Column(String(100), nullable=False)
+    table_name = Column(String(100), nullable=False)
     valid = Column(Boolean)
     created = Column(DateTime, nullable=False)
     analysisversion_id = Column(Integer, ForeignKey("analysisversion.id"))
@@ -33,7 +33,7 @@ class AnalysisMetadata(Base):
     __tablename__ = "analysismetadata"
     id = Column(Integer, primary_key=True)
     schema = Column(String(100), nullable=False)
-    table_id = Column(String(100), nullable=False)
+    table_name = Column(String(100), nullable=False)
     valid = Column(Boolean)
     created = Column(DateTime, nullable=False)
     last_updated = Column(DateTime, nullable=True)
