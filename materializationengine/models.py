@@ -8,13 +8,13 @@ Base = declarative_base()
 class AnalysisVersion(Base):
     __tablename__ = "analysisversion"
     id = Column(Integer, primary_key=True)
-    dataset = Column(String(100), nullable=False)
+    datastack = Column(String(100), nullable=False)
     version = Column(Integer, nullable=False)
     time_stamp = Column(DateTime, nullable=False)
     valid = Column(Boolean)
 
     def __repr__(self):
-        return "{}_v{}".format(self.dataset, self.version)
+        return "{}_v{}".format(self.datastack, self.version)
 
 
 class AnalysisTable(Base):
