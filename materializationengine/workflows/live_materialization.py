@@ -440,6 +440,7 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
                             filter(or_(SegmentationModel.id.in_(anno_ids)))]
     except SQLAlchemyError as e:
         session.rollback()
+        current_root_ids = []
         raise self.retry(exc=e, countdown=3)
     finally:
         session.close()
@@ -581,7 +582,7 @@ def get_query_columns_by_suffix(AnnotationModel, SegmentationModel, suffix):
     seg_model_cols = [getattr(SegmentationModel, name) for name in supervoxel_columns]
 
     # add id columns to lookup
-    seg_model_cols.extend([SegmentationModel.annotation_id, SegmentationModel.id])
+    seg_model_cols.extend([SegmentationModel.id])
     return anno_model_cols, seg_model_cols, supervoxel_columns
 
 
