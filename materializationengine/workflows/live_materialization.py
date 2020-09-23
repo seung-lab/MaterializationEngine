@@ -511,7 +511,9 @@ def update_segmentation_table(self, materialization_data: dict, mat_metadata: di
     try:
         session = sqlalchemy_cache.get(aligned_volume)
         upsert(session, materialization_data, SegmentationModel)
+        upsert_time_stamp = datetime.datetime.utcnow()
         session.close()
+        return {'Status': f'Upsert suceeded at {upsert_time_stamp}'}
     except SQLAlchemyError as e:
         raise e
 
@@ -519,7 +521,7 @@ def update_segmentation_table(self, materialization_data: dict, mat_metadata: di
              bind=True,
              autoretry_for=(Exception,),
              max_retries=3)
-def update_metadata(self, mat_metadata: dict) -> List[int]:
+def update_metadata(self, status: dict, mat_metadata: dict):
     aligned_volume = mat_metadata['aligned_volume']
     segmentation_table_name = mat_metadata['segmentation_table_name']
 
