@@ -470,7 +470,7 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
 
     # lookup expired roots
     if last_updated_time_stamp:
-        last_updated_time_stamp = datetime.datetime.strptime(last_updated_time_stamp, '%Y-%m-%d %H:%M:%S.%f')
+        last_updated_time_stamp = datetime.datetime.strptime(last_updated_time_stamp, '%Y-%m-%dT%H:%M:%S.%f')
         # get time stamp from 5 mins ago
         time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
         old_roots, new_roots = cg.get_proofread_root_ids(
@@ -526,14 +526,14 @@ def update_metadata(self, status: dict, mat_metadata: dict):
     segmentation_table_name = mat_metadata['segmentation_table_name']
 
     session = sqlalchemy_cache.get(aligned_volume)
-    last_updated_timestamp = mat_metadata['materialization_time_stamp']
-
-    last_updated_timestamp = datetime.datetime.strptime(last_updated_timestamp, '%Y-%m-%d %H:%M:%S.%f')
+    
+    last_updated_time_stamp = mat_metadata['materialization_time_stamp']
+    last_updated_time_stamp = datetime.datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%S.%f')
 
     try:
         seg_metadata = session.query(SegmentationMetadata).filter(
             SegmentationMetadata.table_name == segmentation_table_name).one()
-        seg_metadata.last_updated = last_updated_timestamp
+        seg_metadata.last_updated = last_updated_time_stamp
         session.commit()
     except Exception as e:
         celery_logger.error(f"SQL ERROR: {e}")
