@@ -43,7 +43,7 @@ CHUNKGRAPH_TABLE_ID = current_app.config["CHUNKGRAPH_TABLE_ID"]
 INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
 ANNO_ADDRESS = current_app.config["ANNO_ENDPOINT"]
 SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
-
+ROW_CHUNK_SIZE = current_app.config["MATERIALIZATION_ROW_CHUNK_SIZE"]
 
 def start_materialization(aligned_volume_name: str, pcg_table_name: str, aligned_volume_info: dict):
     """Base live materialization
@@ -79,9 +79,10 @@ def start_materialization(aligned_volume_name: str, pcg_table_name: str, aligned
                         get_annotations_with_missing_supervoxel_ids.s(chunk),
                         get_cloudvolume_supervoxel_ids.s(mat_metadata),
                         get_root_ids.s(mat_metadata),
-                        update_segmentation_table.s(mat_metadata)
+                        update_segmentation_table.s(mat_metadata),
+                        update_metadata.s(mat_metadata)
                         ) for chunk in supervoxel_chunks],
-                        update_metadata.s()), # return here is required for chords
+                        fin.si()), # return here is required for chords
                         fin.si() # final task which will process a return status/timing etc...
                     )
 
@@ -146,12 +147,9 @@ def get_materialization_info(self, aligned_volume: str,
                 segmentation_metadata = {'last_updated': None}
                 db.cached_session.close()
 
-            last_updated_time_stamp = segmentation_metadata.get('last_updated')
+            last_updated_time_stamp = segmentation_metadata.get('last_updated', None)
             materialization_timestamp = datetime.datetime.utcnow() 
             
-            if not last_updated_time_stamp:
-                last_updated_time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=90)
-
             table_metadata = {
                 'aligned_volume': str(aligned_volume),
                 'schema': db.get_table_schema(annotation_table),
@@ -216,7 +214,7 @@ def create_missing_segmentation_tables(self, mat_metadata: dict) -> dict:
 
 
 @celery.task(name="process:chunk_supervoxel_ids_task", bind=True)
-def chunk_supervoxel_ids_task(self, mat_metadata: dict, chunk_size: int = 2500) -> List[List]:
+def chunk_supervoxel_ids_task(self, mat_metadata: dict, chunk_size: int = None) -> List[List]:
     """Creates list of chunks with start:end index for chunking queries for materialziation.
 
     Parameters
@@ -232,6 +230,9 @@ def chunk_supervoxel_ids_task(self, mat_metadata: dict, chunk_size: int = 2500) 
         list of list containg start and end indices
     """
     AnnotationModel = create_annotation_model(mat_metadata)
+    
+    if not chunk_size:
+        chunk_size = ROW_CHUNK_SIZE
 
     chunked_ids = chunk_ids(mat_metadata, AnnotationModel.id, chunk_size)
 
@@ -463,20 +464,23 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
                           dtype=object).fillna(value=np.nan)
         root_ids_df = pd.concat((supervoxel_df, df), axis=1)
 
-    # get time stamp from 5 mins ago
-    time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
-    # lookup expired roots
-    old_roots, new_roots = cg.get_proofread_root_ids(
-        last_updated_time_stamp, time_stamp)
-    root_id_map = dict(zip(old_roots, new_roots))
-
     cols = [x for x in root_ids_df.columns if "root_id" in x]
 
     updated_rows = 0
-    for col in cols:
-        for old_root_id, new_root_id in root_id_map.items():
-            root_ids_df.loc[root_ids_df[col] == old_root_id, col] = new_root_id
-            updated_rows += 1
+
+    # lookup expired roots
+    if last_updated_time_stamp:
+        last_updated_time_stamp = datetime.datetime.strptime(last_updated_time_stamp, '%Y-%m-%d %H:%M:%S.%f')
+        # get time stamp from 5 mins ago
+        time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
+        old_roots, new_roots = cg.get_proofread_root_ids(
+            last_updated_time_stamp, time_stamp)
+        root_id_map = dict(zip(old_roots, new_roots))
+
+        for col in cols:
+            for old_root_id, new_root_id in root_id_map.items():
+                root_ids_df.loc[root_ids_df[col] == old_root_id, col] = new_root_id
+                updated_rows += 1
 
     # filter missing root_ids and lookup root_ids if missing
     mask = np.logical_and.reduce([root_ids_df[col].isna() for col in cols])
@@ -521,7 +525,9 @@ def update_metadata(self, mat_metadata: dict) -> List[int]:
 
     session = sqlalchemy_cache.get(aligned_volume)
     last_updated_timestamp = mat_metadata['materialization_time_stamp']
-    
+
+    last_updated_timestamp = datetime.datetime.strptime(last_updated_timestamp, '%Y-%m-%d %H:%M:%S.%f')
+
     try:
         seg_metadata = session.query(SegmentationMetadata).filter(
             SegmentationMetadata.table_name == segmentation_table_name).one()
