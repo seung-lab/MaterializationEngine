@@ -528,7 +528,7 @@ def update_metadata(self, status: dict, mat_metadata: dict):
     session = sqlalchemy_cache.get(aligned_volume)
     
     last_updated_time_stamp = mat_metadata['materialization_time_stamp']
-    last_updated_time_stamp = datetime.datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%S.%f')
+    last_updated_time_stamp = datetime.datetime.strptime(last_updated_time_stamp, '%Y-%m-%dT%H:%M:%S.%f')
 
     try:
         seg_metadata = session.query(SegmentationMetadata).filter(
