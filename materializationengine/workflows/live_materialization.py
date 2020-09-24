@@ -506,6 +506,10 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
 @celery.task(name="process:update_segmentation_table",
              bind=True)
 def update_segmentation_table(self, materialization_data: dict, mat_metadata: dict) -> dict:
+    
+    if not materialization_data:
+        return None
+    
     SegmentationModel = create_segmentation_model(mat_metadata)
     aligned_volume = mat_metadata.get("aligned_volume")
 
