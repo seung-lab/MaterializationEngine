@@ -478,9 +478,10 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
         root_id_map = dict(zip(old_roots, new_roots))
 
         for col in cols:
-            for old_root_id, new_root_id in root_id_map.items():
-                root_ids_df.loc[root_ids_df[col] == old_root_id, col] = new_root_id
-                updated_rows += 1
+            if not root_ids_df[root_ids_df[col].isin([old_roots])].empty:
+                for old_root_id, new_root_id in root_id_map.items():
+                    root_ids_df.loc[root_ids_df[col] == old_root_id, col] = new_root_id
+                    updated_rows += 1
 
     # filter missing root_ids and lookup root_ids if missing
     mask = np.logical_and.reduce([root_ids_df[col].isna() for col in cols])
