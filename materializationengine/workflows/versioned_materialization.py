@@ -1,34 +1,35 @@
 import datetime
 import logging
-import numpy as np
-from flask import current_app
-from sqlalchemy import create_engine, MetaData
-from sqlalchemy.orm import scoped_session, sessionmaker
-from sqlalchemy.sql import func, or_
-from sqlalchemy.engine.url import make_url
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.engine.url import URL
-import cloudvolume
-from celery import group, chain, chord, subtask, signature
-from celery.utils.log import get_task_logger
+from typing import List
 
-from emannotationschemas import models as em_models
+import cloudvolume
+import numpy as np
+from celery import chain, chord, group, signature, subtask
+from celery.utils.log import get_task_logger
+from dynamicannotationdb.key_utils import build_segmentation_table_name
 from emannotationschemas import get_schema
+from emannotationschemas import models as em_models
 from emannotationschemas.flatten import create_flattened_schema
 from emannotationschemas.models import create_table_dict, format_version_db_uri
-from dynamicannotationdb.key_utils import (
-    build_segmentation_table_name,
-)
+from flask import current_app
 from materializationengine import materializationmanager as manager
 from materializationengine import materialize
 from materializationengine.celery_worker import celery
-from materializationengine.database import get_db, create_session, sqlalchemy_cache
-from materializationengine.models import AnalysisMetadata, Base, AnalysisTable, AnalysisVersion
-from materializationengine.errors import AnnotationParseFailure
 from materializationengine.chunkedgraph_gateway import ChunkedGraphGateway
-from materializationengine.shared_tasks import chunk_supervoxel_ids_task, fin
-from materializationengine.utils import create_annotation_model, create_segmentation_model
-from typing import List
+from materializationengine.database import (create_session, get_db,
+                                            sqlalchemy_cache)
+from materializationengine.errors import AnnotationParseFailure
+from materializationengine.models import (AnalysisMetadata, AnalysisTable,
+                                          AnalysisVersion, Base)
+from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
+                                                query_id_range)
+from materializationengine.utils import (create_annotation_model,
+                                         create_segmentation_model)
+from sqlalchemy import MetaData, create_engine
+from sqlalchemy.engine.url import URL, make_url
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import scoped_session, sessionmaker
+from sqlalchemy.sql import func, or_
 
 celery_logger = get_task_logger(__name__)
 
@@ -233,7 +234,7 @@ def create_analysis_database(self, mat_metadata: dict) -> str:
             )
     engine.dispose()
 
-    return str(sql_uri)
+    return mat_metadata
 
 
 @celery.task(name="process:create_analysis_tables", bind=True)
@@ -342,12 +343,14 @@ def create_analysis_tables(self, mat_metadata: dict):
                 )
     mat_engine.dispose()
     analysis_engine.dispose()
-    return analysis_tables
+    return mat_metadata
 
 
-
-@celery.task(name="process:insert_annotation_data", bind=True)
-def insert_annotation_data(self, mat_metadata: dict):
+@celery.task(name="process:insert_annotation_data",
+             bind=True,
+             autoretry_for=(Exception,),
+             max_retries=3)
+def insert_annotation_data(self, mat_metadata: dict, chunk: List[int]):
 
     aligned_volume = mat_metadata['aligned_volume']
     analysis_version = mat_metadata['analysis_version']
@@ -358,14 +361,17 @@ def insert_annotation_data(self, mat_metadata: dict):
 
     session, __ = create_session(sql_uri)
 
-    anno_table_model = create_annotation_model(mat_metadata)
-    seg_table_model = create_segmentation_model(mat_metadata)
+    AnnotationModel = create_annotation_model(mat_metadata)
+    SegmentationModel = create_segmentation_model(mat_metadata)
     analysis_table = get_analysis_table(sql_uri, aligned_volume, annotation_table_name)
-
-    r = session.query(anno_table_model, seg_table_model).\
-                join(seg_table_model).\
-                filter((anno_table_model.deleted <= datetime.datetime.utcnow()) | (anno_table_model.valid == True)).\
-                filter(seg_table_model.id == anno_table_model.id)
+    
+    chunked_id_query = query_id_range(AnnotationModel.id, chunk[0], chunk[1])
+  
+    r = session.query(AnnotationModel, SegmentationModel).\
+                join(SegmentationModel).\
+                filter((AnnotationModel.deleted <= datetime.datetime.utcnow()) | (AnnotationModel.valid == True)).\
+                filter(SegmentationModel.id == AnnotationModel.id).\
+                filter(chunked_id_query).order_by(AnnotationModel.id)
 
     annotation_data = r.all()
     annotations = []
