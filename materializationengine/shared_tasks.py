@@ -37,6 +37,14 @@ def chunk_supervoxel_ids_task(self, mat_metadata: dict, chunk_size: int = None) 
 
     return [chunk for chunk in chunked_ids]
 
+@celery.task(name="process:fin", acks_late=True)
+def fin(*args, **kwargs):
+    return True
+
+
+@celery.task(name="process:collect_data", acks_late=True)
+def collect_data(*args, **kwargs):
+    return args, kwargs
 
 def query_id_range(column, start_id: int, end_id: int):
     if end_id:
