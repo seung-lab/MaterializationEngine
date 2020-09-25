@@ -34,7 +34,7 @@ class BaseConfig:
     GLOBAL_SERVER = "https://global.daf-apis.com"
     SCHEMA_SERVICE_ENDPOINT = "https://global.daf-apis.com/schema/"
     SEGMENTATION_ENDPOINT = "https://global.daf-apis.com/"
-
+    MATERIALIZATION_ROW_CHUNK_SIZE = 500
     if os.environ.get("DAF_CREDENTIALS", None) is not None:
         with open(os.environ.get("DAF_CREDENTIALS"), "r") as f:
             AUTH_TOKEN = json.load(f)["token"]
