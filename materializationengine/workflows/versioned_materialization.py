@@ -394,7 +394,9 @@ def insert_annotation_data(self, mat_metadata: dict, chunk: List[int]):
     except Exception as e:
         celery_logger.error(e)
         analysis_session.rollback()
-
+    finally:
+        analysis_session.close()
+        analysis_engine.dispose()
 
 def create_analysis_sql_uri(sql_uri: str, aligned_volume: str, mat_version: int):
     sql_base_uri = sql_uri.rpartition("/")[0]
