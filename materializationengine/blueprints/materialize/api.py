@@ -89,6 +89,7 @@ class CreateVersionedMaterializationResource(Resource):
             r.raise_for_status()
             logging.info(url)
             datastack_info = r.json()
+            datastack_info['datastack'] = datastack_name
             frozen_materialization(datastack_info, analysis_version)
             return f"Creating frozen database {datastack_name} version {analysis_version} ", 200
         except requests.exceptions.RequestException as e:
