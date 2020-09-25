@@ -73,6 +73,24 @@ class RunMaterializeResource(Resource):
             logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
 
 
+@mat_bp.route("/test_materialize/<string:datastack_name>/<analysis_version>")
+class CreateVersionedMaterializationResource(Resource):
+    @auth_required
+    @mat_bp.doc("run versioned materialization", security="apikey")
+    def get(self, datastack_name: str, analysis_version: int):
+        from materializationengine.workflows.flat_materialization import frozen_materialization
+        INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
+        url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{datastack_name}"
+        try:
+            auth_header = {"Authorization": f"Bearer {current_app.config['AUTH_TOKEN']}"}
+            r = requests.get(url, headers=auth_header)
+            r.raise_for_status()
+            logging.info(url)
+            datastack_info = r.json()
+            frozen_materialization(datastack_info, analysis_version)
+            return f"Creating frozen database {datastack_name} version {analysis_version} ", 200
+        except requests.exceptions.RequestException as e:
+            logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
 
 
 @mat_bp.route("/aligned_volumes")
