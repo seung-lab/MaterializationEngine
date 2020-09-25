@@ -15,7 +15,7 @@ from emannotationschemas.models import format_version_db_uri
 from materializationengine.models import AnalysisTable, AnalysisVersion
 from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
 from materializationengine.views import get_datasets
-from materializationengine.database import get_db, create_session
+from materializationengine.database import get_db, sqlalchemy_cache, create_session
 from materializationengine.info_client import get_aligned_volumes
 from middle_auth_client import auth_required, auth_requires_permission
 import requests
@@ -27,6 +27,9 @@ from sqlalchemy import create_engine, MetaData
 from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy.exc import NoSuchTableError
+from sqlalchemy.engine.url import make_url
+
+SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
 
 
 __version__ = "0.2.35"
@@ -108,9 +111,10 @@ class VersionResource(Resource):
     @mat_bp.doc("get_analysis_versions", security="apikey")
     def get(self, aligned_volume_name):
         check_aligned_volume(aligned_volume_name)
-        db = get_db(aligned_volume_name)
+        session = sqlalchemy_cache.get(aligned_volume_name)
+        
         response = (
-            db.session.query(AnalysisVersion).filter(AnalysisVersion.datastack == aligned_volume_name).all()
+            session.query(AnalysisVersion).filter(AnalysisVersion.datastack == aligned_volume_name).all()
         )
         schema = AnalysisVersionSchema(many=True)
         versions, error = schema.dump(response)
@@ -127,8 +131,10 @@ class TableResource(Resource):
     @mat_bp.doc("get_all_tables", security="apikey")
     def get(self, aligned_volume_name, version):
         check_aligned_volume(aligned_volume_name)
+        session = sqlalchemy_cache.get(aligned_volume_name)
+
         response = (
-            db.session.query(AnalysisTable)
+            session.query(AnalysisTable)
             .filter(AnalysisTable.analysisversion)
             .filter(AnalysisVersion.version == version)
             .filter(AnalysisVersion.datastack == aligned_volume_name)
@@ -148,8 +154,9 @@ class AnnotationResource(Resource):
     @mat_bp.doc("get_top_materialized_annotations", security="apikey")
     def get(self, aligned_volume_name, version, tablename):
         check_aligned_volume(aligned_volume_name)
-        sql_uri = format_version_db_uri(db, aligned_volume_name, version)
-        session, engine = create_session(sql_uri)
+        sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
+        sql_uri = make_url(f"{sql_base_uri}/{aligned_volume_name}")
+        session, engine - create_session(sql_uri)
         metadata = MetaData()
         try:
             annotation_table = Table(tablename, metadata, autoload=True, autoload_with=engine)
