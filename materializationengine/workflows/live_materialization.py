@@ -12,7 +12,6 @@ import pandas as pd
 from celery import Task, chain, chord, chunks, group, subtask
 from celery.utils.log import get_task_logger
 from flask import current_app
-from geoalchemy2.shape import to_shape
 from sqlalchemy import MetaData, and_, create_engine, func, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -27,25 +26,21 @@ from dynamicannotationdb.models import SegmentationMetadata
 from emannotationschemas import models as em_models
 from materializationengine.celery_worker import celery
 from materializationengine.chunkedgraph_gateway import ChunkedGraphGateway
-from materializationengine.database import get_db
+from materializationengine.database import get_db, sqlalchemy_cache, create_session
 from materializationengine.errors import (AnnotationParseFailure, TaskFailure,
                                           WrongModelType)
-from materializationengine.extensions import create_session
-from materializationengine.utils import make_root_id_column_name
+from materializationengine.shared_tasks import chunk_supervoxel_ids_task, query_id_range
+from materializationengine.utils import (
+    make_root_id_column_name,
+    create_annotation_model,
+    create_segmentation_model,
+    get_query_columns_by_suffix,
+    get_geom_from_wkb)
+from materializationengine.upsert import upsert
 
 celery_logger = get_task_logger(__name__)
 
-BIGTABLE = current_app.config["BIGTABLE_CONFIG"]
-PROJECT_ID = BIGTABLE["project_id"]
-CG_INSTANCE_ID = BIGTABLE["instance_id"]
-AMDB_INSTANCE_ID = BIGTABLE["amdb_instance_id"]
-CHUNKGRAPH_TABLE_ID = current_app.config["CHUNKGRAPH_TABLE_ID"]
-INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
-ANNO_ADDRESS = current_app.config["ANNO_ENDPOINT"]
-SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
-ROW_CHUNK_SIZE = current_app.config["MATERIALIZATION_ROW_CHUNK_SIZE"]
-
-def start_materialization(aligned_volume_name: str, pcg_table_name: str, aligned_volume_info: dict):
+def start_materialization(aligned_volume_name: str, pcg_table_name: str, segmentation_source: dict):
     """Base live materialization
 
     Workflow paths:
@@ -61,11 +56,11 @@ def start_materialization(aligned_volume_name: str, pcg_table_name: str, aligned
     ----------
     aligned_volume_name : str
         [description]
-    aligned_volume_info : dict
+    segmentation_source : dict
         [description]
     """
 
-    result = get_materialization_info.s(aligned_volume_name, pcg_table_name, aligned_volume_info).delay()
+    result = get_materialization_info.s(aligned_volume_name, pcg_table_name, segmentation_source).delay()
     mat_info = result.get()
     for mat_metadata in mat_info:
         if mat_metadata:
@@ -88,28 +83,6 @@ def start_materialization(aligned_volume_name: str, pcg_table_name: str, aligned
 
             process_chunks_workflow.apply_async()
 
-class SqlAlchemyCache:
-
-    def __init__(self):
-        self._engine = None
-        self._sessions = {}
-
-    @property
-    def engine(self):
-        return self._engine
-
-    def get(self, aligned_volume):
-        if aligned_volume not in self._sessions:
-            sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
-            sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-            self._engine = create_engine(sql_uri, pool_recycle=3600,
-                                                  pool_size=20,
-                                                  max_overflow=50)
-            Session = scoped_session(sessionmaker(bind=self._engine))
-            self._sessions[aligned_volume] = Session
-        return self._sessions[aligned_volume]
-
-sqlalchemy_cache = SqlAlchemyCache()
 
 @celery.task(name="process:get_materialization_info", bind=True)
 def get_materialization_info(self, aligned_volume: str,
@@ -125,7 +98,7 @@ def get_materialization_info(self, aligned_volume: str,
         name of aligned volume
     pcg_table_name: str
         cg_table_name
-    aligned_volume_info:
+    segmentation_source:
         infoservice data
     Returns
     -------
@@ -211,59 +184,6 @@ def create_missing_segmentation_tables(self, mat_metadata: dict) -> dict:
     else:
         session.close()
     return mat_metadata
-
-
-@celery.task(name="process:chunk_supervoxel_ids_task", bind=True)
-def chunk_supervoxel_ids_task(self, mat_metadata: dict, chunk_size: int = None) -> List[List]:
-    """Creates list of chunks with start:end index for chunking queries for materialziation.
-
-    Parameters
-    ----------
-    mat_metadata : dict
-        Materialization metadata
-    block_size : int, optional
-        [description], by default 2500
-
-    Returns
-    -------
-    List[List]
-        list of list containg start and end indices
-    """
-    AnnotationModel = create_annotation_model(mat_metadata)
-    
-    if not chunk_size:
-        chunk_size = ROW_CHUNK_SIZE
-
-    chunked_ids = chunk_ids(mat_metadata, AnnotationModel.id, chunk_size)
-
-    return [chunk for chunk in chunked_ids]
-   
-def query_id_range(column, start_id: int, end_id: int):
-    if end_id:
-        return and_(column >= start_id, column < end_id)
-    else:
-        return column >= start_id
-
-def chunk_ids(mat_metadata, model, chunk_size: int):
-    aligned_volume = mat_metadata.get('aligned_volume')
-    session = sqlalchemy_cache.get(aligned_volume)
-
-    q = session.query(
-        model, func.row_number().over(order_by=model).label("row_count")
-    ).from_self(model)
-
-    if chunk_size > 1:
-        q = q.filter(text("row_count %% %d=1" % chunk_size))
-
-    chunks = [id for id, in q]
-
-    while chunks:
-        chunk_start = chunks.pop(0)
-        if chunks:
-            chunk_end = chunks[0]
-        else:
-            chunk_end = None
-        yield [chunk_start, chunk_end]
 
 
 @celery.task(name="process:get_annotations_with_missing_supervoxel_ids",
@@ -556,100 +476,3 @@ def collect_data(*args, **kwargs):
     return args, kwargs
 
 
-def create_segmentation_model(mat_metadata):
-    annotation_table_name = mat_metadata.get('annotation_table_name')
-    schema_type = mat_metadata.get("schema")
-    pcg_table_name = mat_metadata.get("pcg_table_name")
-
-    SegmentationModel = em_models.make_segmentation_model(annotation_table_name, schema_type, pcg_table_name)
-    return SegmentationModel
-
-def create_annotation_model(mat_metadata):
-    annotation_table_name = mat_metadata.get('annotation_table_name')
-    schema_type = mat_metadata.get("schema")
-
-    AnnotationModel = em_models.make_annotation_model(annotation_table_name, schema_type)
-    return AnnotationModel
-
-def get_geom_from_wkb(wkb):
-    wkb_element = to_shape(wkb)
-    if wkb_element.has_z:
-        return [int(wkb_element.xy[0][0]), int(wkb_element.xy[1][0]), int(wkb_element.z)]
-
-def get_query_columns_by_suffix(AnnotationModel, SegmentationModel, suffix):
-    seg_columns = [column.name for column in SegmentationModel.__table__.columns]
-    anno_columns = [column.name for column in AnnotationModel.__table__.columns]
-
-    matched_columns = set()
-    for column in seg_columns:
-        prefix = (column.split("_")[0])
-        for anno_col in anno_columns:
-            if anno_col.startswith(prefix):
-                matched_columns.add(anno_col)
-    matched_columns.remove('id')
-
-    supervoxel_columns =  [f"{col.rsplit('_', 1)[0]}_{suffix}" for col in matched_columns if col != 'annotation_id']
-    # # create model columns for querying
-    anno_model_cols = [getattr(AnnotationModel, name) for name in matched_columns]
-    anno_model_cols.append(AnnotationModel.id)
-    seg_model_cols = [getattr(SegmentationModel, name) for name in supervoxel_columns]
-
-    # add id columns to lookup
-    seg_model_cols.extend([SegmentationModel.id])
-    return anno_model_cols, seg_model_cols, supervoxel_columns
-
-
-def chunk_rows(data, chunksize: int=None):
-    if chunksize:
-        i = iter(data)
-        generator = (list(islice(i, chunksize)) for _ in repeat(None))
-    else:
-        generator = iter([data])
-    return takewhile(bool, generator)
-
-
-def create_sql_rows(session, data_dict: dict, model):
-    """Yields a dictionary if the record's id already exists, a row object 
-    otherwise.
-    
-    TODO: strip uneeded if else statements
-    """
-    ids = {item[0] for item in session.query(model.id)}
-    for data in data_dict:
-        is_row = hasattr(data, 'to_dict')
-        if is_row and data.get('id') in ids:
-            yield data.to_dict(), True
-        elif is_row:
-            yield data, False
-        elif data.get('id') in ids:
-            yield data, True
-        else:
-            yield model(**data), False
-
-def upsert(session, data, model, chunksize=None):
-    
-    for records in chunk_rows(data, chunksize):
-        resources = create_sql_rows(session, records, model)
-        sorted_resources = sorted(resources, key=itemgetter(1))
-        for key, group in groupby(sorted_resources, itemgetter(1)):
-            data = [g[0] for g in group]
-
-            if key:
-                session_upsert = partial(session.bulk_update_mappings, model)
-            else:
-                session_upsert = session.add_all
-            try:
-                session_upsert(data)
-                session.commit()
-            except IntegrityError:
-                session.rollback()
-                upsert(session, data, model)
-            except Exception as e:
-                session.rollback()
-                num_rows = len(data)
-
-                if num_rows > 1:
-                    upsert(session, data, model, num_rows // 2)
-                else:
-                    celery_logger.error(e)
-                    raise SQLAlchemyError
