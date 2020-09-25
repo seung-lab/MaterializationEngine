@@ -158,7 +158,7 @@ class LinkedAnnotations(Resource):
             for annotation in annotations:
                 db.update_linked_annotations(table_name,
                                              pcg_table_name,
-                                             annotations)
+                                             annotation)
 
         return f"Updated {len(data)} annotations", 200
 
