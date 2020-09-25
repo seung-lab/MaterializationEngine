@@ -29,7 +29,7 @@ from materializationengine.chunkedgraph_gateway import ChunkedGraphGateway
 from materializationengine.database import get_db, sqlalchemy_cache, create_session
 from materializationengine.errors import (AnnotationParseFailure, TaskFailure,
                                           WrongModelType)
-from materializationengine.shared_tasks import chunk_supervoxel_ids_task, query_id_range
+from materializationengine.shared_tasks import chunk_supervoxel_ids_task, query_id_range, fin
 from materializationengine.utils import (
     make_root_id_column_name,
     create_annotation_model,
