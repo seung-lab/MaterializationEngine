@@ -14,9 +14,8 @@ from flask_accepts import accepts, responds
 from emannotationschemas.models import format_version_db_uri
 from materializationengine.models import AnalysisTable, AnalysisVersion
 from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
-from materializationengine.extensions import create_session
 from materializationengine.views import get_datasets
-from materializationengine.database import get_db
+from materializationengine.database import get_db, create_session
 from materializationengine.info_client import get_aligned_volumes
 from middle_auth_client import auth_required, auth_requires_permission
 import requests
@@ -93,12 +92,13 @@ class CreateVersionedMaterializationResource(Resource):
             logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
 
 
-@mat_bp.route("/aligned_volumes")
+@mat_bp.route("/aligned_volume/<aligned_volume_name>")
 class DatasetResource(Resource):
     @auth_required
     @mat_bp.doc("get_aligned_volume_versions", security="apikey")
-    def get(self):
-        response = db.session.query(AnalysisVersion.dataset).distinct()
+    def get(self, aligned_volume_name: str):
+        db = get_db(aligned_volume_name)
+        response = db.session.query(AnalysisVersion.datastack).distinct()
         aligned_volumes = [r._asdict() for r in response]
         return aligned_volumes
 
@@ -108,8 +108,9 @@ class VersionResource(Resource):
     @mat_bp.doc("get_analysis_versions", security="apikey")
     def get(self, aligned_volume_name):
         check_aligned_volume(aligned_volume_name)
+        db = get_db(aligned_volume_name)
         response = (
-            db.session.query(AnalysisVersion).filter(AnalysisVersion.dataset == aligned_volume_name).all()
+            db.session.query(AnalysisVersion).filter(AnalysisVersion.datastack == aligned_volume_name).all()
         )
         schema = AnalysisVersionSchema(many=True)
         versions, error = schema.dump(response)
@@ -130,7 +131,7 @@ class TableResource(Resource):
             db.session.query(AnalysisTable)
             .filter(AnalysisTable.analysisversion)
             .filter(AnalysisVersion.version == version)
-            .filter(AnalysisVersion.dataset == aligned_volume_name)
+            .filter(AnalysisVersion.datastack == aligned_volume_name)
             .all()
         )
         schema = AnalysisTableSchema(many=True)
@@ -147,7 +148,6 @@ class AnnotationResource(Resource):
     @mat_bp.doc("get_top_materialized_annotations", security="apikey")
     def get(self, aligned_volume_name, version, tablename):
         check_aligned_volume(aligned_volume_name)
-        db = get_db()
         sql_uri = format_version_db_uri(db, aligned_volume_name, version)
         session, engine = create_session(sql_uri)
         metadata = MetaData()
