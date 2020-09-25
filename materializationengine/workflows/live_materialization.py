@@ -466,13 +466,4 @@ def update_metadata(self, status: dict, mat_metadata: dict):
     finally:
         session.close()
 
-@celery.task(name="process:fin", acks_late=True)
-def fin(*args, **kwargs):
-    return True
-
-
-@celery.task(name="process:collect_data", acks_late=True)
-def collect_data(*args, **kwargs):
-    return args, kwargs
-
 
