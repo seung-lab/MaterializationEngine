@@ -156,7 +156,7 @@ class AnnotationResource(Resource):
         check_aligned_volume(aligned_volume_name)
         sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
         sql_uri = make_url(f"{sql_base_uri}/{aligned_volume_name}")
-        session, engine - create_session(sql_uri)
+        session, engine = create_session(sql_uri)
         metadata = MetaData()
         try:
             annotation_table = Table(tablename, metadata, autoload=True, autoload_with=engine)
