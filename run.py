@@ -1,13 +1,13 @@
 # Run a test server.
 from werkzeug.serving import WSGIRequestHandler
 from materializationengine import create_app, create_celery
-from materializationengine.extensions import celery
+from materializationengine.celery_worker import celery_app
 import os
 
 HOME = os.path.expanduser("~")
 
 application = create_app()
-celery = create_celery(application, celery)
+celery = create_celery(application, celery_app)
 
 if __name__ == "__main__":
 
