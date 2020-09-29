@@ -35,7 +35,7 @@ celery_logger = get_task_logger(__name__)
 
 SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
 
-def frozen_materialization(datastack_info: dict, analysis_version: int = None):
+def versioned_materialization(datastack_info: dict):
     """Create a timelocked database of materialization annotations
     and asociated segmentation data.
 
@@ -57,13 +57,10 @@ def frozen_materialization(datastack_info: dict, analysis_version: int = None):
     aligned_volume : str
         [description]
     """
-
+    analysis_version = create_new_version.s(datastack_info)
     result = get_analysis_info.s(datastack_info, analysis_version).delay()
     mat_info = result.get()
 
-    analysisversion = create_new_version.s(mat_info)
-
-    mat_info = result.get()
     for mat_metadata in mat_info:
         if mat_metadata:
             result = chunk_supervoxel_ids_task.s(mat_metadata).delay()
@@ -82,13 +79,12 @@ def frozen_materialization(datastack_info: dict, analysis_version: int = None):
             )
 
             process_chunks_workflow.apply_async()
-    pass
+    
 
 @celery.task(name="process:create_new_version", bind=True)
-def create_new_version(self, mat_info: dict):
-    aligned_volume_name = mat_info.get('aligned_volume')
-    datastack = mat_info.get('datastack')
-    analysis_version = mat_info.get('analysis_version')
+def create_new_version(self, datastack_info: dict):
+    aligned_volume_name = datastack_info['aligned_volume']['name']
+    datastack = datastack_info.get('datastack')
     
     table_objects = [
         AnalysisVersion.__tablename__,
@@ -107,17 +103,14 @@ def create_new_version(self, mat_info: dict):
 
     session = sqlalchemy_cache.get(aligned_volume_name)
 
-    if analysis_version:
-        new_version_number = analysis_version
-    else:
-        top_version = (session.query(AnalysisVersion)
-                    .order_by(AnalysisVersion.version.desc())
-                    .first())
+    top_version = (session.query(AnalysisVersion)
+                .order_by(AnalysisVersion.version.desc())
+                .first())
 
-        if top_version is None:
-            new_version_number = 1
-        else:
-            new_version_number = top_version.version + 1
+    if top_version is None:
+        new_version_number = 1
+    else:
+        new_version_number = top_version.version + 1
     
     time_stamp = datetime.datetime.utcnow()
 
@@ -127,12 +120,10 @@ def create_new_version(self, mat_info: dict):
                                       valid=True)
     session.add(analysisversion)
     session.commit()
-    return analysisversion
-
+    return new_version_number
 
 @celery.task(name="process:get_analysis_info", bind=True)
-def get_analysis_info(self, datastack_info: dict,
-                            analysis_version: int=None) -> List[dict]:
+def get_analysis_info(self, datastack_info: dict, analysis_version: int) -> List[dict]:
     """Initialize materialization by an aligned volume name. Iterates thorugh all
     tables in a aligned volume database and gathers metadata for each table. The list
     of tables are passed to workers for materialization.
@@ -155,7 +146,7 @@ def get_analysis_info(self, datastack_info: dict,
     pcg_table_name = datastack_info['segmentation_source'].split("/")[-1]
     segmentation_source = datastack_info.get('segmentation_source')
     db = get_db(aligned_volume_name)
-    
+
     annotation_tables = db.get_valid_table_names()
     metadata = []
     for annotation_table in annotation_tables:
@@ -164,10 +155,10 @@ def get_analysis_info(self, datastack_info: dict,
             segmentation_table_name = build_segmentation_table_name(
                 annotation_table, pcg_table_name)
 
-            materialization_timestamp = datetime.datetime.utcnow()
+            materialization_time_stamp = datetime.datetime.utcnow()
 
             table_metadata = {
-                'datastack': datastack_info['datastack']['name'],
+                'datastack': datastack_info['datastack'],
                 'aligned_volume': str(aligned_volume_name),
                 'schema': db.get_table_schema(annotation_table),
                 'max_id': int(max_id),
@@ -175,7 +166,7 @@ def get_analysis_info(self, datastack_info: dict,
                 'annotation_table_name': annotation_table,
                 'pcg_table_name': pcg_table_name,
                 'segmentation_source': segmentation_source,
-                'materialization_timestamp': materialization_timestamp,
+                'materialization_time_stamp': materialization_time_stamp,
                 'analysis_version': analysis_version
             }
             metadata.append(table_metadata.copy())
@@ -202,12 +193,12 @@ def create_analysis_database(self, mat_metadata: dict) -> str:
 
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-    
-    engine = create_engine(sql_uri)
 
-    sql_base_uri = sql_uri.rpartition("/")[0]
     analysis_sql_uri = make_url(
         f"{sql_base_uri}/{aligned_volume}_v{analysis_version}")
+            
+    engine = create_engine(sql_uri)
+
 
     with engine.connect() as connection:
         connection.execute("commit")
@@ -261,7 +252,6 @@ def create_analysis_tables(self, mat_metadata: dict):
 
     aligned_volume = mat_metadata['aligned_volume']
     analysis_version = mat_metadata['analysis_version']
-    datastack = mat_metadata['datastack']
 
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
@@ -306,14 +296,6 @@ def create_analysis_tables(self, mat_metadata: dict):
 
                 creation_time = datetime.datetime.now()
 
-                analysis_version_dict = {
-                    "datastack": datastack,
-                    "version": analysis_version,
-                    "time_stamp": creation_time,
-                    "valid": True
-                }
-                analysis_version = AnalysisVersion(**analysis_version_dict)
-
                 analysis_table_dict = {
                     "aligned_volume": aligned_volume,
                     "schema": schema_name,
@@ -325,10 +307,7 @@ def create_analysis_tables(self, mat_metadata: dict):
                 analysis_table = AnalysisTable(**analysis_table_dict)
 
                 try:
-
-                    mat_session.add(analysis_version)
-                    mat_session.flush()
-                    analysis_table.analysisversion_id = analysis_version.id
+                    analysis_table.analysisversion_id = mat_metadata['analysis_version']
                     mat_session.add(analysis_table)
                     mat_session.commit()
                 except Exception as e:
