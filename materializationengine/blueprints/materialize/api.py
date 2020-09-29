@@ -29,7 +29,6 @@ from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy.exc import NoSuchTableError
 from sqlalchemy.engine.url import make_url
 
-SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
 
 
 __version__ = "0.2.35"
@@ -75,12 +74,12 @@ class RunMaterializeResource(Resource):
             logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
 
 
-@mat_bp.route("/test_materialize/<string:datastack_name>/<analysis_version>")
+@mat_bp.route("/test_materialize/<string:datastack_name>")
 class CreateVersionedMaterializationResource(Resource):
     @auth_required
     @mat_bp.doc("run versioned materialization", security="apikey")
-    def get(self, datastack_name: str, analysis_version: int):
-        from materializationengine.workflows.flat_materialization import frozen_materialization
+    def get(self, datastack_name: str):
+        from materializationengine.workflows.versioned_materialization import versioned_materialization
         INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
         url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{datastack_name}"
         try:
@@ -90,8 +89,8 @@ class CreateVersionedMaterializationResource(Resource):
             logging.info(url)
             datastack_info = r.json()
             datastack_info['datastack'] = datastack_name
-            frozen_materialization(datastack_info, analysis_version)
-            return f"Creating frozen database {datastack_name} version {analysis_version} ", 200
+            versioned_materialization(datastack_info)
+            return f"Creating versioned database: {datastack_name}", 200
         except requests.exceptions.RequestException as e:
             logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
 
@@ -155,6 +154,7 @@ class AnnotationResource(Resource):
     @mat_bp.doc("get_top_materialized_annotations", security="apikey")
     def get(self, aligned_volume_name, version, tablename):
         check_aligned_volume(aligned_volume_name)
+        SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
         sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
         sql_uri = make_url(f"{sql_base_uri}/{aligned_volume_name}")
         session, engine = create_session(sql_uri)
