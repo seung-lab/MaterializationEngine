@@ -57,9 +57,11 @@ def versioned_materialization(datastack_info: dict):
     aligned_volume : str
         [description]
     """
-    analysis_version = create_new_version.s(datastack_info)
-    result = get_analysis_info.s(datastack_info, analysis_version).delay()
-    mat_info = result.get()
+    setup_new_versioned_workflow = chain(
+        create_new_version.s(datastack_info),
+        get_analysis_info.s(datastack_info))
+    setup_results = setup_new_versioned_workflow.apply_async()
+    mat_info = setup_results.get()
 
     for mat_metadata in mat_info:
         if mat_metadata:
@@ -68,16 +70,13 @@ def versioned_materialization(datastack_info: dict):
 
             process_chunks_workflow = chain(
                 create_analysis_database.s(mat_metadata),
-                create_analysis_tables.s(mat_metadata),
+                create_analysis_tables.s(),
                 chord([
                     chain(
                         insert_annotation_data.s(chunk),
                     ) for chunk in supervoxel_chunks],
                     fin.si()),  # return here is required for chords
-                # final task which will process a return status/timing etc...
-                fin.si()
-            )
-
+                fin.si()) # final task which will process a return status/timing etc...
             process_chunks_workflow.apply_async()
     
 
@@ -123,7 +122,7 @@ def create_new_version(self, datastack_info: dict):
     return new_version_number
 
 @celery.task(name="process:get_analysis_info", bind=True)
-def get_analysis_info(self, datastack_info: dict, analysis_version: int) -> List[dict]:
+def get_analysis_info(self, analysis_version: int, datastack_info: dict) -> List[dict]:
     """Initialize materialization by an aligned volume name. Iterates thorugh all
     tables in a aligned volume database and gathers metadata for each table. The list
     of tables are passed to workers for materialization.
@@ -217,7 +216,7 @@ def create_analysis_database(self, mat_metadata: dict) -> str:
             )
             connection.execute(
                 f"CREATE DATABASE {analysis_sql_uri.database} \
-                                TEMPLATE template_postgis"
+                                TEMPLATE postgres"
             )
             result = connection.execute(
                 f"SELECT 1 FROM pg_catalog.pg_database \
@@ -258,16 +257,15 @@ def create_analysis_tables(self, mat_metadata: dict):
     
     anno_db = get_db(aligned_volume)
     tables = anno_db._get_all_tables()
-    sql_base_uri, analysis_sql_uri = create_analysis_sql_uri(
-        sql_uri, aligned_volume, analysis_version)
+    
+    analysis_sql_uri = create_analysis_sql_uri(
+        SQL_URI_CONFIG, aligned_volume, analysis_version)
     try:
         __, analysis_engine = create_session(analysis_sql_uri)
         mat_session, mat_engine = create_session(sql_uri)
         analysis_base = declarative_base(bind=analysis_engine)
     except Exception as e:
         raise e
-
-    analysis_tables = []
 
     for table in tables:
         # only create table if marked as valid in the metadata table
@@ -303,20 +301,20 @@ def create_analysis_tables(self, mat_metadata: dict):
                     "valid": True,
                     "created": creation_time
                 }
-
+                analysis_version = mat_session.query(AnalysisVersion).\
+                                    filter(AnalysisVersion==mat_metadata['analysis_version']).first()
                 analysis_table = AnalysisTable(**analysis_table_dict)
 
                 try:
-                    analysis_table.analysisversion_id = mat_metadata['analysis_version']
+                    analysis_table.analysisversion_id = analysis_version.id
                     mat_session.add(analysis_table)
                     mat_session.commit()
                 except Exception as e:
                     mat_session.rollback()
-                    logging.error(e)
+                    celery_logger.error(e)
                 finally:
-                    analysis_tables.append(table_name)
                     mat_session.close()
-                logging.info(
+                celery_logger.info(
                     f"Table: {table_name} created using {analysis_table} \
                             model at {creation_time}"
                 )
@@ -342,7 +340,7 @@ def insert_annotation_data(self, mat_metadata: dict, chunk: List[int]):
 
     AnnotationModel = create_annotation_model(mat_metadata)
     SegmentationModel = create_segmentation_model(mat_metadata)
-    analysis_table = get_analysis_table(sql_uri, aligned_volume, annotation_table_name)
+    analysis_table = get_analysis_table(aligned_volume, annotation_table_name, analysis_version)
     
     chunked_id_query = query_id_range(AnnotationModel.id, chunk[0], chunk[1])
   
@@ -362,7 +360,7 @@ def insert_annotation_data(self, mat_metadata: dict, chunk: List[int]):
         del annotation['superceded_id']
         annotations.append(annotation)
 
-    analysys_sql_uri = create_analysis_sql_uri(sql_uri, aligned_volume, analysis_version)
+    analysys_sql_uri = create_analysis_sql_uri(SQL_URI_CONFIG, aligned_volume, analysis_version)
     analysis_session, analysis_engine = create_session(analysys_sql_uri)      
 
     try:
@@ -384,13 +382,13 @@ def create_analysis_sql_uri(sql_uri: str, aligned_volume: str, mat_version: int)
     return analysis_sql_uri
 
 
-def get_analysis_table(sql_uri: str, aligned_volume: str, table_name: str, mat_version: int = 1):
+def get_analysis_table(aligned_volume: str, table_name: str, mat_version: int = 1):
 
     anno_db = get_db(aligned_volume)
     schema_name = anno_db.get_table_schema(table_name)
 
     analysis_sql_uri = create_analysis_sql_uri(
-        sql_uri, aligned_volume, mat_version)
+        SQL_URI_CONFIG, aligned_volume, mat_version)
     analysis_engine = create_engine(analysis_sql_uri)
 
     meta = MetaData()
