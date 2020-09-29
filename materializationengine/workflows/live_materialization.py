@@ -62,27 +62,26 @@ def start_materialization(aligned_volume_name: str, pcg_table_name: str, segment
 
     result = get_materialization_info.s(aligned_volume_name, pcg_table_name, segmentation_source).delay()
     mat_info = result.get()
+
     for mat_metadata in mat_info:
         if mat_metadata:
             result = chunk_supervoxel_ids_task.s(mat_metadata).delay()
             supervoxel_chunks = result.get()
 
             process_chunks_workflow = chain(
-                create_missing_segmentation_tables.s(mat_metadata),
+                create_missing_segmentation_table.s(mat_metadata),
                 chord([
                     chain(
                         get_annotations_with_missing_supervoxel_ids.s(chunk),
                         get_cloudvolume_supervoxel_ids.s(mat_metadata),
                         get_root_ids.s(mat_metadata),
                         update_segmentation_table.s(mat_metadata),
-                        update_metadata.s(mat_metadata)
                         ) for chunk in supervoxel_chunks],
                         fin.si()), # return here is required for chords
-                        fin.si() # final task which will process a return status/timing etc...
-                    )
+                        update_metadata.s(mat_metadata))  # final task which will process a return status/timing etc...
 
             process_chunks_workflow.apply_async()
-
+    
 
 @celery.task(name="process:get_materialization_info", bind=True)
 def get_materialization_info(self, aligned_volume: str,
@@ -121,7 +120,7 @@ def get_materialization_info(self, aligned_volume: str,
                 db.cached_session.close()
 
             last_updated_time_stamp = segmentation_metadata.get('last_updated', None)
-            materialization_timestamp = datetime.datetime.utcnow() 
+            materialization_time_stamp = datetime.datetime.utcnow() 
             
             table_metadata = {
                 'aligned_volume': str(aligned_volume),
@@ -133,16 +132,16 @@ def get_materialization_info(self, aligned_volume: str,
                 'segmentation_source': segmentation_source,
                 'coord_resolution': [4,4,40],
                 'last_updated_time_stamp': last_updated_time_stamp,
-                'materialization_time_stamp': materialization_timestamp
+                'materialization_time_stamp': materialization_time_stamp
             }
             metadata.append(table_metadata.copy())
     db.cached_session.close()   
     return metadata
 
 
-@celery.task(name='process:create_missing_segmentation_tables',
+@celery.task(name='process:create_missing_segmentation_table',
              bind=True)
-def create_missing_segmentation_tables(self, mat_metadata: dict) -> dict:
+def create_missing_segmentation_table(self, mat_metadata: dict) -> dict:
     """Create missing segmentation tables associated with an annotation table if it 
     does not already exist.
 
@@ -341,6 +340,7 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
     pcg_table_name = mat_metadata.get("pcg_table_name")
     last_updated_time_stamp = mat_metadata.get("last_updated_time_stamp")
     aligned_volume = mat_metadata.get("aligned_volume")
+    materialization_time_stamp = mat_metadata.get("materialization_time_stamp")
 
     supervoxel_df = pd.DataFrame(materialization_data, dtype=object)
     drop_col_names = list(
@@ -412,7 +412,7 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
             if 'supervoxel_id' in col_name:
                 root_id_name = col_name.replace('supervoxel_id', 'root_id')
                 data = missing_root_rows.loc[:, col_name]
-                root_id_array = np.squeeze(cg.get_roots(data.to_list()))
+                root_id_array = np.squeeze(cg.get_roots(data.to_list(), time_stamp=materialization_time_stamp))
                 root_ids_df.loc[data.index, root_id_name] = root_id_array
                 updated_rows += 1
 
@@ -452,8 +452,8 @@ def update_metadata(self, status: dict, mat_metadata: dict):
 
     session = sqlalchemy_cache.get(aligned_volume)
     
-    last_updated_time_stamp = mat_metadata['materialization_time_stamp']
-    last_updated_time_stamp = datetime.datetime.strptime(last_updated_time_stamp, '%Y-%m-%dT%H:%M:%S.%f')
+    materialization_time_stamp = mat_metadata['materialization_time_stamp']
+    last_updated_time_stamp = datetime.datetime.strptime(materialization_time_stamp, '%Y-%m-%dT%H:%M:%S.%f')
 
     try:
         seg_metadata = session.query(SegmentationMetadata).filter(
