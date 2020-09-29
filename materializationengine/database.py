@@ -4,9 +4,7 @@ from sqlalchemy.engine.url import make_url
 from sqlalchemy import create_engine, engine
 from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
-
-SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
-
+from functools import lru_cache
 
 cache = {}
 
@@ -37,6 +35,7 @@ class SqlAlchemyCache:
 
     def get(self, aligned_volume):
         if aligned_volume not in self._sessions:
+            SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
             sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
             sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
             self._engine = create_engine(sql_uri, pool_recycle=3600,
