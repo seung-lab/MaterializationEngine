@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 if [ "$DATABASE" = "postgres" ]
 then
@@ -13,7 +13,7 @@ fi
 
 psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<-EOSQL
 
-    CREATE ROLE postgres with SUPERUSER PASSWORD 'synapsedb';
+    CREATE ROLE postgres with SUPERUSER PASSWORD 'materialize';
 
 EOSQL
 exec "$@"
