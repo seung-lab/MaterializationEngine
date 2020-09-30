@@ -9,7 +9,7 @@ class AnalysisVersion(Base):
     __tablename__ = "analysisversion"
     id = Column(Integer, primary_key=True)
     datastack = Column(String(100), nullable=False)
-    version = Column(Integer, nullable=False, unique=True)
+    version = Column(Integer, nullable=False)
     time_stamp = Column(DateTime, nullable=False)
     valid = Column(Boolean)
 
