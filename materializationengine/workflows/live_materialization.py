@@ -414,7 +414,7 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
                 data = missing_root_rows.loc[:, col_name]
                 root_id_array = np.squeeze(cg.get_roots(data.to_list(), time_stamp=materialization_time_stamp))
                 root_ids_df.loc[data.index, root_id_name] = root_id_array
-                updated_rows += 1
+                updated_rows += len(root_id_array)
 
     if updated_rows == 0:
         self.request.callbacks = None
