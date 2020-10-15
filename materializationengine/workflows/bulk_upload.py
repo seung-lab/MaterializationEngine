@@ -49,9 +49,10 @@ def bulk_upload(bulk_upload_params: dict):
     result = create_chunks.s(bulk_file_info[0]).delay()
     bulk_upload_chunks = result.get()
     
+    create_tables.si(bulk_upload_params).delay()
+
     for chunk in bulk_upload_chunks:
             bulk_upload_workflow = chain(
-                create_tables.s(bulk_upload_params),
                 chord([
                     chain(
                         gcs_read_npy_chunk.s(file_metadata, chunk),
