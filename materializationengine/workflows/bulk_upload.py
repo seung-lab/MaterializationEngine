@@ -109,12 +109,13 @@ def create_chunks(self, bulk_upload_info: dict) -> List:
     
     if chunk_size <= 1:
         raise ValueError(f'Chunk size of {chunk_size}, must be larger than 1.')
-    
+    chunks = []
     for chunk_start in range(0, num_rows, chunk_size):        
         chunk_end = chunk_start + chunk_size - 1
         if chunk_end > num_rows:
             chunk_end = num_rows
-        yield [chunk_start, chunk_end - chunk_start]
+        chunks.append([chunk_start, chunk_end - chunk_start])
+    return chunks
 
 @celery.task(name="process:create_tables",
              bind=True,
