@@ -23,3 +23,4 @@ alembic==1.4.2
 celery==4.4.7
 cachetools==4.1.1
 gevent==20.6.2
+gcsfs==0.7.1
