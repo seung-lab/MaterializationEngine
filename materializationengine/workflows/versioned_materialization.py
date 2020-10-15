@@ -12,8 +12,6 @@ from emannotationschemas import models as em_models
 from emannotationschemas.flatten import create_flattened_schema
 from emannotationschemas.models import create_table_dict, format_version_db_uri
 from flask import current_app
-from materializationengine import materializationmanager as manager
-from materializationengine import materialize
 from materializationengine.celery_worker import celery
 from materializationengine.chunkedgraph_gateway import ChunkedGraphGateway
 from materializationengine.database import (create_session, get_db,
@@ -73,6 +71,9 @@ def versioned_materialization(datastack_info: dict):
                 create_analysis_tables.s(),
                 chord([
                     chain(
+                        # get_annotations_with_missing_supervoxel_ids.s(chunk),
+                        # get_cloudvolume_supervoxel_ids.s(mat_metadata),
+                        # get_root_ids.s(mat_metadata),
                         insert_annotation_data.s(chunk),
                     ) for chunk in supervoxel_chunks],
                     fin.si()),  # return here is required for chords
