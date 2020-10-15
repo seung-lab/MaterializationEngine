@@ -4,6 +4,7 @@ from celery import Celery
 celery_app = Celery(include=[
     'materializationengine.workflows.live_materialization',
     'materializationengine.workflows.versioned_materialization',
+    'materializationengine.workflows.bulk_upload',
     'materializationengine.shared_tasks',
     ])
 
