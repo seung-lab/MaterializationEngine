@@ -7,6 +7,9 @@ class AlignedVolumeNotFoundException(MaterializationEngineException):
     """ error raised when a aligned_volume is not found """
     pass
 
+class DataStackNotFoundException(MaterializationEngineException):
+    """ error raised when a datastack is not found """
+    pass
 
 class MaterializeAnnotationException(Exception):
     pass
