@@ -203,7 +203,6 @@ def gcs_read_npy_chunk(bulk_upload_info: dict, chunk: List):
         raise ValueError()
         
     fs = gcsfs.GCSFileSystem(project=project)
-    # try:
     with fs.open(filename, 'rb') as fhandle:
         major, minor = np.lib.format.read_magic(fhandle)
         shape, fortran, dtype = np.lib.format.read_array_header_1_0(fhandle)
