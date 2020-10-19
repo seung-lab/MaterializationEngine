@@ -95,11 +95,11 @@ class CreateVersionedMaterializationResource(Resource):
             logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
 
 
-@mat_bp.route("/bulk_upload/<string:datastack_name>/<string:table_name>/<string:pcg_table_name>")
+@mat_bp.route("/bulk_upload/<string:datastack_name>/<string:table_name>/<string:segmentation_source>/<string:description>")
 class BulkUploadResource(Resource):
     @auth_required
-    @mat_bp.doc("Bulk upload", security="apikey")
-    def get(self, datastack_name: str, table_name: str, pcg_table_name: str):
+    @mat_bp.doc("bulk upload", security="apikey")
+    def get(self, datastack_name: str, table_name: str, segmentation_source: str, description: str):
         from materializationengine.workflows.bulk_upload import bulk_upload
         INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
         url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{datastack_name}"
@@ -108,11 +108,16 @@ class BulkUploadResource(Resource):
             r = requests.get(url, headers=auth_header)
             r.raise_for_status()
             logging.info(url)
-            datastack_info = r.json()
-            datastack_info['datastack'] = datastack_name
-            datastack_info['annotation_table_name'] = table_name
-            datastack_info['pcg_table_name'] = pcg_table_name
-            bulk_upload(datastack_info)
+            bulk_upload_info = r.json()
+            
+            bulk_upload_info.update({
+
+                'datastack': datastack_name,
+                'description': description,
+                'annotation_table_name': table_name,
+                'segmentation_source': segmentation_source,
+            })
+            bulk_upload(bulk_upload_info)
             return f"Uploading : {datastack_name}", 200
         except requests.exceptions.RequestException as e:
             logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
