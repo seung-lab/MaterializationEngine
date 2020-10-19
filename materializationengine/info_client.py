@@ -45,8 +45,8 @@ def get_datastacks():
 
 @cachetools.func.ttl_cache(maxsize=10, ttl=5 * 60)
 def get_datastack_info(datastack_name):
-    infoservice = current_app.config["INFOSERVICE_ENDPOINT"]
-    url = os.path.join(infoservice, f"api/v2/datastack_name/{aligned_volume}")
+    server = current_app.config["GLOBAL_SERVER"]
+    auth = AuthClient(server_address=server)
     infoclient = InfoServiceClient(
         server_address=server,
         auth_client=auth,
