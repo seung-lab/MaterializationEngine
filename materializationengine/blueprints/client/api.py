@@ -4,8 +4,8 @@ from flask_accepts import accepts, responds
 
 from materializationengine.models import AnalysisTable, AnalysisVersion
 from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
-from materializationengine.info_client import get_aligned_volumes
-from materializationengine.database import get_db
+from materializationengine.info_client import get_aligned_volumes, get_datastacks, get_datastack_info
+from materializationengine.database import get_db, sqlalchemy_cache, create_session
 from materializationengine.blueprints.client.schemas import (
     Metadata,
     SegmentationTableSchema,
@@ -40,6 +40,77 @@ def check_aligned_volume(aligned_volume):
     aligned_volumes = get_aligned_volumes()
     if aligned_volume not in aligned_volumes:
         abort(400, f"aligned volume: {aligned_volume} not valid")
+
+def get_relevant_datastack_info(datastack_name):
+    ds_info = get_datastack_info(datastack_name=datastack_name)
+    seg_source = ds_info['segmentation_source']
+    pcg_table_name = seg_source.split('/')[-1]
+    aligned_volume_name = ds_info['aligned_volume']['name']
+    return aligned_volume_name, pcg_table_name
+
+@client_bp.route("/datastack/<string:datastack_name>/versions)
+class DatastackVersions(Resource):
+    @auth_required
+    @client_bp.doc("datastack_versions", security="apikey")
+    def get(self, datastack_name: str):
+        aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+        #db = get_db(aligned_volume_name)
+        session = sqlalchemy_cache.get(aligned_volume_name)
+
+        response = (
+            session.query(AnalysisVersion)
+            .filter(AnalysisVersion.datastack == datastack_name)
+            .all()
+        )
+
+        versions = [av.version for av in response]
+        return versions, 200
+
+@client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/tables)
+class FrozenTableVersions(Resource):
+    @auth_required
+    @client_bp.doc("get_frozen_tables", security="apikey")
+    def get(self, datastack_namn: str, version:int):
+        aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+        session = sqlalchemy_cache.get(aligned_volume_name)
+
+        av = (
+            session.query(AnalysisVersion)
+            .filter(AnalysisVersion.datastack_name == datastack_name)
+            .filter(AnalysisVersion.version == version)
+            .first_or_404()
+        )
+
+        response = (
+            session.query(AnalysisTable)
+            .filter(AnalysisTable.analysisversion_id == av.id)
+            .all()
+        )
+        return [r._asdict() for r in response], 200
+
+@client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/table/<string:table_name>/metadata)
+class FrozenTableMetadata(Resource):
+    @auth_required
+    @client_bp.doc("get_frozen_table_metadata", security="apikey")
+    def get(self, datastack_namn: str, version:int, table_name: str):
+        aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+        session = sqlalchemy_cache.get(aligned_volume_name)
+
+        av = (
+            session.query(AnalysisVersion)
+            .filter(AnalysisVersion.datastack_name == datastack_name)
+            .filter(AnalysisVersion.version == version)
+            .first_or_404()
+        )
+
+        response = (
+            session.query(AnalysisTable)
+            .filter(AnalysisTable.analysisversion_id == av.id)
+            .filter(AnalysisTable.table_name == table_name)
+            .first_or_404()
+        )
+        return response._asdict(), 200
+
 
 @client_bp.route("/aligned_volume/<string:aligned_volume_name>/table")
 class SegmentationTable(Resource):
