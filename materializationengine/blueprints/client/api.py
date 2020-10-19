@@ -48,7 +48,7 @@ def get_relevant_datastack_info(datastack_name):
     aligned_volume_name = ds_info['aligned_volume']['name']
     return aligned_volume_name, pcg_table_name
 
-@client_bp.route("/datastack/<string:datastack_name>/versions)
+@client_bp.route("/datastack/<string:datastack_name>/versions")
 class DatastackVersions(Resource):
     @auth_required
     @client_bp.doc("datastack_versions", security="apikey")
@@ -66,17 +66,17 @@ class DatastackVersions(Resource):
         versions = [av.version for av in response]
         return versions, 200
 
-@client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/tables)
+@client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/tables")
 class FrozenTableVersions(Resource):
     @auth_required
     @client_bp.doc("get_frozen_tables", security="apikey")
-    def get(self, datastack_namn: str, version:int):
+    def get(self, datastack_name: str, version:int):
         aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
         session = sqlalchemy_cache.get(aligned_volume_name)
 
         av = (
             session.query(AnalysisVersion)
-            .filter(AnalysisVersion.datastack_name == datastack_name)
+            .filter(AnalysisVersion.datastack == datastack_name)
             .filter(AnalysisVersion.version == version)
             .first_or_404()
         )
@@ -88,17 +88,17 @@ class FrozenTableVersions(Resource):
         )
         return [r._asdict() for r in response], 200
 
-@client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/table/<string:table_name>/metadata)
+@client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/table/<string:table_name>/metadata")
 class FrozenTableMetadata(Resource):
     @auth_required
     @client_bp.doc("get_frozen_table_metadata", security="apikey")
-    def get(self, datastack_namn: str, version:int, table_name: str):
+    def get(self, datastack_name: str, version:int, table_name: str):
         aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
         session = sqlalchemy_cache.get(aligned_volume_name)
 
         av = (
             session.query(AnalysisVersion)
-            .filter(AnalysisVersion.datastack_name == datastack_name)
+            .filter(AnalysisVersion.datastack== datastack_name)
             .filter(AnalysisVersion.version == version)
             .first_or_404()
         )
