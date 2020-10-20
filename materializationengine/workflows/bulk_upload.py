@@ -105,7 +105,7 @@ def get_file_info(self, bulk_upload_params: dict) -> dict:
 @celery.task(name="process:create_chunks", bind=True)
 def create_chunks(self, bulk_upload_info: dict) -> List:   
     num_rows = bulk_upload_info['num_rows']
-    chunk_size = bulk_upload_info.get('chunk_size', 1000)
+    chunk_size = bulk_upload_info.get('chunk_size', 100_000)
     chunks = []
     if chunk_size <= 1:
         raise ValueError(f'Chunk size of {chunk_size}, must be larger than 1.')
@@ -296,7 +296,7 @@ def split_annotation_data(serialized_data, schema):
 def upload_data(data: List, bulk_upload_info: dict):
 
     aligned_volume = bulk_upload_info["aligned_volume"]
-    celery_logger.info(f"............................METADATA {bulk_upload_info}")
+    
     model_data = {
         "annotation_table_name": bulk_upload_info['annotation_table_name'],
         "schema": bulk_upload_info['schema'],
