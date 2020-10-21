@@ -176,6 +176,7 @@ def create_tables(self, bulk_upload_params: dict):
              bind=True,
              autoretry_for=(Exception,),
              max_retries=3,
+             acks_late=True,
              ignore_results=True,
              store_errors_even_if_ignored=True)  
 def bulk_upload_task(self, bulk_upload_info: dict, chunk: List):
