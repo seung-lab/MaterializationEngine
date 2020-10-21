@@ -55,6 +55,22 @@ def bulk_upload(bulk_upload_params: dict):
         bulk_file_info, chunk) for chunk in bulk_upload_chunks)
     bulk_upload_workflow.apply_async()
 
+def insert_missing_data(bulk_upload_params: dict):
+    bulk_upload_params.update({
+        "project": "gs://allen-minnie-phase3",
+        "file_path": "minniephase3-synapses",
+        "schema": "synapse"
+    })
+    bulk_upload_chunks = bulk_upload_params["chunks"]
+
+    get_file_data = get_file_info.s(bulk_upload_params)
+    file_results = get_file_data.apply_async()
+    bulk_file_info = file_results.get()
+        
+    bulk_upload_workflow = group(bulk_upload_task.s(
+        bulk_file_info, chunk) for chunk in bulk_upload_chunks)
+    bulk_upload_workflow.apply_async()
+
 COLUMNS = {
     "cleft_ids": "id",
     "presyn_coords": "pre_pt_position",
