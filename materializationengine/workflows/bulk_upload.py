@@ -310,12 +310,10 @@ def upload_data(data: List, bulk_upload_info: dict):
     engine = sqlalchemy_cache.engine
     
     try:
-        engine.execute(AnnotationModel.__table__.insert(), data[0])
-        engine.execute(SegmentationModel.__table__.insert(), data[1])
-        session.commit()
+        with engine.begin() as connection:
+            connection.execute(AnnotationModel.__table__.insert(), data[0])
+            connection.execute(SegmentationModel.__table__.insert(), data[1])
     except Exception as e:
         celery_logger.error(f"ERROR: {e}")
-        session.rollback()
     finally:
-        session.close()
-    
+        engine.dispose()
