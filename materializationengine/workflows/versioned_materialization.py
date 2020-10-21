@@ -326,6 +326,7 @@ def create_analysis_tables(self, mat_metadata: dict):
 
 @celery.task(name="process:insert_annotation_data",
              bind=True,
+             acks_late=True,
              autoretry_for=(Exception,),
              max_retries=3)
 def insert_annotation_data(self, mat_metadata: dict, chunk: List[int]):
