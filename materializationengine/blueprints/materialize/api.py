@@ -151,7 +151,7 @@ class BulkUploadResource(Resource):
             bulk_upload_info = r.json()
             
             bulk_upload_info.update({
-                'columns': args['column_mapping'],
+                'column_mapping': args['column_mapping'],
                 'project': args['project'],
                 'file_path': args['file_path'],
                 'schema': args['schema'],
@@ -195,7 +195,7 @@ class InsertMissingChunks(Resource):
             bulk_upload_info = r.json()
             bulk_upload_info.update({
                 'chunks': args['chunks'],
-                'columns': args['column_mapping'],
+                'column_mapping': args['column_mapping'],
                 'project': args['project'],
                 'file_path': args['file_path'],
                 'schema': args['schema'],
