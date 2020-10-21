@@ -188,6 +188,7 @@ def create_missing_segmentation_table(self, mat_metadata: dict) -> dict:
 @celery.task(name="process:get_annotations_with_missing_supervoxel_ids",
              bind=True,
              autoretry_for=(Exception,),
+             acks_late=True,
              max_retries=3)
 def get_annotations_with_missing_supervoxel_ids(self, mat_metadata: dict,
                                                       chunk: List[int]) -> dict:
@@ -253,6 +254,7 @@ def get_annotations_with_missing_supervoxel_ids(self, mat_metadata: dict,
 
 @celery.task(name="process:get_cloudvolume_supervoxel_ids",
              bind=True,
+             acks_late=True,
              autoretry_for=(Exception,),
              max_retries=3)
 def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
@@ -292,6 +294,7 @@ def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, mat_metadat
 
 @celery.task(name="process:get_sql_supervoxel_ids",
              bind=True,
+             acks_late=True,
              autoretry_for=(Exception,),
              max_retries=3)
 def get_sql_supervoxel_ids(self, chunks: List[int], mat_metadata: dict) -> List[int]:
@@ -334,6 +337,7 @@ def get_sql_supervoxel_ids(self, chunks: List[int], mat_metadata: dict) -> List[
 
 @celery.task(name="process:get_root_ids",
              bind=True,
+             acks_late=True,
              autoretry_for=(SQLAlchemyError,),
              max_retries=3)
 def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
@@ -424,7 +428,10 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
 
 
 @celery.task(name="process:update_segmentation_table",
-             bind=True)
+             acks_late=True,
+             bind=True,
+             autoretry_for=(SQLAlchemyError,),
+             max_retries=3)
 def update_segmentation_table(self, materialization_data: dict, mat_metadata: dict) -> dict:
     
     if not materialization_data:
@@ -440,10 +447,12 @@ def update_segmentation_table(self, materialization_data: dict, mat_metadata: di
         session.close()
         return {'Status': f'Upsert suceeded at {upsert_time_stamp}'}
     except SQLAlchemyError as e:
-        raise e
+        raise self.retry(exc=e, countdown=3)
+
 
 @celery.task(name="process:update_metadata",
              bind=True,
+             acks_late=True,
              autoretry_for=(Exception,),
              max_retries=3)
 def update_metadata(self, status: dict, mat_metadata: dict):
