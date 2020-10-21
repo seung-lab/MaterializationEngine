@@ -37,11 +37,7 @@ celery_logger = get_task_logger(__name__)
 SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
 
 def bulk_upload(bulk_upload_params: dict):
-    bulk_upload_params.update({
-        "project": "gs://allen-minnie-phase3",
-        "file_path": "minniephase3-synapses",
-        "schema": "synapse"
-    })
+
     get_file_data = get_file_info.s(bulk_upload_params)
     file_results = get_file_data.apply_async()
     bulk_file_info = file_results.get()
@@ -56,11 +52,7 @@ def bulk_upload(bulk_upload_params: dict):
     bulk_upload_workflow.apply_async()
 
 def insert_missing_data(bulk_upload_params: dict):
-    bulk_upload_params.update({
-        "project": "gs://allen-minnie-phase3",
-        "file_path": "minniephase3-synapses",
-        "schema": "synapse"
-    })
+
     bulk_upload_chunks = bulk_upload_params["chunks"]
 
     get_file_data = get_file_info.s(bulk_upload_params)
@@ -70,17 +62,6 @@ def insert_missing_data(bulk_upload_params: dict):
     bulk_upload_workflow = group(bulk_upload_task.s(
         bulk_file_info, chunk) for chunk in bulk_upload_chunks)
     bulk_upload_workflow.apply_async()
-
-COLUMNS = {
-    "cleft_ids": "id",
-    "presyn_coords": "pre_pt_position",
-    "center_coords": "ctr_pt_position",
-    "postsyn_coords": "post_pt_position",
-    "sizes": "size",
-    "sv_ids_ordered": ["pre_pt_supervoxel_id", "post_pt_supervoxel_id"],
-    "root_ids_ordered": ["pre_pt_root_id", "post_pt_root_id"],        
-}
-
 
 @celery.task(name="process:get_file_info",
              bind=True,
@@ -260,8 +241,10 @@ def gcs_read_npy_chunk(bulk_upload_info: dict, chunk: List):
 
 def parse_data(data: List, bulk_upload_info: dict):
     data_type = bulk_upload_info['data_type']
-    if data_type in COLUMNS:
-        data_columns = COLUMNS[data_type]
+    column_mapping = bulk_upload_info['column_mapping']
+
+    if data_type in column_mapping:
+        data_columns = column_mapping[data_type]
        
     if not isinstance(data_columns, list):
         data = {data_columns: data}
