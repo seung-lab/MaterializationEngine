@@ -63,8 +63,7 @@ def versioned_materialization(datastack_info: dict):
 
     for mat_metadata in mat_info:
         if mat_metadata:
-            result = chunk_supervoxel_ids_task.s(mat_metadata).delay()
-            supervoxel_chunks = result.get()
+            supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
 
             process_chunks_workflow = chain(
                 create_analysis_database.s(mat_metadata),
