@@ -1,5 +1,6 @@
 import datetime
 import logging
+import time
 from copy import deepcopy
 from functools import lru_cache, partial
 from itertools import groupby, islice, repeat, takewhile
@@ -11,7 +12,24 @@ import numpy as np
 import pandas as pd
 from celery import Task, chain, chord, chunks, group, subtask
 from celery.utils.log import get_task_logger
+from dynamicannotationdb.key_utils import build_segmentation_table_name
+from dynamicannotationdb.models import SegmentationMetadata
+from emannotationschemas import models as em_models
 from flask import current_app
+from materializationengine.celery_worker import celery
+from materializationengine.chunkedgraph_gateway import ChunkedGraphGateway
+from materializationengine.database import (create_session, get_db,
+                                            sqlalchemy_cache)
+from materializationengine.errors import (AnnotationParseFailure, TaskFailure,
+                                          WrongModelType)
+from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
+                                                query_id_range)
+from materializationengine.upsert import upsert
+from materializationengine.utils import (create_annotation_model,
+                                         create_segmentation_model,
+                                         get_geom_from_wkb,
+                                         get_query_columns_by_suffix,
+                                         make_root_id_column_name)
 from sqlalchemy import MetaData, and_, create_engine, func, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -21,26 +39,13 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.pool import NullPool
 from sqlalchemy.sql import or_
 
-from dynamicannotationdb.key_utils import build_segmentation_table_name
-from dynamicannotationdb.models import SegmentationMetadata
-from emannotationschemas import models as em_models
-from materializationengine.celery_worker import celery
-from materializationengine.chunkedgraph_gateway import ChunkedGraphGateway
-from materializationengine.database import get_db, sqlalchemy_cache, create_session
-from materializationengine.errors import (AnnotationParseFailure, TaskFailure,
-                                          WrongModelType)
-from materializationengine.shared_tasks import chunk_supervoxel_ids_task, query_id_range, fin
-from materializationengine.utils import (
-    make_root_id_column_name,
-    create_annotation_model,
-    create_segmentation_model,
-    get_query_columns_by_suffix,
-    get_geom_from_wkb)
-from materializationengine.upsert import upsert
-
 celery_logger = get_task_logger(__name__)
 
-def start_materialization(aligned_volume_name: str, pcg_table_name: str, segmentation_source: dict):
+
+@celery.task(name="process:start_materialization",
+             acks_late=True,
+             bind=True)
+def start_materialization(self, aligned_volume_name: str, pcg_table_name: str, segmentation_source: dict):
     """Base live materialization
 
     Workflow paths:
@@ -59,34 +64,46 @@ def start_materialization(aligned_volume_name: str, pcg_table_name: str, segment
     segmentation_source : dict
         [description]
     """
-
-    result = get_materialization_info.s(aligned_volume_name, pcg_table_name, segmentation_source).delay()
-    mat_info = result.get()
+    mat_info = get_materialization_info(aligned_volume_name, pcg_table_name, segmentation_source)
 
     for mat_metadata in mat_info:
         if mat_metadata:
-            result = chunk_supervoxel_ids_task.s(mat_metadata).delay()
-            supervoxel_chunks = result.get()
-
+            supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
             process_chunks_workflow = chain(
                 create_missing_segmentation_table.s(mat_metadata),
                 chord([
                     chain(
-                        get_annotations_with_missing_supervoxel_ids.s(chunk),
-                        get_cloudvolume_supervoxel_ids.s(mat_metadata),
-                        get_root_ids.s(mat_metadata),
-                        update_segmentation_table.s(mat_metadata),
+                        live_update_task.s(chunk),
                         ) for chunk in supervoxel_chunks],
                         fin.si()), # return here is required for chords
                         update_metadata.s(mat_metadata))  # final task which will process a return status/timing etc...
 
             process_chunks_workflow.apply_async()
-    
 
-@celery.task(name="process:get_materialization_info", bind=True)
-def get_materialization_info(self, aligned_volume: str,
-                                   pcg_table_name: str,
-                                   segmentation_source: str) -> List[dict]:
+          
+@celery.task(name="process:live_update_task",
+             acks_late=True,
+             bind=True,
+             autoretry_for=(Exception,),
+             max_retries=6)
+def live_update_task(self, mat_metadata, chunk):
+    try:
+        start_time = time.time()
+        missing_data = get_annotations_with_missing_supervoxel_ids(mat_metadata, chunk)
+        supervoxel_data = get_cloudvolume_supervoxel_ids(missing_data, mat_metadata)
+        root_id_data = get_root_ids(supervoxel_data, mat_metadata)
+        result = update_segmentation_table(root_id_data, mat_metadata)
+        celery_logger.info(result)
+        run_time = time.time() - start_time
+        table_name = mat_metadata["annotation_table_name"]
+    except Exception as e:
+        celery_logger.error(e)
+        raise self.retry(exc=e, countdown=3)        
+    return {"Table name": f"{table_name}", "Run time": f"{run_time}"}
+
+def get_materialization_info(aligned_volume: str,
+                             pcg_table_name: str,
+                             segmentation_source: str) -> List[dict]:
     """Initialize materialization by an aligned volume name. Iterates thorugh all
     tables in a aligned volume database and gathers metadata for each table. The list
     of tables are passed to workers for materialization.
@@ -132,8 +149,13 @@ def get_materialization_info(self, aligned_volume: str,
                 'segmentation_source': segmentation_source,
                 'coord_resolution': [4,4,40],
                 'last_updated_time_stamp': last_updated_time_stamp,
-                'materialization_time_stamp': materialization_time_stamp
+                'materialization_time_stamp': materialization_time_stamp,
             }
+            if table_metadata["schema"] == "synapse":
+                table_metadata.update({
+                    'chunk_size': 20000
+                    })
+
             metadata.append(table_metadata.copy())
     db.cached_session.close()   
     return metadata
@@ -185,13 +207,8 @@ def create_missing_segmentation_table(self, mat_metadata: dict) -> dict:
     return mat_metadata
 
 
-@celery.task(name="process:get_annotations_with_missing_supervoxel_ids",
-             bind=True,
-             autoretry_for=(Exception,),
-             acks_late=True,
-             max_retries=3)
-def get_annotations_with_missing_supervoxel_ids(self, mat_metadata: dict,
-                                                      chunk: List[int]) -> dict:
+def get_annotations_with_missing_supervoxel_ids(mat_metadata: dict,
+                                                chunk: List[int]) -> dict:
     """Get list of valid annotation and their ids to lookup existing supervoxel ids. If there
     are missing supervoxels they will be set as None for cloudvolume lookup.
 
@@ -229,10 +246,10 @@ def get_annotations_with_missing_supervoxel_ids(self, mat_metadata: dict,
         session.close()
     except SQLAlchemyError as e:
         session.rollback()
-        raise self.retry(exc=e, countdown=3)
+        celery_logger.error(e)
 
     if not anno_ids:
-        self.request.callbacks = None
+        return
 
     wkb_data = annotation_dataframe.loc[:, annotation_dataframe.columns.str.endswith("position")]
 
@@ -252,12 +269,8 @@ def get_annotations_with_missing_supervoxel_ids(self, mat_metadata: dict,
         merged_dataframe = pd.concat((segmentation_dataframe, annotation_dataframe), axis=1)
     return merged_dataframe.to_dict(orient='list')
 
-@celery.task(name="process:get_cloudvolume_supervoxel_ids",
-             bind=True,
-             acks_late=True,
-             autoretry_for=(Exception,),
-             max_retries=3)
-def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
+
+def get_cloudvolume_supervoxel_ids(materialization_data: dict, mat_metadata: dict) -> dict:
     """Lookup missing supervoxel ids.
 
     Parameters
@@ -291,13 +304,7 @@ def get_cloudvolume_supervoxel_ids(self, materialization_data: dict, mat_metadat
     return mat_df.to_dict(orient='list')
 
 
-
-@celery.task(name="process:get_sql_supervoxel_ids",
-             bind=True,
-             acks_late=True,
-             autoretry_for=(Exception,),
-             max_retries=3)
-def get_sql_supervoxel_ids(self, chunks: List[int], mat_metadata: dict) -> List[int]:
+def get_sql_supervoxel_ids(chunks: List[int], mat_metadata: dict) -> List[int]:
     """Iterates over columns with 'supervoxel_id' present in the name and
     returns supervoxel ids between start and stop ids.
 
@@ -332,20 +339,24 @@ def get_sql_supervoxel_ids(self, chunks: List[int], mat_metadata: dict) -> List[
         session.close()
         return supervoxel_id_data
     except Exception as e:
-        raise self.retry(exc=e, countdown=3)
+        celery_logger.error(e)
 
 
-@celery.task(name="process:get_root_ids",
-             bind=True,
-             acks_late=True,
-             autoretry_for=(SQLAlchemyError,),
-             max_retries=3)
-def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
+def get_root_ids(materialization_data: dict, mat_metadata: dict) -> dict:
+    """Get root ids
+
+    Args:
+        materialization_data (dict): supervoxel data for root_id lookup
+        mat_metadata (dict): Materialization metadata
+
+    Returns:
+        dict: root_ids to be inserted into db
+    """
     pcg_table_name = mat_metadata.get("pcg_table_name")
     last_updated_time_stamp = mat_metadata.get("last_updated_time_stamp")
     aligned_volume = mat_metadata.get("aligned_volume")
-    materialization_time_stamp = mat_metadata.get("materialization_time_stamp")
-
+    materialization_time_stamp = datetime.datetime.strptime(
+        mat_metadata.get("materialization_time_stamp"), '%Y-%m-%dT%H:%M:%S.%f')
     supervoxel_df = pd.DataFrame(materialization_data, dtype=object)
     drop_col_names = list(
         supervoxel_df.loc[:, supervoxel_df.columns.str.endswith("position")])
@@ -366,7 +377,7 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
     except SQLAlchemyError as e:
         session.rollback()
         current_root_ids = []
-        raise self.retry(exc=e, countdown=3)
+        celery_logger.error(e)
     finally:
         session.close()
 
@@ -394,7 +405,13 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
 
     # lookup expired roots
     if last_updated_time_stamp:
-        last_updated_time_stamp = datetime.datetime.strptime(last_updated_time_stamp, '%Y-%m-%dT%H:%M:%S.%f')
+        try:
+            ts_format = "%Y-%m-%dT%H:%M:%S.%f"
+            last_updated_time_stamp = datetime.datetime.strptime(last_updated_time_stamp, ts_format)
+        except:
+            ts_format = '%Y-%m-%d %H:%M:%S.%f'
+            last_updated_time_stamp = datetime.datetime.strptime(last_updated_time_stamp, ts_format)
+
         # get time stamp from 5 mins ago
         time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
         old_roots, new_roots = cg.get_proofread_root_ids(
@@ -418,21 +435,15 @@ def get_root_ids(self, materialization_data: dict, mat_metadata: dict) -> dict:
                 data = missing_root_rows.loc[:, col_name]
                 root_id_array = np.squeeze(cg.get_roots(data.to_list(), time_stamp=materialization_time_stamp))
                 root_ids_df.loc[data.index, root_id_name] = root_id_array
-                updated_rows += len(data)
+                updated_rows += 1
 
     if updated_rows == 0:
-        self.request.callbacks = None
         return
         
     return root_ids_df.to_dict(orient='records')
 
 
-@celery.task(name="process:update_segmentation_table",
-             acks_late=True,
-             bind=True,
-             autoretry_for=(SQLAlchemyError,),
-             max_retries=3)
-def update_segmentation_table(self, materialization_data: dict, mat_metadata: dict) -> dict:
+def update_segmentation_table(materialization_data: dict, mat_metadata: dict) -> dict:
     
     if not materialization_data:
         return None
@@ -447,7 +458,7 @@ def update_segmentation_table(self, materialization_data: dict, mat_metadata: di
         session.close()
         return {'Status': f'Upsert suceeded at {upsert_time_stamp}'}
     except SQLAlchemyError as e:
-        raise self.retry(exc=e, countdown=3)
+        celery_logger.error(e)
 
 
 @celery.task(name="process:update_metadata",
@@ -474,5 +485,5 @@ def update_metadata(self, status: dict, mat_metadata: dict):
         session.rollback()
     finally:
         session.close()
-
+    return {f"Table: {segmentation_table_name}": f"Time stamp {materialization_time_stamp}"}
 
