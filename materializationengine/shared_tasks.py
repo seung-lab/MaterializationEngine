@@ -12,16 +12,14 @@ from materializationengine.utils import create_annotation_model
 ROW_CHUNK_SIZE = current_app.config["MATERIALIZATION_ROW_CHUNK_SIZE"]
 
 
-@celery.task(name="process:chunk_supervoxel_ids_task", bind=True)
-def chunk_supervoxel_ids_task(self, mat_metadata: dict, chunk_size: int = None) -> List[List]:
+# @celery.task(name="process:chunk_supervoxel_ids_task", bind=True, acks_late=True)
+def chunk_supervoxel_ids_task(mat_metadata: dict) -> List[List]:
     """Creates list of chunks with start:end index for chunking queries for materialziation.
 
     Parameters
     ----------
     mat_metadata : dict
         Materialization metadata
-    block_size : int, optional
-        [description], by default 2500
 
     Returns
     -------
@@ -29,7 +27,8 @@ def chunk_supervoxel_ids_task(self, mat_metadata: dict, chunk_size: int = None) 
         list of list containg start and end indices
     """
     AnnotationModel = create_annotation_model(mat_metadata)
-
+    chunk_size = mat_metadata.get('chunk_size', None)
+    
     if not chunk_size:
         chunk_size = ROW_CHUNK_SIZE
 
