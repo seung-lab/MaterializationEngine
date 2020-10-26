@@ -152,7 +152,7 @@ class VersionResource(Resource):
             logging.error(error)
             return abort(404)
 
-@mat_bp.route("/aligned_volumes/<aligned_volume_name>/<version>")
+@mat_bp.route("/aligned_volumes/<aligned_volume_name>/version/<version>")
 class TableResource(Resource):
     @auth_required
     @mat_bp.doc("get_all_tables", security="apikey")
@@ -175,7 +175,7 @@ class TableResource(Resource):
             logging.error(error)
             return abort(404)
 
-@mat_bp.route("/aligned_volumes/<aligned_volume_name>/<version>/<tablename>")
+@mat_bp.route("/aligned_volumes/<aligned_volume_name>/version/<version>/tablename/<tablename>")
 class AnnotationResource(Resource):
     @auth_required
     @mat_bp.doc("get_top_materialized_annotations", security="apikey")

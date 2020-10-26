@@ -9,6 +9,7 @@ from materializationengine.database import get_db, sqlalchemy_cache, create_sess
 from materializationengine.blueprints.client.schemas import (
     Metadata,
     SegmentationTableSchema,
+    SimpleQuerySchema,
     CreateTableSchema,
     PostPutAnnotationSchema,
     GetDeleteAnnotationSchema,
@@ -74,15 +75,13 @@ class FrozenTableVersions(Resource):
         aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
         session = sqlalchemy_cache.get(aligned_volume_name)
 
-        av = (
-            session.query(AnalysisVersion)
-            .filter(AnalysisVersion.datastack == datastack_name)
+        av = (AnalysisVersion.query
             .filter(AnalysisVersion.version == version)
             .first_or_404()
         )
 
         response = (
-            session.query(AnalysisTable)
+            AnalysisTable.query
             .filter(AnalysisTable.analysisversion_id == av.id)
             .all()
         )
@@ -111,6 +110,82 @@ class FrozenTableMetadata(Resource):
         )
         return response._asdict(), 200
 
+
+def specific_query(tables, filter_in_dict={}, filter_notin_dict={},
+                       filter_equal_dict = {},
+                       select_columns=None):
+        """ Allows a more narrow query without requiring knowledge about the
+            underlying data structures 
+
+        Parameters
+        ----------
+        tables: list of lists
+            standard: list of one entry: table_name of table that one wants to
+                      query
+            join: list of two lists: first entries are table names, second
+                                     entries are the columns used for the join
+        filter_in_dict: dict of dicts
+            outer layer: keys are table names
+            inner layer: keys are column names, values are entries to filter by
+        filter_notin_dict: dict of dicts
+            inverse to filter_in_dict
+        select_columns: list of str
+
+        Returns
+        -------
+        sqlalchemy query object:
+        """
+        tables = [[table] if not isinstance(table, list) else table
+                  for table in tables]
+        query_args = [self.model(table[0]) for table in tables]
+
+        if len(tables) == 2:
+            join_args = (self.model(tables[1][0]),
+                         self.model(tables[1][0]).__dict__[tables[1][1]] ==
+                         self.model(tables[0][0]).__dict__[tables[0][1]])
+        elif len(tables) > 2:
+            raise Exception("Currently, only single joins are supported")
+        else:
+            join_args = None
+
+        filter_args = []
+
+        for filter_table, filter_table_dict in filter_in_dict.items():
+            for column_name in filter_table_dict.keys():
+                filter_values = filter_table_dict[column_name]
+                filter_values = np.array(filter_values, dtype="O")
+
+                filter_args.append((self.model(filter_table).__dict__[column_name].
+                                    in_(filter_values), ))
+
+        for filter_table, filter_table_dict in filter_notin_dict.items():
+            for column_name in filter_table_dict.keys():
+                filter_values = filter_table_dict[column_name]
+                filter_values = np.array(filter_values, dtype="O")
+
+                filter_args.append((sqlalchemy.not_(self.model(filter_table).__dict__[column_name].
+                                                    in_(filter_values)), ))
+        
+        for filter_table, filter_table_dict in filter_equal_dict.items():
+            for column_name in filter_table_dict.keys():
+                filter_value = filter_table_dict[column_name]
+                filter_args.append((self.model(filter_table).__dict__[column_name]==filter_value, ))
+
+        return self._query(query_args=query_args, filter_args=filter_args,
+                           join_args=join_args, select_columns=select_columns)
+
+
+@client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/table/<string:table_name>/query")
+class FrozenTableQuery(Resource):
+@auth_required
+@client_bp.doc("simple_query", security="apikey")
+@accepts("SimpleQuerySchema", schema=SimpleQuerySchema, api=client_bp)
+def post(self, datastack_name, version, table_name):
+    aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+    session = sqlalchemy_cache.get(aligned_volume_name)
+    data = request.parsed_obj
+
+    
 
 @client_bp.route("/aligned_volume/<string:aligned_volume_name>/table")
 class SegmentationTable(Resource):
