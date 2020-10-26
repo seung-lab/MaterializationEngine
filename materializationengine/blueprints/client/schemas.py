@@ -30,3 +30,12 @@ class PostPutAnnotationSchema(SegmentationInfoSchema):
 class SegmentationDataSchema(Schema):
     pcg_table_name = fields.Str(required=True)
     segmentations = fields.List(fields.Dict, required=True)
+
+
+
+class SimpleQuerySchema(Schema):
+    filter_in_dict = fields.Dict()
+    filter_out_dict = fields.Dict()
+    filter_equal_dict = fields.Dict()
+    select_columns = fields.List(fields.Str)
+    offset = fields.Integer()
