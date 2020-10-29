@@ -75,7 +75,7 @@ class RunMaterializeResource(Resource):
         Args:
             datastack_name (str): name of datastack from infoservice
         """
-        from materializationengine.workflows.live_materialization import start_materialization
+        from materializationengine.workflows.ingest_new_annotations import start_materialization
         INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
         url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{datastack_name}"
         try:
@@ -103,7 +103,7 @@ class CreateFrozenMaterializationResource(Resource):
         Args:
             datastack_name (str): name of datastack from infoservice
         """
-        from materializationengine.workflows.versioned_materialization import versioned_materialization
+        from materializationengine.workflows.create_frozen_database import versioned_materialization
         INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
         url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{datastack_name}"
         try:
@@ -116,6 +116,35 @@ class CreateFrozenMaterializationResource(Resource):
             versioned_materialization(datastack_info)
         except requests.exceptions.RequestException as e:
             logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
+
+
+@mat_bp.route("/materialize/roots/datastack/<string:datastack_name>")
+class UpdateExpiredRootIdsResource(Resource):
+    @auth_required
+    @mat_bp.doc("update expired root ids", security="apikey")
+    def post(self, datastack_name: str):
+        """Update expired root ids
+
+        Args:
+            datastack_name (str): name of datastack from infoservice
+        """
+        from materializationengine.workflows.update_root_ids import update_root_ids_task
+        INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
+        url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{datastack_name}"
+        try:
+            auth_header = {"Authorization": f"Bearer {current_app.config['AUTH_TOKEN']}"}
+            r = requests.get(url, headers=auth_header)
+            r.raise_for_status()
+            logging.info(url)
+            datastack_info = r.json()
+            datastack_info['datastack'] = datastack_name
+
+            update_root_ids_task.s(datastack_info).apply_async()
+            return 200
+        except requests.exceptions.RequestException as e:
+            logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
+
+
 
 @mat_bp.expect(bulk_upload_parser)
 @mat_bp.route("/bulk_upload/<string:datastack_name>/<string:table_name>/<string:segmentation_source>/<string:description>")
