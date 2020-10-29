@@ -152,16 +152,18 @@ def get_materialization_info(aligned_volume: str,
 
 
 def get_expire_root_ids(mat_metadata, expired_chunk_size: int=100):
-    last_timestamp = mat_metadata.get('last_updated_timestamp', None)
+    last_updated_ts = mat_metadata.get('last_updated_time_stamp', None)
     pcg_table_name = mat_metadata.get("pcg_table_name")
 
-    if last_timestamp:
-        formatted_ts = datetime.datetime.strptime(last_timestamp, '%Y-%m-%d %H:%M:%S.%f')
-
+    if last_updated_ts:
+        last_updated_ts = datetime.datetime.strptime(last_updated_ts, '%Y-%m-%d %H:%M:%S.%f')
+    else:
+        last_updated_ts = datetime.datetime.utcnow() - datetime.timedelta(minutes=60)
+    
     cg = ChunkedGraphGateway(pcg_table_name)
 
-    time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
-    old_roots, __ = cg.get_proofread_root_ids(formatted_ts, time_stamp)
+    current_time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
+    old_roots, __ = cg.get_proofread_root_ids(last_updated_ts, current_time_stamp)
     
     chunks = len(old_roots) // expired_chunk_size
 
