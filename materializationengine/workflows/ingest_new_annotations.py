@@ -23,7 +23,7 @@ from materializationengine.database import (create_session, get_db,
 from materializationengine.errors import (AnnotationParseFailure, TaskFailure,
                                           WrongModelType)
 from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
-                                                query_id_range)
+                                                query_id_range, update_metadata)
 from materializationengine.upsert import upsert
 from materializationengine.utils import (create_annotation_model,
                                          create_segmentation_model,
@@ -458,31 +458,4 @@ def update_segmentation_table(materialization_data: dict, mat_metadata: dict) ->
         return {'status': 'updated'}
     except SQLAlchemyError as e:
         celery_logger.error(e)
-
-
-@celery.task(name="process:update_metadata",
-             bind=True,
-             acks_late=True,
-             autoretry_for=(Exception,),
-             max_retries=3)
-def update_metadata(self, status: dict, mat_metadata: dict):
-    aligned_volume = mat_metadata['aligned_volume']
-    segmentation_table_name = mat_metadata['segmentation_table_name']
-
-    session = sqlalchemy_cache.get(aligned_volume)
-    
-    materialization_time_stamp = mat_metadata['materialization_time_stamp']
-    last_updated_time_stamp = datetime.datetime.strptime(materialization_time_stamp, '%Y-%m-%dT%H:%M:%S.%f')
-
-    try:
-        seg_metadata = session.query(SegmentationMetadata).filter(
-            SegmentationMetadata.table_name == segmentation_table_name).one()
-        seg_metadata.last_updated = last_updated_time_stamp
-        session.commit()
-    except Exception as e:
-        celery_logger.error(f"SQL ERROR: {e}")
-        session.rollback()
-    finally:
-        session.close()
-    return {f"Table: {segmentation_table_name}": f"Time stamp {materialization_time_stamp}"}
 
