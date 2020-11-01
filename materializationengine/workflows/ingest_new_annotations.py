@@ -23,7 +23,7 @@ from materializationengine.database import (create_session, get_db,
 from materializationengine.errors import (AnnotationParseFailure, TaskFailure,
                                           WrongModelType)
 from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
-                                                query_id_range)
+                                                query_id_range, update_metadata)
 from materializationengine.upsert import upsert
 from materializationengine.utils import (create_annotation_model,
                                          create_segmentation_model,
@@ -91,7 +91,7 @@ def live_update_task(self, mat_metadata, chunk):
         start_time = time.time()
         missing_data = get_annotations_with_missing_supervoxel_ids(mat_metadata, chunk)
         supervoxel_data = get_cloudvolume_supervoxel_ids(missing_data, mat_metadata)
-        root_id_data = get_root_ids(supervoxel_data, mat_metadata)
+        root_id_data = get_new_root_ids(supervoxel_data, mat_metadata)
         result = update_segmentation_table(root_id_data, mat_metadata)
         celery_logger.info(result)
         run_time = time.time() - start_time
@@ -342,7 +342,7 @@ def get_sql_supervoxel_ids(chunks: List[int], mat_metadata: dict) -> List[int]:
         celery_logger.error(e)
 
 
-def get_root_ids(materialization_data: dict, mat_metadata: dict) -> dict:
+def get_new_root_ids(materialization_data: dict, mat_metadata: dict) -> dict:
     """Get root ids
 
     Args:
@@ -381,7 +381,6 @@ def get_root_ids(materialization_data: dict, mat_metadata: dict) -> dict:
     finally:
         session.close()
 
-    cg = ChunkedGraphGateway(pcg_table_name)
 
     supervoxel_col_names = list(
         supervoxel_df.loc[:, supervoxel_df.columns.str.endswith("supervoxel_id")])
@@ -394,35 +393,36 @@ def get_root_ids(materialization_data: dict, mat_metadata: dict) -> dict:
     else:
         # create empty dataframe with root_id columns
         root_id_columns = [col_name.replace('supervoxel_id', 'root_id')
-                           for col_name in supervoxel_col_names if 'supervoxel_id' in col_name]
+                            for col_name in supervoxel_col_names if 'supervoxel_id' in col_name]
         df = pd.DataFrame(columns=root_id_columns,
-                          dtype=object).fillna(value=np.nan)
+                            dtype=object).fillna(value=np.nan)
         root_ids_df = pd.concat((supervoxel_df, df), axis=1)
 
-    cols = [x for x in root_ids_df.columns if "root_id" in x]
+        cols = [x for x in root_ids_df.columns if "root_id" in x]
 
-    updated_rows = 0
 
     # lookup expired roots
-    if last_updated_time_stamp:
-        try:
-            ts_format = "%Y-%m-%dT%H:%M:%S.%f"
-            last_updated_time_stamp = datetime.datetime.strptime(last_updated_time_stamp, ts_format)
-        except:
-            ts_format = '%Y-%m-%d %H:%M:%S.%f'
-            last_updated_time_stamp = datetime.datetime.strptime(last_updated_time_stamp, ts_format)
+    # if last_updated_time_stamp:
+    #     try:
+    #         ts_format = "%Y-%m-%dT%H:%M:%S.%f"
+    #         last_updated_time_stamp = datetime.datetime.strptime(last_updated_time_stamp, ts_format)
+    #     except:
+    #         ts_format = '%Y-%m-%d %H:%M:%S.%f'
+    #         last_updated_time_stamp = datetime.datetime.strptime(last_updated_time_stamp, ts_format)
 
-        # get time stamp from 5 mins ago
-        time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
-        old_roots, new_roots = cg.get_proofread_root_ids(
-            last_updated_time_stamp, time_stamp)
-        root_id_map = dict(zip(old_roots, new_roots))
+    #     # get time stamp from 5 mins ago
+    #     time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
+    #     old_roots, new_roots = cg.get_proofread_root_ids(
+    #         last_updated_time_stamp, time_stamp)
+    #     root_id_map = dict(zip(old_roots, new_roots))
 
-        for col in cols:
-            if not root_ids_df[root_ids_df[col].isin([old_roots])].empty:
-                for old_root_id, new_root_id in root_id_map.items():
-                    root_ids_df.loc[root_ids_df[col] == old_root_id, col] = new_root_id
-                    updated_rows += 1
+    #     for col in cols:
+    #         if not root_ids_df[root_ids_df[col].isin([old_roots])].empty:
+    #             for old_root_id, new_root_id in root_id_map.items():
+    #                 root_ids_df.loc[root_ids_df[col] == old_root_id, col] = new_root_id
+    #                 updated_rows += 1
+    cg = ChunkedGraphGateway(pcg_table_name)
+    updated_rows = 0
 
     # filter missing root_ids and lookup root_ids if missing
     mask = np.logical_and.reduce([root_ids_df[col].isna() for col in cols])
@@ -446,7 +446,7 @@ def get_root_ids(materialization_data: dict, mat_metadata: dict) -> dict:
 def update_segmentation_table(materialization_data: dict, mat_metadata: dict) -> dict:
     
     if not materialization_data:
-        return None
+        return {'status': 'empty'}
     
     SegmentationModel = create_segmentation_model(mat_metadata)
     aligned_volume = mat_metadata.get("aligned_volume")
@@ -454,36 +454,8 @@ def update_segmentation_table(materialization_data: dict, mat_metadata: dict) ->
     try:
         session = sqlalchemy_cache.get(aligned_volume)
         upsert(session, materialization_data, SegmentationModel)
-        upsert_time_stamp = datetime.datetime.utcnow()
         session.close()
-        return {'Status': f'Upsert suceeded at {upsert_time_stamp}'}
+        return {'status': 'updated'}
     except SQLAlchemyError as e:
         celery_logger.error(e)
-
-
-@celery.task(name="process:update_metadata",
-             bind=True,
-             acks_late=True,
-             autoretry_for=(Exception,),
-             max_retries=3)
-def update_metadata(self, status: dict, mat_metadata: dict):
-    aligned_volume = mat_metadata['aligned_volume']
-    segmentation_table_name = mat_metadata['segmentation_table_name']
-
-    session = sqlalchemy_cache.get(aligned_volume)
-    
-    materialization_time_stamp = mat_metadata['materialization_time_stamp']
-    last_updated_time_stamp = datetime.datetime.strptime(materialization_time_stamp, '%Y-%m-%dT%H:%M:%S.%f')
-
-    try:
-        seg_metadata = session.query(SegmentationMetadata).filter(
-            SegmentationMetadata.table_name == segmentation_table_name).one()
-        seg_metadata.last_updated = last_updated_time_stamp
-        session.commit()
-    except Exception as e:
-        celery_logger.error(f"SQL ERROR: {e}")
-        session.rollback()
-    finally:
-        session.close()
-    return {f"Table: {segmentation_table_name}": f"Time stamp {materialization_time_stamp}"}
 
