@@ -85,7 +85,8 @@ def create_celery(app=None, celery=None):
                         'task_serializer': 'json',
                         'result_serializer': 'json',
                         'accept_content': ['json'],
-                        'optimization':'fair'})
+                        'optimization':'fair',
+                        'worker_prefetch_multiplier': 1})
     celery.conf.update(app.config)
     TaskBase = celery.Task
 
