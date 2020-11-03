@@ -135,9 +135,13 @@ def get_materialization_info(aligned_volume: str,
                 celery_logger.error(f"TABLE DOES NOT EXIST: {e}")
                 segmentation_metadata = {'last_updated': None}
                 db.cached_session.close()
+            
+            materialization_time_stamp = datetime.datetime.utcnow() 
 
             last_updated_time_stamp = segmentation_metadata.get('last_updated', None)
-            materialization_time_stamp = datetime.datetime.utcnow() 
+            if not last_updated_time_stamp:
+                last_updated_time_stamp = materialization_time_stamp
+            
             
             table_metadata = {
                 'aligned_volume': str(aligned_volume),
@@ -398,7 +402,7 @@ def get_new_root_ids(materialization_data: dict, mat_metadata: dict) -> dict:
                             dtype=object).fillna(value=np.nan)
         root_ids_df = pd.concat((supervoxel_df, df), axis=1)
 
-        cols = [x for x in root_ids_df.columns if "root_id" in x]
+    cols = [x for x in root_ids_df.columns if "root_id" in x]
 
 
     # lookup expired roots
