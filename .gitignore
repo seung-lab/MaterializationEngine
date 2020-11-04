@@ -110,3 +110,8 @@ data/
 test-reports/
 client-secret.json
 credentials.tar.gz
+
+*.db
+*.pkl
+*.ipynb
+*.csv
