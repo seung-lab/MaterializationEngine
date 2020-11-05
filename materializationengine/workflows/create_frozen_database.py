@@ -7,6 +7,7 @@ import numpy as np
 from celery import chain, chord, group, signature, subtask
 from celery.utils.log import get_task_logger
 from dynamicannotationdb.key_utils import build_segmentation_table_name
+from dynamicannotationdb.models import AnnoMetadata, SegmentationMetadata
 from emannotationschemas import get_schema
 from emannotationschemas import models as em_models
 from emannotationschemas.flatten import create_flattened_schema
@@ -255,26 +256,27 @@ def create_analysis_tables(self, mat_metadata: dict):
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
     
-    anno_db = get_db(aligned_volume)
-    tables = anno_db._get_all_tables()
-    
     analysis_sql_uri = create_analysis_sql_uri(
         SQL_URI_CONFIG, aligned_volume, analysis_version)
     try:
-        __, analysis_engine = create_session(analysis_sql_uri)
-        mat_session, mat_engine = create_session(sql_uri)
+        analysis_session, analysis_engine = create_session(analysis_sql_uri)
+        session, engine = create_session(sql_uri)
         analysis_base = declarative_base(bind=analysis_engine)
     except Exception as e:
         raise e
+
+    tables = session.query(AnnoMetadata).all()
 
     for table in tables:
         # only create table if marked as valid in the metadata table
         if table.valid:
             table_name = table.table_name
             # create name of table to be materialized
-            if not mat_engine.dialect.has_table(analysis_engine, table_name):
-                schema_name = anno_db.get_table_schema(table_name)
-                anno_schema = get_schema(schema_name)
+            if not engine.dialect.has_table(analysis_engine, table_name):
+                schema_type = session.query(AnnoMetadata.schema_type).\
+                                filter(AnnoMetadata.table_name==table_name).first()
+
+                anno_schema = get_schema(schema_type[0])
                 flat_schema = create_flattened_schema(anno_schema)
                 # construct dict of sqlalchemy columns
 
@@ -286,40 +288,45 @@ def create_analysis_tables(self, mat_metadata: dict):
                     with_crud_columns=False,
                 )
 
-                analysis_table = type(
+                flat_table = type(
                     table_name, (analysis_base,), annotation_dict)
-                analysis_table.__table__.create(bind=analysis_engine)
+                flat_table.__table__.create(bind=analysis_engine)
 
                 # insert metadata into the materialized aligned_volume tables
 
                 creation_time = datetime.datetime.now()
 
+                result = session.query(AnalysisVersion).\
+                    filter(AnalysisVersion ==
+                           mat_metadata['analysis_version']).first()
+
                 analysis_table_dict = {
                     "aligned_volume": aligned_volume,
-                    "schema": schema_name,
+                    "schema": schema_type[0],
                     "table_name": table_name,
                     "valid": True,
-                    "created": creation_time
+                    "created": creation_time,
+                    "analysisversion_id": result.id
                 }
-                analysis_version = mat_session.query(AnalysisVersion).\
-                                    filter(AnalysisVersion==mat_metadata['analysis_version']).first()
+                
                 analysis_table = AnalysisTable(**analysis_table_dict)
+                session.add(analysis_table)
 
-                try:
-                    analysis_table.analysisversion_id = analysis_version.id
-                    mat_session.add(analysis_table)
-                    mat_session.commit()
-                except Exception as e:
-                    mat_session.rollback()
-                    celery_logger.error(e)
-                finally:
-                    mat_session.close()
-                celery_logger.info(
-                    f"Table: {table_name} created using {analysis_table} \
-                            model at {creation_time}"
-                )
-    mat_engine.dispose()
-    analysis_engine.dispose()
+    try:
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        celery_logger.error(e)
+    finally:
+        session.close()
+        engine.dispose()
+        analysis_session.close()
+        analysis_engine.dispose()
+
+    celery_logger.info(
+        f"Table: {table_name} created using {analysis_table} \
+                model at {creation_time}"
+    )
     return mat_metadata
 
 
@@ -337,7 +344,7 @@ def insert_annotation_data(self, mat_metadata: dict, chunk: List[int]):
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
 
-    session, __ = create_session(sql_uri)
+    session, engine = create_session(sql_uri)
 
     AnnotationModel = create_annotation_model(mat_metadata)
     SegmentationModel = create_segmentation_model(mat_metadata)
@@ -375,6 +382,8 @@ def insert_annotation_data(self, mat_metadata: dict, chunk: List[int]):
     finally:
         analysis_session.close()
         analysis_engine.dispose()
+        session.close()
+        engine.dispose()
 
 def create_analysis_sql_uri(sql_uri: str, aligned_volume: str, mat_version: int):
     sql_base_uri = sql_uri.rpartition("/")[0]
@@ -409,4 +418,6 @@ def get_analysis_table(aligned_volume: str, table_name: str, mat_version: int = 
         analysis_table = type(table_name, (Base,), annotation_dict)
     else:
         analysis_table = meta.tables[table_name]
+
+    analysis_engine.dispose()
     return analysis_table
