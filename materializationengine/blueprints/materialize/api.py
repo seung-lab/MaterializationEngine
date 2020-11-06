@@ -34,14 +34,14 @@ __version__ = "0.2.35"
 
 
 bulk_upload_parser = reqparse.RequestParser()
-bulk_upload_parser.add_argument('column_mapping', type=json.loads, location='json')
+bulk_upload_parser.add_argument('column_mapping', type=list, location='json')
 bulk_upload_parser.add_argument('project', type=str)
 bulk_upload_parser.add_argument('file_path', type=str)
 bulk_upload_parser.add_argument('schema', type=str)
 
 missing_chunk_parser = reqparse.RequestParser()
-missing_chunk_parser.add_argument('chunks', type=json.loads, location='json')
-missing_chunk_parser.add_argument('column_mapping', type=json.loads, location='json')
+missing_chunk_parser.add_argument('chunks', type=list, location='json')
+missing_chunk_parser.add_argument('column_mapping', type=list, location='json')
 missing_chunk_parser.add_argument('project', type=str)
 missing_chunk_parser.add_argument('file_path', type=str)
 missing_chunk_parser.add_argument('schema', type=str)
@@ -128,7 +128,7 @@ class UpdateExpiredRootIdsResource(Resource):
         Args:
             datastack_name (str): name of datastack from infoservice
         """
-        from materializationengine.workflows.update_root_ids import update_root_ids_task
+        from materializationengine.workflows.update_root_ids import expired_root_id_workflow
         INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
         url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{datastack_name}"
         try:
@@ -139,7 +139,7 @@ class UpdateExpiredRootIdsResource(Resource):
             datastack_info = r.json()
             datastack_info['datastack'] = datastack_name
 
-            update_root_ids_task.s(datastack_info).apply_async()
+            expired_root_id_workflow.s(datastack_info).apply_async()
             return 200
         except requests.exceptions.RequestException as e:
             logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
