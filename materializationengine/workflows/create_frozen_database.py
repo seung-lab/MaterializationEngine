@@ -14,7 +14,7 @@ from emannotationschemas.flatten import create_flattened_schema
 from emannotationschemas.models import create_table_dict, format_version_db_uri
 from flask import current_app
 from materializationengine.celery_worker import celery
-from materializationengine.chunkedgraph_gateway import ChunkedGraphGateway
+from materializationengine.chunkedgraph_gateway import chunkedgraph_cache
 from materializationengine.database import (create_session, get_db,
                                             sqlalchemy_cache)
 from materializationengine.errors import AnnotationParseFailure
@@ -322,11 +322,6 @@ def create_analysis_tables(self, mat_metadata: dict):
         engine.dispose()
         analysis_session.close()
         analysis_engine.dispose()
-
-    celery_logger.info(
-        f"Table: {table_name} created using {analysis_table} \
-                model at {creation_time}"
-    )
     return mat_metadata
 
 
