@@ -1,58 +1,33 @@
 import datetime
-import logging
-import time
-from copy import deepcopy
-from functools import lru_cache, partial
-from itertools import groupby, islice, repeat, takewhile
-from operator import itemgetter
 from typing import List
 
-import cloudvolume
 import numpy as np
 import pandas as pd
-from celery import Task, chain, chord, chunks, group, subtask
+from celery import chain, chord, group
 from celery.utils.log import get_task_logger
 from dynamicannotationdb.key_utils import build_segmentation_table_name
 from dynamicannotationdb.models import SegmentationMetadata
-from emannotationschemas import models as em_models
-from flask import current_app
 from materializationengine.celery_worker import celery
-from materializationengine.chunkedgraph_gateway import ChunkedGraphGateway
-from materializationengine.database import (create_session, get_db,
-                                            sqlalchemy_cache)
-from materializationengine.errors import (AnnotationParseFailure, TaskFailure,
-                                          WrongModelType)
-from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
-                                                query_id_range,
-                                                update_metadata)
+from materializationengine.chunkedgraph_gateway import chunkedgraph_cache
+from materializationengine.database import get_db, sqlalchemy_cache
+from materializationengine.shared_tasks import fin, update_metadata
 from materializationengine.upsert import upsert
-from materializationengine.utils import (create_annotation_model,
-                                         create_segmentation_model,
-                                         get_geom_from_wkb,
-                                         get_query_columns_by_suffix,
-                                         make_root_id_column_name)
-from sqlalchemy import MetaData, and_, create_engine, func, text
-from sqlalchemy.engine.url import make_url
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.ext.automap import automap_base
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import scoped_session, sessionmaker
-from sqlalchemy.pool import NullPool
-from sqlalchemy.sql import or_
+from materializationengine.utils import create_segmentation_model
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.sql import func, or_
 
 celery_logger = get_task_logger(__name__)
 
 
 @celery.task(name="process:update_root_ids_task",
-             bind=True)
-def update_root_ids_task(self, datastack_info: dict):
-    """[summary]
+             bind=True,
+             acks_late=True,)
+def expired_root_id_workflow(self, datastack_info: dict):
+    """Workflow to process expired root ids and lookup and
+    update table with current root ids.
 
     Args:
-        datastack_info (dict): [description]
-
-    Returns:
-        [type]: [description]
+        datastack_info (dict): Workflow metadata
     """
     aligned_volume_name = datastack_info['aligned_volume']['name']
     pcg_table_name = datastack_info['segmentation_source'].split("/")[-1]
@@ -61,58 +36,40 @@ def update_root_ids_task(self, datastack_info: dict):
 
     for mat_metadata in mat_info:
         if mat_metadata:
-            expired_root_ids = get_expire_root_ids(mat_metadata)
-            if expired_root_ids:
-                process_root_ids = [chain(
-                    get_supervoxel_ids.s(root, mat_metadata),
-                    chunk_process_root_ids.s())
-                    for root in expired_root_ids]
-                get_new_roots_workflow = chain(
-                    group(*process_root_ids), fin.si(), update_metadata.s(mat_metadata))
-
-                get_new_roots_workflow.apply_async()
-            else:
-                last_updated_ts = mat_metadata.get(
-                    'last_updated_time_stamp', None)
-                current_time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
-
-                return {f"Nothing to update, no expired root ids between {last_updated_ts} and {current_time_stamp}"}
+            chunked_roots = get_expired_root_ids(mat_metadata)
+            process_root_ids = chain(
+                chord([chain(update_root_ids.si(root, mat_metadata))
+                       for root in chunked_roots], fin.si()),  # return here is required for chords
+                update_metadata.si(mat_metadata))  # final task which will process a return status/timing etc...
+            process_root_ids.apply_async()
 
 
-def create_chunks(lst, n):
-    """Return successive n-sized chunks from a list."""
-    if len(lst) <= n:
-        n = len(lst)
-    return [lst[i:i + n] for i in range(0, len(lst), n)]
-
-
-@celery.task(name="process:chunk_process_root_ids",
+@celery.task(name="process:update_root_ids",
              acks_late=True,
-             bind=True,
-             autoretry_for=(Exception,),
-             max_retries=1)
-def chunk_process_root_ids(self, supervoxel_data_and_mat_metadata):
-    """Create parallel chains to lookup new root_ids and insert 
-    into database.
+             bind=True,)
+def update_root_ids(self, root_ids: List[int], mat_metadata: dict) -> True:
+    """Chunks supervoxel data and distributes 
+    supervoxels ids to parallel worker tasks that
+    lookup new root_ids and update the database table.
 
     Args:
-        mat_metadata (dict): [description]
-        supervoxel_data (dict): [description]
-
-    Returns:
-        [type]: [description]
+        root_ids (List[int]): List of expired root_ids 
+        mat_metadata (dict): metadata for tasks
     """
-    supervoxel_data, mat_metadata = supervoxel_data_and_mat_metadata
-    try:
-        for __, data in supervoxel_data.items():
-            if data:
-                chunked_supervoxels = create_chunks(data, 100)
-                worker_chain = [chain(get_new_roots.s(chunk, mat_metadata), update_segmentation_table.s(mat_metadata)
-                                      ) for chunk in chunked_supervoxels]
-                return group(*worker_chain).apply_async()
-    except Exception as e:
-        celery_logger.error(e)
-        raise self.retry(exc=e, countdown=3)
+    supervoxel_data = get_supervoxel_ids(root_ids, mat_metadata)
+    for __, data in supervoxel_data.items():
+        if data:
+            chunked_supervoxels = create_chunks(data, 100)
+            worker_chain = group(get_new_roots.s(chunk, mat_metadata) for chunk in chunked_supervoxels)
+            worker_chain.apply_async()
+    return True
+
+def create_chunks(data_list: List, chunk_size: int):
+    """Return successive n-sized chunks from a list."""
+    if len(data_list) <= chunk_size:
+        chunk_size = len(data_list)
+    for i in range(0, len(data_list), chunk_size):
+        yield data_list[i:i + chunk_size]
 
 
 def get_materialization_info(aligned_volume: str,
@@ -152,14 +109,26 @@ def get_materialization_info(aligned_volume: str,
             'segmentation_table_name': segmentation_table_name,
             'pcg_table_name': pcg_table_name,
             'last_updated_time_stamp': str(result[0]),
-            'materialization_time_stamp': materialization_time_stamp,
+            'materialization_time_stamp': str(materialization_time_stamp)
         }
         metadata.append(table_metadata.copy())
     db.cached_session.close()
     return metadata
 
 
-def get_expire_root_ids(mat_metadata, expired_chunk_size: int = 100):
+def get_expired_root_ids(mat_metadata: dict, expired_chunk_size: int = 10):
+    """[summary]
+
+    Args:
+        mat_metadata (dict): [description]
+        expired_chunk_size (int, optional): [description]. Defaults to 10.
+
+    Returns:
+        [type]: [description]
+
+    Yields:
+        [type]: [description]
+    """
     last_updated_ts = mat_metadata.get('last_updated_time_stamp', None)
     pcg_table_name = mat_metadata.get("pcg_table_name")
 
@@ -169,7 +138,7 @@ def get_expire_root_ids(mat_metadata, expired_chunk_size: int = 100):
     else:
         last_updated_ts = datetime.datetime.utcnow() - datetime.timedelta(minutes=60)
 
-    cg = ChunkedGraphGateway(pcg_table_name)
+    cg = chunkedgraph_cache.init_pcg(pcg_table_name)
 
     current_time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
     old_roots, __ = cg.get_proofread_root_ids(
@@ -183,20 +152,15 @@ def get_expire_root_ids(mat_metadata, expired_chunk_size: int = 100):
             chunks = len(old_roots) // expired_chunk_size
 
         chunked_root_ids = np.array_split(old_roots, chunks)
-        expired_chunked_root_id_lists = [
-            x.tolist() for x in [*chunked_root_ids]]
-        return expired_chunked_root_id_lists
+
+        for x in chunked_root_ids:
+            yield x.tolist()
     else:
         return None
 
 
-@celery.task(name="process:get_supervoxel_ids",
-             acks_late=True,
-             bind=True,
-             autoretry_for=(Exception,),
-             max_retries=3)
-def get_supervoxel_ids(self, root_id_chunk: list, mat_metadata: dict):
-    """[summary]
+def get_supervoxel_ids(root_id_chunk: list, mat_metadata: dict):
+    """Get supervoxel ids associated with expired root ids
 
     Args:
         root_id_chunk (list): [description]
@@ -228,11 +192,10 @@ def get_supervoxel_ids(self, root_id_chunk: list, mat_metadata: dict):
             expired_root_id_data[root_id_column] = pd.DataFrame(
                 supervoxels).to_dict(orient="records")
     except Exception as e:
-        celery_logger.error(e)
-        raise self.retry(exc=e, countdown=3)
+        raise e
     finally:
         session.close()
-    return expired_root_id_data, mat_metadata
+    return expired_root_id_data
 
 
 @celery.task(name="process:get_new_roots",
@@ -241,16 +204,15 @@ def get_supervoxel_ids(self, root_id_chunk: list, mat_metadata: dict):
              autoretry_for=(Exception,),
              max_retries=3)
 def get_new_roots(self, supervoxel_chunk: list, mat_metadata: dict):
-    """[summary]
+    """Get new roots from supervoxels ids of expired roots
 
     Args:
         supervoxel_chunk (list): [description]
         mat_metadata (dict): [description]
 
     Returns:
-        [type]: [description]
+        [dict]: dicts of new root_ids
     """
-    start = time.time()
     pcg_table_name = mat_metadata.get("pcg_table_name")
 
     materialization_time_stamp = mat_metadata['materialization_time_stamp']
@@ -269,50 +231,25 @@ def get_new_roots(self, supervoxel_chunk: list, mat_metadata: dict):
     supervoxel_df = root_ids_df.loc[:, supervoxel_col_name[0]]
     supervoxel_data = supervoxel_df.to_list()
 
-    cg = ChunkedGraphGateway(pcg_table_name)
-    try:
-        root_id_array = np.squeeze(cg.get_roots(
-            supervoxel_data, time_stamp=formatted_mat_ts))
+    cg = chunkedgraph_cache.init_pcg(pcg_table_name)
+    root_id_array = np.squeeze(cg.get_roots(
+        supervoxel_data, time_stamp=formatted_mat_ts))
 
-        root_ids_df.loc[supervoxel_df.index,
-                        root_id_col_name[0]] = root_id_array
-        root_ids_df.drop(columns=[supervoxel_col_name[0]])
-    except Exception as e:
-        celery_logger.error(e)
-        raise self.retry(exc=e, countdown=3)
-    finally:
-        celery_logger.info(time.time() - start)
+    del supervoxel_data
 
-    return root_ids_df.to_dict(orient='records')
-
-
-@celery.task(name="process:update_segmentation_table",
-             acks_late=True,
-             bind=True,
-             autoretry_for=(Exception,),
-             max_retries=3)
-def update_segmentation_table(self, materialization_data: dict, mat_metadata: dict) -> dict:
-    """[summary]
-
-    Args:
-        materialization_data (dict): [description]
-        mat_metadata (dict): [description]
-
-    Returns:
-        dict: [description]
-    """
-
-    if not materialization_data:
-        return {'status': 'empty'}
+    root_ids_df.loc[supervoxel_df.index,
+                    root_id_col_name[0]] = root_id_array
+    root_ids_df.drop(columns=[supervoxel_col_name[0]])
 
     SegmentationModel = create_segmentation_model(mat_metadata)
     aligned_volume = mat_metadata.get("aligned_volume")
 
+    session = sqlalchemy_cache.get(aligned_volume)
     try:
-        session = sqlalchemy_cache.get(aligned_volume)
-        upsert(session, materialization_data, SegmentationModel)
+        session.bulk_update_mappings(SegmentationModel, root_ids_df.to_dict(orient='records'))
+        session.commit()
+    except Exception as e:
+        celery_logger.error(f"ERROR: {e}")
+    finally:
         session.close()
-        return {'status': 'updated'}
-    except SQLAlchemyError as e:
-        celery_logger.error(e)
-        raise self.retry(exc=e, countdown=3)
+    return True
