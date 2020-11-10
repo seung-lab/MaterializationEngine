@@ -17,7 +17,7 @@ from dynamicannotationdb.models import SegmentationMetadata
 from emannotationschemas import models as em_models
 from flask import current_app
 from materializationengine.celery_worker import celery
-from materializationengine.chunkedgraph_gateway import ChunkedGraphGateway
+from materializationengine.chunkedgraph_gateway import chunkedgraph_cache
 from materializationengine.database import (create_session, get_db,
                                             sqlalchemy_cache)
 from materializationengine.errors import (AnnotationParseFailure, TaskFailure,
@@ -425,7 +425,7 @@ def get_new_root_ids(materialization_data: dict, mat_metadata: dict) -> dict:
     #             for old_root_id, new_root_id in root_id_map.items():
     #                 root_ids_df.loc[root_ids_df[col] == old_root_id, col] = new_root_id
     #                 updated_rows += 1
-    cg = ChunkedGraphGateway(pcg_table_name)
+    cg = chunkedgraph_cache.init_pcg(pcg_table_name)
     updated_rows = 0
 
     # filter missing root_ids and lookup root_ids if missing
