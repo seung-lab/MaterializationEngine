@@ -113,7 +113,7 @@ class CreateFrozenMaterializationResource(Resource):
             logging.info(url)
             datastack_info = r.json()
             datastack_info['datastack'] = datastack_name
-            versioned_materialization(datastack_info)
+            versioned_materialization.s(datastack_info).apply_async()
         except requests.exceptions.RequestException as e:
             logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
 
