@@ -35,6 +35,7 @@ class BaseConfig:
     SCHEMA_SERVICE_ENDPOINT = "https://global.daf-apis.com/schema/"
     SEGMENTATION_ENDPOINT = "https://global.daf-apis.com/"
     MATERIALIZATION_ROW_CHUNK_SIZE = 500
+    QUERY_LIMIT_SIZE = 200000
     if os.environ.get("DAF_CREDENTIALS", None) is not None:
         with open(os.environ.get("DAF_CREDENTIALS"), "r") as f:
             AUTH_TOKEN = json.load(f)["token"]
