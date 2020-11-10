@@ -1,10 +1,8 @@
 from flask import current_app
 from dynamicannotationdb.materialization_client import DynamicMaterializationClient
 from sqlalchemy.engine.url import make_url
-from sqlalchemy import create_engine, engine
+from sqlalchemy import create_engine
 from sqlalchemy.orm import scoped_session, sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
-from functools import lru_cache
 
 cache = {}
 
