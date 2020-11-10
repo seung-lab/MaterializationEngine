@@ -170,7 +170,8 @@ def specific_query(sqlalchemy_session, engine, model_dict, tables,
                    filter_notin_dict={},
                    filter_equal_dict = {},
                    select_columns=None,
-                   offset = None):
+                   offset = None,
+                   limit = None):
         """ Allows a more narrow query without requiring knowledge about the
             underlying data structures 
 
@@ -230,10 +231,11 @@ def specific_query(sqlalchemy_session, engine, model_dict, tables,
                 filter_args.append((model_dict[filter_table].__dict__[column_name]==filter_value, ))
 
         return _query(sqlalchemy_session, engine, query_args=query_args, filter_args=filter_args,
-                           join_args=join_args, select_columns=select_columns, offset=offset)
+                           join_args=join_args, select_columns=select_columns,
+                           offset=offset, limit=limit)
 
 def _make_query(this_sqlalchemy_session, query_args, join_args=None, filter_args=None,
-                    select_columns=None, offset=None, limit=500000):
+                    select_columns=None, offset=None, limit=None):
         """Constructs a query object with selects, joins, and filters
 
         Args:
@@ -260,7 +262,8 @@ def _make_query(this_sqlalchemy_session, query_args, join_args=None, filter_args
             query = query.with_entities(*select_columns)
         if offset is not None:
             query=query.offset(offset)
-        query=query.limit(limit)
+        if limit is not None:
+            query=query.limit(limit)
         return query
 
 def _execute_query(session, engine, query, fix_wkb=True, fix_decimal=True, n_threads=None, index_col=None, import_via_buffer=False):
@@ -285,7 +288,7 @@ def _execute_query(session, engine, query, fix_wkb=True, fix_decimal=True, n_thr
         return df
 
 def _query(this_sqlalchemy_session, engine, query_args, join_args=None, filter_args=None,
-               select_columns=None, fix_wkb=True, index_col=None, offset=None):
+               select_columns=None, fix_wkb=True, index_col=None, offset=None, limit=None):
         """ Wraps make_query and execute_query in one function
 
         Parameters
@@ -297,6 +300,7 @@ def _query(this_sqlalchemy_session, engine, query_args, join_args=None, filter_a
         fix_wkb: bool
         index_col: str or None
         offset: int or None
+        limit: int or None
 
 
         :param select_columns:
@@ -310,7 +314,8 @@ def _query(this_sqlalchemy_session, engine, query_args, join_args=None, filter_a
                                  join_args=join_args,
                                  filter_args=filter_args,
                                  select_columns=select_columns,
-                                 offset=offset)
+                                 offset=offset,
+                                 limit=limit)
 
         df = _execute_query(this_sqlalchemy_session, engine,
                                  query=query, fix_wkb=fix_wkb,

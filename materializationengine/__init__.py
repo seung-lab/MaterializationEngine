@@ -37,6 +37,7 @@ def create_app(test_config=None):
     app = Flask(__name__,
                 static_folder="../static",
                 instance_path=get_instance_folder_path(),
+                static_url_path='/materialize/static',
                 instance_relative_config=True,
                 template_folder="../templates")
     # load configuration (from test_config if passed)
