@@ -2,8 +2,6 @@ import datetime
 import logging
 from typing import List
 
-import cloudvolume
-import numpy as np
 from celery import chain, chord, group, signature, subtask
 from celery.utils.log import get_task_logger
 from dynamicannotationdb.key_utils import build_segmentation_table_name
@@ -34,7 +32,11 @@ celery_logger = get_task_logger(__name__)
 
 SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
 
-def versioned_materialization(datastack_info: dict):
+
+@celery.task(name="process:versioned_materialization",
+             bind=True,
+             acks_late=True,)
+def versioned_materialization(self, datastack_info: dict):
     """Create a timelocked database of materialization annotations
     and asociated segmentation data.
 
@@ -56,33 +58,25 @@ def versioned_materialization(datastack_info: dict):
     aligned_volume : str
         [description]
     """
-    setup_new_versioned_workflow = chain(
-        create_new_version.s(datastack_info),
-        get_analysis_info.s(datastack_info))
-    setup_results = setup_new_versioned_workflow.apply_async()
-    mat_info = setup_results.get()
-
+    
+    new_version_number = create_new_version(datastack_info)
+    mat_info = get_analysis_info(new_version_number, datastack_info)
+    
     for mat_metadata in mat_info:
         if mat_metadata:
-            supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
+            setup_tables = chain(
+            create_analysis_database.s(mat_metadata),
+            create_analysis_tables.s())
+            setup_tables.apply_async()
 
+            supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
             process_chunks_workflow = chain(
-                create_analysis_database.s(mat_metadata),
-                create_analysis_tables.s(),
                 chord([
-                    chain(
-                        # get_annotations_with_missing_supervoxel_ids.s(chunk),
-                        # get_cloudvolume_supervoxel_ids.s(mat_metadata),
-                        # get_root_ids.s(mat_metadata),
-                        insert_annotation_data.s(chunk),
-                    ) for chunk in supervoxel_chunks],
-                    fin.si()),  # return here is required for chords
-                fin.si()) # final task which will process a return status/timing etc...
+                    chain(insert_annotation_data.si(chunk, mat_metadata)) for chunk in supervoxel_chunks], fin.si()), 
+                    update_analysis_metadata.si(mat_metadata))
             process_chunks_workflow.apply_async()
     
-
-@celery.task(name="process:create_new_version", bind=True)
-def create_new_version(self, datastack_info: dict):
+def create_new_version(datastack_info: dict):
     aligned_volume_name = datastack_info['aligned_volume']['name']
     datastack = datastack_info.get('datastack')
     
@@ -117,13 +111,12 @@ def create_new_version(self, datastack_info: dict):
     analysisversion = AnalysisVersion(datastack=datastack,
                                       time_stamp=time_stamp,
                                       version=new_version_number,
-                                      valid=True)
+                                      valid=False)
     session.add(analysisversion)
     session.commit()
     return new_version_number
 
-@celery.task(name="process:get_analysis_info", bind=True)
-def get_analysis_info(self, analysis_version: int, datastack_info: dict) -> List[dict]:
+def get_analysis_info(analysis_version: int, datastack_info: dict) -> List[dict]:
     """Initialize materialization by an aligned volume name. Iterates thorugh all
     tables in a aligned volume database and gathers metadata for each table. The list
     of tables are passed to workers for materialization.
@@ -166,14 +159,17 @@ def get_analysis_info(self, analysis_version: int, datastack_info: dict) -> List
                 'annotation_table_name': annotation_table,
                 'pcg_table_name': pcg_table_name,
                 'segmentation_source': segmentation_source,
-                'materialization_time_stamp': materialization_time_stamp,
-                'analysis_version': analysis_version
+                'materialization_time_stamp': str(materialization_time_stamp),
+                'analysis_version': analysis_version,
+                'chunk_size': 100000,
             }
             metadata.append(table_metadata.copy())
     db.cached_session.close()
     return metadata
 
-@celery.task(name="process:create_analysis_database", bind=True)
+@celery.task(name="process:create_analysis_database",
+             bind=True,
+             acks_late=True,)
 def create_analysis_database(self, mat_metadata: dict) -> str:
     """Create a new database to store materialized annotation tables
 
@@ -190,12 +186,12 @@ def create_analysis_database(self, mat_metadata: dict) -> str:
 
     aligned_volume = mat_metadata['aligned_volume']
     analysis_version = mat_metadata['analysis_version']
-
+    datastack = mat_metadata['datastack']
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
 
     analysis_sql_uri = make_url(
-        f"{sql_base_uri}/{aligned_volume}_v{analysis_version}")
+        f"{sql_base_uri}/{datastack}__mat{analysis_version}")
             
     engine = create_engine(sql_uri)
 
@@ -228,7 +224,9 @@ def create_analysis_database(self, mat_metadata: dict) -> str:
     return mat_metadata
 
 
-@celery.task(name="process:create_analysis_tables", bind=True)
+@celery.task(name="process:create_analysis_tables",
+             bind=True,
+             acks_late=True,)
 def create_analysis_tables(self, mat_metadata: dict):
     """Create all tables in flat materialized format.
 
@@ -252,12 +250,12 @@ def create_analysis_tables(self, mat_metadata: dict):
 
     aligned_volume = mat_metadata['aligned_volume']
     analysis_version = mat_metadata['analysis_version']
-
+    datastack = mat_metadata['datastack']
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
     
     analysis_sql_uri = create_analysis_sql_uri(
-        SQL_URI_CONFIG, aligned_volume, analysis_version)
+        SQL_URI_CONFIG, datastack, analysis_version)
     try:
         analysis_session, analysis_engine = create_session(analysis_sql_uri)
         session, engine = create_session(sql_uri)
@@ -274,7 +272,7 @@ def create_analysis_tables(self, mat_metadata: dict):
             # create name of table to be materialized
             if not engine.dialect.has_table(analysis_engine, table_name):
                 schema_type = session.query(AnnoMetadata.schema_type).\
-                                filter(AnnoMetadata.table_name==table_name).first()
+                    filter(AnnoMetadata.table_name == table_name).first()
 
                 anno_schema = get_schema(schema_type[0])
                 flat_schema = create_flattened_schema(anno_schema)
@@ -292,50 +290,23 @@ def create_analysis_tables(self, mat_metadata: dict):
                     table_name, (analysis_base,), annotation_dict)
                 flat_table.__table__.create(bind=analysis_engine)
 
-                # insert metadata into the materialized aligned_volume tables
-
-                creation_time = datetime.datetime.now()
-
-                result = session.query(AnalysisVersion).\
-                    filter(AnalysisVersion ==
-                           mat_metadata['analysis_version']).first()
-
-                analysis_table_dict = {
-                    "aligned_volume": aligned_volume,
-                    "schema": schema_type[0],
-                    "table_name": table_name,
-                    "valid": True,
-                    "created": creation_time,
-                    "analysisversion_id": result.id
-                }
-                
-                analysis_table = AnalysisTable(**analysis_table_dict)
-                session.add(analysis_table)
-
-    try:
-        session.commit()
-    except Exception as e:
-        session.rollback()
-        celery_logger.error(e)
-    finally:
-        session.close()
-        engine.dispose()
-        analysis_session.close()
-        analysis_engine.dispose()
+    session.close()
+    engine.dispose()
+    analysis_session.close()
+    analysis_engine.dispose()
     return mat_metadata
-
 
 @celery.task(name="process:insert_annotation_data",
              bind=True,
              acks_late=True,
              autoretry_for=(Exception,),
              max_retries=3)
-def insert_annotation_data(self, mat_metadata: dict, chunk: List[int]):
+def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
 
     aligned_volume = mat_metadata['aligned_volume']
     analysis_version = mat_metadata['analysis_version']
     annotation_table_name = mat_metadata['annotation_table_name']
-
+    datastack = mat_metadata['datastack']
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
 
@@ -343,7 +314,7 @@ def insert_annotation_data(self, mat_metadata: dict, chunk: List[int]):
 
     AnnotationModel = create_annotation_model(mat_metadata)
     SegmentationModel = create_segmentation_model(mat_metadata)
-    analysis_table = get_analysis_table(aligned_volume, annotation_table_name, analysis_version)
+    analysis_table = get_analysis_table(aligned_volume, datastack, annotation_table_name, analysis_version)
     
     chunked_id_query = query_id_range(AnnotationModel.id, chunk[0], chunk[1])
   
@@ -363,7 +334,7 @@ def insert_annotation_data(self, mat_metadata: dict, chunk: List[int]):
         del annotation['superceded_id']
         annotations.append(annotation)
 
-    analysys_sql_uri = create_analysis_sql_uri(SQL_URI_CONFIG, aligned_volume, analysis_version)
+    analysys_sql_uri = create_analysis_sql_uri(SQL_URI_CONFIG, datastack, analysis_version)
     analysis_session, analysis_engine = create_session(analysys_sql_uri)      
 
     try:
@@ -380,20 +351,46 @@ def insert_annotation_data(self, mat_metadata: dict, chunk: List[int]):
         session.close()
         engine.dispose()
 
-def create_analysis_sql_uri(sql_uri: str, aligned_volume: str, mat_version: int):
+@celery.task(name="process:update_analysis_metadata",
+             bind=True,
+             acks_late=True,)
+def update_analysis_metadata(self, mat_metadata: dict):
+    aligned_volume = mat_metadata['aligned_volume']
+    session = sqlalchemy_cache.get(aligned_volume)
+
+    analysis_table_dict = {
+        "aligned_volume": aligned_volume,
+        "schema": mat_metadata['schema'],
+        "table_name": mat_metadata['annotation_table_name'],
+        "valid": True,
+        "created": mat_metadata['materialization_time_stamp'],
+        "analysisversion_id": mat_metadata['analysis_version']
+    }
+    analysis_table = AnalysisTable(**analysis_table_dict)
+    session.add(analysis_table)\
+
+    try:
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        celery_logger.error(e)
+    finally:
+        session.close()
+
+def create_analysis_sql_uri(sql_uri: str, datastack: str, mat_version: int):
     sql_base_uri = sql_uri.rpartition("/")[0]
     analysis_sql_uri = make_url(
-        f"{sql_base_uri}/{aligned_volume}_v{mat_version}")
+        f"{sql_base_uri}/{datastack}__mat{mat_version}")
     return analysis_sql_uri
 
 
-def get_analysis_table(aligned_volume: str, table_name: str, mat_version: int = 1):
+def get_analysis_table(aligned_volume: str, datastack: str, table_name: str, mat_version: int = 1):
 
     anno_db = get_db(aligned_volume)
     schema_name = anno_db.get_table_schema(table_name)
 
     analysis_sql_uri = create_analysis_sql_uri(
-        SQL_URI_CONFIG, aligned_volume, mat_version)
+        SQL_URI_CONFIG, datastack, mat_version)
     analysis_engine = create_engine(analysis_sql_uri)
 
     meta = MetaData()
@@ -416,3 +413,4 @@ def get_analysis_table(aligned_volume: str, table_name: str, mat_version: int = 
 
     analysis_engine.dispose()
     return analysis_table
+
