@@ -73,6 +73,25 @@ class DatastackVersions(Resource):
         versions = [av.version for av in response]
         return versions, 200
 
+@client_bp.route("/datastack/<string:datastack_name>/version/<int:version>")
+class DatastackVersion(Resource):
+    @auth_required
+    @client_bp.doc("version metadata", security="apikey")
+    def get(self, datastack_name: str, version: int):
+        aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+        session = sqlalchemy_cache.get(aligned_volume_name)
+
+        response = (
+            session.query(AnalysisVersion)
+            .filter(AnalysisVersion.datastack == datastack_name)
+            .filter(AnalysisVersion.version == version)
+            .first()
+        )
+        if response is None:
+            return "No version found", 404
+        schema = AnalysisVersionSchema()
+        return schema.dump(response), 200
+
 @client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/tables")
 class FrozenTableVersions(Resource):
     @auth_required
@@ -206,7 +225,7 @@ class FrozenTableQuery(Resource):
             Model = type(table_name, (Base,), annotation_dict)
             annotation_models.set_model(table_name, Model, flat=True)
 
-        Session = sqlalchemy_cache.get(datastack_name)
+        Session = sqlalchemy_cache.get("{}__mat{}".format(datastack_name, version))
         engine = sqlalchemy_cache.engine
 
         data = request.parsed_obj
