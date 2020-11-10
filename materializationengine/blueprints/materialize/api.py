@@ -13,9 +13,11 @@ from flask_accepts import accepts, responds
 from emannotationschemas.models import format_version_db_uri
 from materializationengine.models import AnalysisTable, AnalysisVersion
 from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
-from materializationengine.views import get_datasets
 from materializationengine.database import get_db, sqlalchemy_cache, create_session
 from materializationengine.info_client import get_aligned_volumes
+from emannotationschemas.flatten import create_flattened_schema
+from emannotationschemas import get_schema
+from emannotationschemas.models import create_table_dict
 from middle_auth_client import auth_required, auth_requires_permission
 import requests
 import logging
