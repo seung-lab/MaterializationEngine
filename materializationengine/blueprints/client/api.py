@@ -227,7 +227,7 @@ class FrozenTableQuery(Resource):
 
         Session = sqlalchemy_cache.get("{}__mat{}".format(datastack_name, version))
         engine = sqlalchemy_cache.engine
-
+        query_limit = current_app.config.get('QUERY_LIMIT_SIZE', 200000)
         data = request.parsed_obj
         logging.info('query {}'.format(data))
         df=specific_query(Session, engine, {table_name: Model}, [table_name],
@@ -235,7 +235,8 @@ class FrozenTableQuery(Resource):
                       filter_notin_dict=data.get('filter_notin_dict', {}),
                       filter_equal_dict=data.get('filter_equal_dict', {}),
                       select_columns=data.get('select_columns', None),
-                      offset=data.get('offset', None))
+                      offset=data.get('offset', None),
+                      limit = query_limit)
         context = pa.default_serialization_context()
         serialized = context.serialize(df)
         return Response(serialized.to_buffer().to_pybytes(),
