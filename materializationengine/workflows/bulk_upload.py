@@ -1,36 +1,21 @@
 import datetime
-import logging
 from typing import List
 
-import cloudvolume
 import gcsfs
 import numpy as np
 import pandas as pd
-from celery import chain, chord, group, signature, subtask
+from celery import group  
 from celery.utils.log import get_task_logger
-from dynamicannotationdb.key_utils import build_segmentation_table_name
 from dynamicannotationdb.models import AnnoMetadata, SegmentationMetadata
 from emannotationschemas import get_schema
 from emannotationschemas import models as em_models
 from emannotationschemas.flatten import create_flattened_schema
-from emannotationschemas.models import create_table_dict, format_version_db_uri
 from flask import current_app
 from materializationengine.celery_worker import celery
-from materializationengine.chunkedgraph_gateway import ChunkedGraphGateway
-from materializationengine.database import (create_session, get_db,
-                                            sqlalchemy_cache)
-from materializationengine.errors import AnnotationParseFailure
-from materializationengine.models import (AnalysisMetadata, AnalysisTable,
-                                          AnalysisVersion, Base)
-from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
-                                                query_id_range)
+from materializationengine.database import sqlalchemy_cache
 from materializationengine.utils import (create_annotation_model,
                                          create_segmentation_model)
-from sqlalchemy import MetaData, create_engine
-from sqlalchemy.engine.url import URL, make_url
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import scoped_session, sessionmaker
-from sqlalchemy.sql import func, or_
+
 
 celery_logger = get_task_logger(__name__)
 
@@ -70,30 +55,35 @@ def insert_missing_data(bulk_upload_params: dict):
 def get_file_info(self, bulk_upload_params: dict) -> dict:
     project_path = bulk_upload_params["project"]
     file_path = bulk_upload_params["file_path"]
+    column_mapping = bulk_upload_params["column_mapping"]
+
     fs = gcsfs.GCSFileSystem(project=project_path)
     npy_files = fs.ls(f"{project_path}/{file_path}")
     npy_files.pop(0)
     bulk_file_info = []
     try:
         for npy_file in npy_files:
-            with fs.open(npy_file, 'rb') as fhandle:
-                major, minor = np.lib.format.read_magic(fhandle)
-                shape, fortran, dtype = np.lib.format.read_array_header_1_0(fhandle)
-                file_info = {
-                    'filename': npy_file,
-                    'project': bulk_upload_params["project"],
-                    'file_path': bulk_upload_params["file_path"],
-                    'schema': bulk_upload_params["schema"],
-                    'description': bulk_upload_params['description'],
-                    'annotation_table_name': bulk_upload_params["annotation_table_name"],
-                    'aligned_volume': bulk_upload_params["aligned_volume"]["name"],
-                    'pcg_table_name': bulk_upload_params["segmentation_source"],
-                    'num_rows': int(shape[0]),
-                    'data_type': npy_file.split("/")[-1].split('.')[0],
-                    'fortran': fortran,
-                }
-                 
-                bulk_file_info.append(file_info.copy())
+            mapped_file_name = npy_file.split("/")[-1].split('.')[0]
+            if mapped_file_name in column_mapping:
+                with fs.open(npy_file, 'rb') as fhandle:
+                    major, minor = np.lib.format.read_magic(fhandle)
+                    shape, fortran, dtype = np.lib.format.read_array_header_1_0(fhandle)
+                    file_info = {
+                        'filename': npy_file,
+                        'project': bulk_upload_params["project"],
+                        'file_path': bulk_upload_params["file_path"],
+                        'schema': bulk_upload_params["schema"],
+                        'description': bulk_upload_params['description'],
+                        'annotation_table_name': bulk_upload_params["annotation_table_name"],
+                        'aligned_volume': bulk_upload_params["aligned_volume"]["name"],
+                        'pcg_table_name': bulk_upload_params["segmentation_source"],
+                        'num_rows': int(shape[0]),
+                        'data_type': mapped_file_name,
+                        'fortran': fortran,
+                        'column_mapping': column_mapping
+                    }
+                    
+                    bulk_file_info.append(file_info.copy())
     except Exception as e:
         raise self.retry(exc=e, countdown=3)
 
@@ -111,6 +101,8 @@ def create_chunks(self, bulk_upload_info: dict) -> List:
         if chunk_end > num_rows:
             chunk_end = num_rows
         chunks.append([chunk_start, chunk_end - chunk_start])
+        if len(chunks) == 10:
+            break
     return chunks
 
 @celery.task(name="process:create_tables",
@@ -141,6 +133,7 @@ def create_tables(self, bulk_upload_params: dict):
                 'flat_segmentation_source': bulk_upload_params.get('flat_segmentation_source')
             }
         anno_metadata = AnnoMetadata(**anno_metadata_dict)
+        session.add(anno_metadata)
 
     if not session.query(SegmentationMetadata).filter(SegmentationMetadata.table_name==table_name).scalar():
         SegmentationModel = create_segmentation_model(bulk_upload_params)
@@ -157,7 +150,6 @@ def create_tables(self, bulk_upload_params: dict):
         seg_metadata = SegmentationMetadata(**seg_metadata_dict)
     
         try:
-            session.add(anno_metadata)
             session.flush()
             session.add(seg_metadata)
             session.commit()
@@ -254,6 +246,7 @@ def parse_data(data: List, bulk_upload_info: dict):
     return formatted_data.to_dict('records')
 
 
+    
 def format_data(data: List, bulk_upload_info: dict):
     schema = bulk_upload_info['schema']
     
@@ -316,4 +309,5 @@ def upload_data(data: List, bulk_upload_info: dict):
     except Exception as e:
         celery_logger.error(f"ERROR: {e}")
     finally:
+        session.close()
         engine.dispose()
