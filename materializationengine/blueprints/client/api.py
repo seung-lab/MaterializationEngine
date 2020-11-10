@@ -1,9 +1,10 @@
-from flask import abort, current_app, request
+from flask import abort, current_app, request, Response, stream_with_context
 from flask_restx import Namespace, Resource, reqparse
 from flask_accepts import accepts, responds
-
+import pyarrow as pa
 from materializationengine.models import AnalysisTable, AnalysisVersion
 from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
+from materializationengine.blueprints.client.query import specific_query, _execute_query
 from materializationengine.info_client import get_aligned_volumes, get_datastacks, get_datastack_info
 from materializationengine.database import get_db, sqlalchemy_cache, create_session
 from materializationengine.blueprints.client.schemas import (
@@ -15,6 +16,10 @@ from materializationengine.blueprints.client.schemas import (
     GetDeleteAnnotationSchema,
     SegmentationDataSchema
 )
+from emannotationschemas import get_schema
+from emannotationschemas.flatten import create_flattened_schema
+from emannotationschemas.models import create_table_dict, Base, annotation_models
+from sqlalchemy.engine.url import make_url
 from middle_auth_client import auth_required, auth_requires_permission
 import logging
 
@@ -61,6 +66,7 @@ class DatastackVersions(Resource):
         response = (
             session.query(AnalysisVersion)
             .filter(AnalysisVersion.datastack == datastack_name)
+            .filter(AnalysisVersion.valid == True)
             .all()
         )
 
@@ -75,17 +81,21 @@ class FrozenTableVersions(Resource):
         aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
         session = sqlalchemy_cache.get(aligned_volume_name)
 
-        av = (AnalysisVersion.query
+        av = (session.query(AnalysisVersion)
             .filter(AnalysisVersion.version == version)
-            .first_or_404()
+            .first()
         )
-
+        if av is None:
+            return None, 404
         response = (
-            AnalysisTable.query
+            session.query(AnalysisTable)
             .filter(AnalysisTable.analysisversion_id == av.id)
             .all()
         )
-        return [r._asdict() for r in response], 200
+        
+        if response is None:
+            return None, 404
+        return [r.table_name for r in response], 200
 
 @client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/table/<string:table_name>/metadata")
 class FrozenTableMetadata(Resource):
@@ -99,93 +109,119 @@ class FrozenTableMetadata(Resource):
             session.query(AnalysisVersion)
             .filter(AnalysisVersion.datastack== datastack_name)
             .filter(AnalysisVersion.version == version)
-            .first_or_404()
+            .first()
         )
-
+        if av is None:
+            return None,404
         response = (
             session.query(AnalysisTable)
             .filter(AnalysisTable.analysisversion_id == av.id)
             .filter(AnalysisTable.table_name == table_name)
-            .first_or_404()
+            .first()
         )
-        return response._asdict(), 200
+        schema = AnalysisTableSchema()
+        tables = schema.dump(response)
 
-
-def specific_query(tables, filter_in_dict={}, filter_notin_dict={},
-                       filter_equal_dict = {},
-                       select_columns=None):
-        """ Allows a more narrow query without requiring knowledge about the
-            underlying data structures 
-
-        Parameters
-        ----------
-        tables: list of lists
-            standard: list of one entry: table_name of table that one wants to
-                      query
-            join: list of two lists: first entries are table names, second
-                                     entries are the columns used for the join
-        filter_in_dict: dict of dicts
-            outer layer: keys are table names
-            inner layer: keys are column names, values are entries to filter by
-        filter_notin_dict: dict of dicts
-            inverse to filter_in_dict
-        select_columns: list of str
-
-        Returns
-        -------
-        sqlalchemy query object:
-        """
-        tables = [[table] if not isinstance(table, list) else table
-                  for table in tables]
-        query_args = [self.model(table[0]) for table in tables]
-
-        if len(tables) == 2:
-            join_args = (self.model(tables[1][0]),
-                         self.model(tables[1][0]).__dict__[tables[1][1]] ==
-                         self.model(tables[0][0]).__dict__[tables[0][1]])
-        elif len(tables) > 2:
-            raise Exception("Currently, only single joins are supported")
+        if tables:
+            return tables, 200
         else:
-            join_args = None
+            logging.error(error)
+            return abort(404)
 
-        filter_args = []
 
-        for filter_table, filter_table_dict in filter_in_dict.items():
-            for column_name in filter_table_dict.keys():
-                filter_values = filter_table_dict[column_name]
-                filter_values = np.array(filter_values, dtype="O")
 
-                filter_args.append((self.model(filter_table).__dict__[column_name].
-                                    in_(filter_values), ))
-
-        for filter_table, filter_table_dict in filter_notin_dict.items():
-            for column_name in filter_table_dict.keys():
-                filter_values = filter_table_dict[column_name]
-                filter_values = np.array(filter_values, dtype="O")
-
-                filter_args.append((sqlalchemy.not_(self.model(filter_table).__dict__[column_name].
-                                                    in_(filter_values)), ))
+@client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/table/<string:table_name>/count")
+class FrozenTableQuery(Resource):
+    @auth_required
+    @client_bp.doc("simple_query", security="apikey")
+    def get(self, datastack_name, version, table_name):
+        aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
         
-        for filter_table, filter_table_dict in filter_equal_dict.items():
-            for column_name in filter_table_dict.keys():
-                filter_value = filter_table_dict[column_name]
-                filter_args.append((self.model(filter_table).__dict__[column_name]==filter_value, ))
+        Session = sqlalchemy_cache.get(aligned_volume_name)
+       
+        aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+        
+        analysis_version = Session.query(AnalysisVersion)\
+            .filter(AnalysisVersion.datastack == datastack_name)\
+            .filter(AnalysisVersion.version == version)\
+            .first()
+        analysis_table = Session.query(AnalysisTable)\
+            .filter(AnalysisTable.analysisversion_id==AnalysisVersion.id)\
+            .filter(AnalysisTable.table_name == table_name)\
+            .first()
 
-        return self._query(query_args=query_args, filter_args=filter_args,
-                           join_args=join_args, select_columns=select_columns)
+        anno_schema = get_schema(analysis_table.schema)
+        FlatSchema = create_flattened_schema(anno_schema)
+        if annotation_models.contains_model(table_name, flat=True):
+            Model = annotation_models.get_model(table_name, flat=True)
+        else:
+            annotation_dict = create_table_dict(
+                table_name=table_name,
+                Schema=FlatSchema,
+                segmentation_source=None,
+                table_metadata=None,
+                with_crud_columns=False,
+            )
+            Model = type(table_name, (Base,), annotation_dict)
+            annotation_models.set_model(table_name, Model, flat=True)
 
+        Session = sqlalchemy_cache.get("{}__mat{}".format(datastack_name, version))
+        return Session().query(Model).count(), 200
 
 @client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/table/<string:table_name>/query")
 class FrozenTableQuery(Resource):
-@auth_required
-@client_bp.doc("simple_query", security="apikey")
-@accepts("SimpleQuerySchema", schema=SimpleQuerySchema, api=client_bp)
-def post(self, datastack_name, version, table_name):
-    aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
-    session = sqlalchemy_cache.get(aligned_volume_name)
-    data = request.parsed_obj
+    @auth_required
+    @client_bp.doc("simple_query", security="apikey")
+    @accepts("SimpleQuerySchema", schema=SimpleQuerySchema, api=client_bp)
+    def post(self, datastack_name, version, table_name):
+        aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+        
+        Session = sqlalchemy_cache.get(aligned_volume_name)
+       
+        data = request.parsed_obj
+        aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+        
+        analysis_version = Session.query(AnalysisVersion)\
+            .filter(AnalysisVersion.datastack == datastack_name)\
+            .filter(AnalysisVersion.version == version)\
+            .first()
+        analysis_table = Session.query(AnalysisTable)\
+            .filter(AnalysisTable.analysisversion_id==AnalysisVersion.id)\
+            .filter(AnalysisTable.table_name == table_name)\
+            .first()
+        
 
-    
+        anno_schema = get_schema(analysis_table.schema)
+        FlatSchema = create_flattened_schema(anno_schema)
+        if annotation_models.contains_model(table_name, flat=True):
+            Model = annotation_models.get_model(table_name, flat=True)
+        else:
+            annotation_dict = create_table_dict(
+                table_name=table_name,
+                Schema=FlatSchema,
+                segmentation_source=None,
+                table_metadata=None,
+                with_crud_columns=False,
+            )
+            Model = type(table_name, (Base,), annotation_dict)
+            annotation_models.set_model(table_name, Model, flat=True)
+
+        Session = sqlalchemy_cache.get(datastack_name)
+        engine = sqlalchemy_cache.engine
+
+        data = request.parsed_obj
+        logging.info('query {}'.format(data))
+        df=specific_query(Session, engine, {table_name: Model}, [table_name],
+                      filter_in_dict=data.get('filter_in_dict', {}),
+                      filter_notin_dict=data.get('filter_notin_dict', {}),
+                      filter_equal_dict=data.get('filter_equal_dict', {}),
+                      select_columns=data.get('select_columns', None),
+                      offset=data.get('offset', None))
+        context = pa.default_serialization_context()
+        serialized = context.serialize(df)
+        return Response(serialized.to_buffer().to_pybytes(),
+                        mimetype='x-application/pyarrow')
+
 
 @client_bp.route("/aligned_volume/<string:aligned_volume_name>/table")
 class SegmentationTable(Resource):

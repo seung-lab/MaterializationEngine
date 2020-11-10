@@ -11,8 +11,11 @@ from flask import (
 from emannotationschemas import get_types, get_schema
 from materializationengine.models import AnalysisTable, AnalysisVersion
 from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
+from materializationengine.info_client import get_aligned_volumes, get_datastacks, get_datastack_info
+from materializationengine.database import get_db, sqlalchemy_cache, create_session
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
+from annotationframeworkclient import auth, infoservice
 from sqlalchemy import func, and_, or_
 import pandas as pd
 from emannotationschemas.models import (
@@ -27,50 +30,37 @@ __version__ = "0.2.35"
 views_bp = Blueprint("views", __name__, url_prefix="/materialize/views")
 
 
-def get_datasets():
-    url = current_app.config["INFOSERVICE_ENDPOINT"] + "/info/api/datasets"
-    return requests.get(url).json()
-
-
 @views_bp.route("/")
 @views_bp.route("/index")
 def index():
-    return render_template("datasets.html", datasets=get_datasets(), version=__version__)
+    return render_template("datastacks.html",
+                           datastacks=get_datastacks(),
+                           version=__version__)
 
 
-def make_df_with_links_to_id(objects, schema, url, col):
-    df = pd.DataFrame(data=schema.dump(objects, many=True).data)
+def make_df_with_links_to_id(objects, schema, url, col, **urlkwargs):
+    df = pd.DataFrame(data=schema.dump(objects, many=True))
+    if urlkwargs is None:
+        urlkwargs={}
     df[col] = df.apply(
-        lambda x: "<a href='{}'>{}</a>".format(url_for(url, id=x.id), x[col]), axis=1
+        lambda x: "<a href='{}'>{}</a>".format(url_for(url, id=x.id, **urlkwargs), x[col]), axis=1
     )
     return df
 
+def get_relevant_datastack_info(datastack_name):
+    ds_info = get_datastack_info(datastack_name=datastack_name)
+    seg_source = ds_info['segmentation_source']
+    pcg_table_name = seg_source.split('/')[-1]
+    aligned_volume_name = ds_info['aligned_volume']['name']
+    return aligned_volume_name, pcg_table_name
 
-@views_bp.route("/dataset")
-def datasets():
-    # datasets = (AnalysisVersion.query.filter(AnalysisVersion.dataset = 'pinky100')
-    #             .first_or_404())
-    # TODO wire to info service
-    return jsonify(get_datasets())
+@views_bp.route("/datastack/<datastack_name>")
+def datastack_view(datastack_name):
+    aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+    session = sqlalchemy_cache.get(aligned_volume_name)
 
-
-@views_bp.route("/dataset/<dataset_name>", methods=["GET"])
-def get_dataset_version(dataset_name):
-    # datasets = (AnalysisVersion.query.filter(AnalysisVersion.dataset = 'pinky100')
-    #             .first_or_404())
-    if dataset_name not in get_datasets():
-        abort(404, "dataset not valid")
-
-    if request.method == "GET":
-        versions = db.session.query(AnalysisVersion).all()
-        schema = AnalysisVersionSchema(many=True)
-        # results = schema.dump(versions)
-        return jsonify(schema.dump(versions).data)
-
-
-@views_bp.route("/dataset/<dataset_name>")
-def dataset_view(dataset_name):
-    version_query = AnalysisVersion.query.filter(AnalysisVersion.dataset == dataset_name)
+    version_query = session.query(AnalysisVersion)\
+        .filter(AnalysisVersion.datastack == datastack_name)
     show_all = request.args.get("all", False) is not False
     if not show_all:
         version_query = version_query.filter(AnalysisVersion.valid == True)
@@ -78,54 +68,67 @@ def dataset_view(dataset_name):
 
     if len(versions) > 0:
         schema = AnalysisVersionSchema(many=True)
-        df = make_df_with_links_to_id(versions, schema, "materialize.version_view", "version")
+        df = make_df_with_links_to_id(versions, schema, "views.version_view", "version",
+                                      datastack_name=datastack_name)
         df_html_table = df.to_html(escape=False)
     else:
         df_html_table = ""
 
     return render_template(
-        "dataset.html", dataset=dataset_name, table=df_html_table, version=__version__
+        "datastack.html", datastack=datastack_name, table=df_html_table, version=__version__
     )
 
 
-@views_bp.route("/version/<int:id>")
-def version_view(id):
-    version = AnalysisVersion.query.filter(AnalysisVersion.id == id).first_or_404()
+@views_bp.route("/datastack/<datastack_name>/version/<int:id>")
+def version_view(datastack_name:str, id:int):
+    aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+    session = sqlalchemy_cache.get(aligned_volume_name)
 
-    table_query = AnalysisTable.query.filter(AnalysisTable.analysisversion == version)
+    version = session.query(AnalysisVersion).filter(AnalysisVersion.id == id).first()
+    
+    table_query = session.query(AnalysisTable).filter(AnalysisTable.analysisversion == version)
     tables = table_query.all()
 
     df = make_df_with_links_to_id(
-        tables, AnalysisTableSchema(many=True), "materialize.table_view", "id"
+        tables, AnalysisTableSchema(many=True), "views.table_view", "id",
+        datastack_name=datastack_name
     )
     df["schema"] = df.schema.map(lambda x: "<a href='/schema/type/{}/view'>{}</a>".format(x, x))
+    df["table_name"] = df.table_name.map(lambda x: "<a href='/annotation/views/aligned_volume/{}/table/{}'>{}</a>".format(aligned_volume_name, x, x))
     with pd.option_context("display.max_colwidth", -1):
         output_html = df.to_html(escape=False)
 
     return render_template(
         "version.html",
-        dataset=version.dataset,
+        datastack=version.datastack,
         analysisversion=version.version,
         table=output_html,
         version=__version__,
     )
 
 
-@views_bp.route("/table/<int:id>")
-def table_view(id):
-    table = AnalysisTable.query.filter(AnalysisTable.id == id).first_or_404()
+@views_bp.route("/datastack/<datastack_name>/table/<int:id>")
+def table_view(datastack_name, id:int):
+    aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+    session = sqlalchemy_cache.get(aligned_volume_name)
+    table = session.query(AnalysisTable).filter(AnalysisTable.id == id).first()
     mapping = {
-        "synapse": url_for("materialize.synapse_report", id=id),
-        "cell_type_local": url_for("materialize.cell_type_local_report", id=id),
+        "synapse": url_for("views.synapse_report",
+                            id=id, datastack_name=datastack_name),
+        "cell_type_local": url_for("views.cell_type_local_report",
+                            id=id, datastack_name=datastack_name),
     }
     if table.schema in mapping:
         return redirect(mapping[table.schema])
     else:
-        return redirect(url_for("materialize.generic_report", id=id))
+        return redirect(url_for("views.generic_report",
+                        datastack_name=datastack_name, id=id))
 
 
-@views_bp.route("/table/<int:id>/cell_type_local")
-def cell_type_local_report(id):
+@views_bp.route("/datastack/<datastack_name>/table/<int:id>/cell_type_local")
+def cell_type_local_report(datastack_name, id):
+    aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+    session = sqlalchemy_cache.get(aligned_volume_name)
     table = AnalysisTable.query.filter(AnalysisTable.id == id).first_or_404()
     if table.schema != "cell_type_local":
         abort(504, "this table is not a cell_type_local table")
@@ -161,12 +164,15 @@ def cell_type_local_report(id):
     )
 
 
-@views_bp.route("/table/<int:id>/synapse")
-def synapse_report(id):
-    table = AnalysisTable.query.filter(AnalysisTable.id == id).first_or_404()
+@views_bp.route("/datastack/<datastack_name>/table/<int:id>/synapse")
+def synapse_report(datastack_name, id):
+    aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+    session = sqlalchemy_cache.get(aligned_volume_name)
+    table = session.query(AnalysisTable).filter(AnalysisTable.id == id).first()
     if table.schema != "synapse":
         abort(504, "this table is not a synapse table")
-    make_dataset_models(table.analysisversion.dataset, [], version=table.analysisversion.version)
+    
+    make_dataset_models(table.analysisversion.datastack, [], version=table.analysisversion.version)
 
     SynapseModel = make_annotation_model(
         table.analysisversion.dataset,
@@ -197,11 +203,14 @@ def synapse_report(id):
     )
 
 
-@views_bp.route("/table/<int:id>/generic")
+@views_bp.route("/datastack/<datastack_name>/table/<int:id>/generic")
 def generic_report(id):
-    table = AnalysisTable.query.filter(AnalysisTable.id == id).first_or_404()
+    aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+    session = sqlalchemy_cache.get(aligned_volume_name)
+    table = session.query(AnalysisTable).filter(AnalysisTable.id == id).first()
 
-    make_dataset_models(table.analysisversion.dataset, [], version=table.analysisversion.version)
+    make_dataset_models(table.analysisversion.dataset, [],
+                        version=table.analysisversion.version)
 
     Model = make_annotation_model(
         table.analysisversion.dataset,
