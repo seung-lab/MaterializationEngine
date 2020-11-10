@@ -83,15 +83,17 @@ def chunk_ids(mat_metadata, model, chunk_size: int):
              acks_late=True,
              autoretry_for=(Exception,),
              max_retries=3)
-def update_metadata(self, *args):
-    status, mat_metadata = args
+def update_metadata(self, mat_metadata: dict):
     aligned_volume = mat_metadata['aligned_volume']
     segmentation_table_name = mat_metadata['segmentation_table_name']
 
     session = sqlalchemy_cache.get(aligned_volume)
     
     materialization_time_stamp = mat_metadata['materialization_time_stamp']
-    last_updated_time_stamp = datetime.datetime.strptime(materialization_time_stamp, '%Y-%m-%dT%H:%M:%S.%f')
+    try:
+        last_updated_time_stamp = datetime.datetime.strptime(materialization_time_stamp, '%Y-%m-%d %H:%M:%S.%f')
+    except ValueError:
+        last_updated_time_stamp = datetime.datetime.strptime(materialization_time_stamp, '%Y-%m-%dT%H:%M:%S.%f')
 
     try:
         seg_metadata = session.query(SegmentationMetadata).filter(
