@@ -326,7 +326,7 @@ class FrozenTableQuery(Resource):
                       filter_equal_dict=data.get('filter_equal_dict', {}),
                       select_columns=data.get('select_columns', None),
                       offset=data.get('offset', None),
-                      limit = data['limit'])
+                      limit = limit)
         context = pa.default_serialization_context()
         serialized = context.serialize(df)
         return Response(serialized.to_buffer().to_pybytes(),
