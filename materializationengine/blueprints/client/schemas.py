@@ -1,4 +1,5 @@
 from marshmallow import fields, Schema
+from marshmallow.validate import Length
 
 
 class Metadata(Schema):
@@ -39,3 +40,13 @@ class SimpleQuerySchema(Schema):
     filter_equal_dict = fields.Dict()
     select_columns = fields.List(fields.Str)
     offset = fields.Integer()
+    limit = fields.Integer()
+
+class ComplexQuerySchema(Schema):
+    tables = fields.List(fields.List(fields.Str, validate=Length(equal=2)), required=True)
+    filter_in_dict = fields.Dict()
+    filter_out_dict = fields.Dict()
+    filter_equal_dict = fields.Dict()
+    select_columns = fields.List(fields.Str)
+    offset = fields.Integer()
+    limit = fields.Integer()

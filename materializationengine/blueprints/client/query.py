@@ -70,12 +70,26 @@ def fix_columns_with_query(df, query, n_threads=None, fix_decimal=True, fix_wkb=
     """ Use a query object to suggest how to convert columns imported from csv to correct types.
     """
     if len(df) > 0:
-        schema_model = query.column_descriptions[0]['type']
+        n_tables = len(query.column_descriptions)
+        print(n_tables)
+        if n_tables==1:
+            schema_model = query.column_descriptions[0]['type']
         for colname in df.columns:
-            coltype = type(getattr(schema_model, colname).type)
-
+            if n_tables==1:
+                coltype = type(getattr(schema_model, colname).type)
+            else:
+                coltype = None
+                for k in range(n_tables):
+                    schema_model = query.column_descriptions[k]['type']
+                    try:
+                        coltype = type(getattr(schema_model, colname).type)
+                    except AttributeError:
+                        pass
+                if coltype is None:
+                    raise AttributeError('cannot find column type for {}'.format(colname))
             if coltype is Boolean:
-                df[colname] = _fix_boolean_column(df[colname])
+                pass
+            #    df[colname] = _fix_boolean_column(df[colname])
 
             elif coltype is Geometry and fix_wkb is True:
                 df[colname] = fix_wkb_column(
@@ -252,7 +266,7 @@ def _make_query(this_sqlalchemy_session, query_args, join_args=None, filter_args
         query = this_sqlalchemy_session.query(*query_args)
 
         if join_args is not None:
-            query = query.join(*join_args, full=True)
+            query = query.join(*join_args, full=False)
 
         if filter_args is not None:
             for f in filter_args:
