@@ -234,11 +234,7 @@ class FrozenTableMetadata(Resource):
         schema = AnalysisTableSchema()
         tables = schema.dump(analysis_table)
 
-        if tables:
-            return tables, 200
-        else:
-            logging.error(error)
-            return abort(404)
+        return tables, 200
 
 
 
