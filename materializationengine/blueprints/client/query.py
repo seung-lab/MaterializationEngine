@@ -16,6 +16,7 @@ from sqlalchemy.orm import Query
 from geoalchemy2.elements import WKBElement
 from geoalchemy2.types import Geometry
 from sqlalchemy.sql.sqltypes import Boolean
+from sqlalchemy import not_
 from decimal import Decimal
 from multiwrapper import multiprocessing_utils as mu
 import numpy as np
@@ -25,6 +26,7 @@ from datetime import datetime
 from functools import partial
 import shapely
 
+DEFAULT_SUFFIX_LIST = ['x','y','z','xx','yy','zz','xxx','yyy','zzz']
 
 def fix_wkb_column(df_col, wkb_data_start_ind=2, n_threads=None):
     """Convert a column with 3-d point data stored as in WKB format
@@ -69,28 +71,20 @@ def fix_wkb_column(df_col, wkb_data_start_ind=2, n_threads=None):
 def fix_columns_with_query(df, query, n_threads=None, fix_decimal=True, fix_wkb=True, wkb_data_start_ind=2):
     """ Use a query object to suggest how to convert columns imported from csv to correct types.
     """
+
     if len(df) > 0:
         n_tables = len(query.column_descriptions)
-        print(n_tables)
         if n_tables==1:
             schema_model = query.column_descriptions[0]['type']
         for colname in df.columns:
             if n_tables==1:
                 coltype = type(getattr(schema_model, colname).type)
             else:
-                coltype = None
-                for k in range(n_tables):
-                    schema_model = query.column_descriptions[k]['type']
-                    try:
-                        coltype = type(getattr(schema_model, colname).type)
-                    except AttributeError:
-                        pass
-                if coltype is None:
-                    raise AttributeError('cannot find column type for {}'.format(colname))
+                coltype=type(next(col['type'] for col in query.column_descriptions if col['name']==colname))
             if coltype is Boolean:
                 pass
             #    df[colname] = _fix_boolean_column(df[colname])
-
+            
             elif coltype is Geometry and fix_wkb is True:
                 df[colname] = fix_wkb_column(
                     df[colname], wkb_data_start_ind=wkb_data_start_ind, n_threads=n_threads)
@@ -185,7 +179,8 @@ def specific_query(sqlalchemy_session, engine, model_dict, tables,
                    filter_equal_dict = {},
                    select_columns=None,
                    offset = None,
-                   limit = None):
+                   limit = None,
+                   suffixes = None):
         """ Allows a more narrow query without requiring knowledge about the
             underlying data structures 
 
@@ -210,7 +205,29 @@ def specific_query(sqlalchemy_session, engine, model_dict, tables,
         """
         tables = [[table] if not isinstance(table, list) else table
                   for table in tables]
-        query_args = [model_dict[table[0]] for table in tables]
+        models = [model_dict[table[0]] for table in tables]
+        if len(models)>1:
+            column_lists = [[m.key for m in model.__table__.columns] for model in models]
+            col_names, col_counts = np.unique(np.concatenate(column_lists), return_counts=True)
+            dup_cols = col_names[col_counts>1]
+            # if there are duplicate columns we need to redname
+            if len(dup_cols)>1:
+                if suffixes is None:
+                    suffixes = [DEFAULT_SUFFIX_LIST[i] for i in range(len(models))]
+                else:
+                    assert(len(suffixes)==len(models))
+                query_args = []
+                for model, suffix in zip(models, suffixes):
+                    for column in model.__table__.columns:
+                        if column.key in dup_cols:
+                            query_args.append(column.label(column.key + '_{}'.format(suffix)))
+                        else:
+                            query_args.append(column)
+            # otherwise we can just use all of them
+            else:
+                query_args = models
+        else:
+            query_args = models
 
         if len(tables) == 2:
             join_args = (model_dict[tables[1][0]],
@@ -235,8 +252,7 @@ def specific_query(sqlalchemy_session, engine, model_dict, tables,
             for column_name in filter_table_dict.keys():
                 filter_values = filter_table_dict[column_name]
                 filter_values = np.array(filter_values, dtype="O")
-
-                filter_args.append((sqlalchemy.not_(model_dict[filter_table].__dict__[column_name].
+                filter_args.append((not_(model_dict[filter_table].__dict__[column_name].
                                                     in_(filter_values)), ))
         
         for filter_table, filter_table_dict in filter_equal_dict.items():
@@ -278,6 +294,7 @@ def _make_query(this_sqlalchemy_session, query_args, join_args=None, filter_args
             query=query.offset(offset)
         if limit is not None:
             query=query.limit(limit)
+        print(query.statement)
         return query
 
 def _execute_query(session, engine, query, fix_wkb=True, fix_decimal=True, n_threads=None, index_col=None, import_via_buffer=False):

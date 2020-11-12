@@ -36,7 +36,7 @@ class SegmentationDataSchema(Schema):
 
 class SimpleQuerySchema(Schema):
     filter_in_dict = fields.Dict()
-    filter_out_dict = fields.Dict()
+    filter_notin_dict = fields.Dict()
     filter_equal_dict = fields.Dict()
     select_columns = fields.List(fields.Str)
     offset = fields.Integer()
@@ -45,8 +45,9 @@ class SimpleQuerySchema(Schema):
 class ComplexQuerySchema(Schema):
     tables = fields.List(fields.List(fields.Str, validate=Length(equal=2)), required=True)
     filter_in_dict = fields.Dict()
-    filter_out_dict = fields.Dict()
+    filter_notin_dict = fields.Dict()
     filter_equal_dict = fields.Dict()
     select_columns = fields.List(fields.Str)
     offset = fields.Integer()
     limit = fields.Integer()
+    suffixes =  fields.List(fields.Str)
