@@ -27,6 +27,7 @@ from sqlalchemy.engine.url import URL, make_url
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import scoped_session, sessionmaker
 from sqlalchemy.sql import func, or_
+from sqlalchemy.engine import reflection
 
 celery_logger = get_task_logger(__name__)
 
@@ -289,7 +290,11 @@ def create_analysis_tables(self, mat_metadata: dict):
                 flat_table = type(
                     table_name, (analysis_base,), annotation_dict)
                 flat_table.__table__.create(bind=analysis_engine)
-
+    
+                if anno_schema == 'synapse':
+                    indexes = get_table_indexes(table_name, analysis_engine)
+                    is_dropped = drop_table_indexes(table_name, indexes, analysis_engine)
+        
     session.close()
     engine.dispose()
     analysis_session.close()
@@ -304,6 +309,8 @@ def create_analysis_tables(self, mat_metadata: dict):
 def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
 
     aligned_volume = mat_metadata['aligned_volume']
+    schema = mat_metadata['schema']
+
     analysis_version = mat_metadata['analysis_version']
     annotation_table_name = mat_metadata['annotation_table_name']
     datastack = mat_metadata['datastack']
@@ -317,12 +324,18 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
     analysis_table = get_analysis_table(aligned_volume, datastack, annotation_table_name, analysis_version)
     
     chunked_id_query = query_id_range(AnnotationModel.id, chunk[0], chunk[1])
-  
-    r = session.query(AnnotationModel, SegmentationModel).\
-                join(SegmentationModel).\
-                filter((AnnotationModel.deleted <= datetime.datetime.utcnow()) | (AnnotationModel.valid == True)).\
-                filter(SegmentationModel.id == AnnotationModel.id).\
-                filter(chunked_id_query).order_by(AnnotationModel.id)
+    
+    if schema == 'synapse':
+        r = session.query(AnnotationModel, SegmentationModel).\
+                    join(SegmentationModel).\
+                    filter(SegmentationModel.id == AnnotationModel.id).\
+                    filter(chunked_id_query).order_by(AnnotationModel.id)
+    else:
+        r = session.query(AnnotationModel, SegmentationModel).\
+                    join(SegmentationModel).\
+                    filter((AnnotationModel.deleted <= datetime.datetime.utcnow()) | (AnnotationModel.valid == True)).\
+                    filter(SegmentationModel.id == AnnotationModel.id).\
+                    filter(chunked_id_query).order_by(AnnotationModel.id)
 
     annotation_data = r.all()
     annotations = []
@@ -367,7 +380,7 @@ def update_analysis_metadata(self, mat_metadata: dict):
         "analysisversion_id": mat_metadata['analysis_version']
     }
     analysis_table = AnalysisTable(**analysis_table_dict)
-    session.add(analysis_table)\
+    session.add(analysis_table)
 
     try:
         session.commit()
@@ -414,3 +427,64 @@ def get_analysis_table(aligned_volume: str, datastack: str, table_name: str, mat
     analysis_engine.dispose()
     return analysis_table
 
+def get_table_indexes(table_name: str, engine):
+    insp = reflection.Inspector.from_engine(engine)
+    pk_columns = insp.get_pk_constraint(table_name)
+    indexed_columns = insp.get_indexes(table_name)
+    foreign_keys = insp.get_foreign_keys(table_name)
+    index_map = {}
+
+    if pk_columns:
+            pk = {
+                'primary_key_name': pk_columns['name'],
+                'column_name': pk_columns['constrained_columns'][0]
+            }
+            index_map.update({
+                'primary_key': pk
+            })
+    if indexed_columns:
+        indexes = []
+        for index in indexed_columns:
+            indx_map = {
+                'index_name': index["name"],
+                'column_name': index["column_names"][0],
+            }
+            indexes.append(indx_map.copy())  
+
+        index_map.update({
+            'indexes': indexes
+        })
+    if foreign_keys:
+        for fk in foreign_keys:
+            fKeys = []
+            foreign_keys = {
+                'foreign_key': fk["name"],
+                'column_name': fk["constrained_columns"][0],
+            }
+            fKeys.append(foreign_keys.copy())  
+        index_map.update({
+            'foreign_keys': foreign_keys
+        })
+    return index_map
+
+
+def drop_table_indexes(table_name, indexes, engine):
+    command = f"ALTER TABLE {table_name}"
+    for index_type, index_columns in indexes.items():
+        if index_type== 'foreign_key':
+            fk_list = [index_columns['foreign_key'] for i in index_columns]
+            drop_fk = f"DROP CONSTRAINT {', '.join(fk_list)}"
+            command = f"{command} {drop_fk}"
+        if index_type =='primary_key':
+            drop_pk = f"DROP CONSTRAINT {index_columns['primary_key_name']}"
+            command = f"{command} {drop_pk};"
+        if index_type == 'indexes':
+            index_list = [col['index_name'] for col in index_columns]
+            drop_index = f"DROP INDEX {', '.join(index_list)}"
+            command = f"{command} {drop_index}"           
+    try:
+        connection = engine.connect() 
+        connection.execute(f"{command}")
+    except Exception as e:
+        celery_logger.error(e)
+    return True
