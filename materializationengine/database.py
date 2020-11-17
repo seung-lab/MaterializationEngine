@@ -24,22 +24,23 @@ def create_session(sql_uri: str = None):
 class SqlAlchemyCache:
 
     def __init__(self):
-        self._engine = None
+        self._engines = {}
         self._sessions = {}
 
-    @property
-    def engine(self):
-        return self._engine
-
-    def get(self, aligned_volume):
-        if aligned_volume not in self._sessions:
+    def get_engine(self, aligned_volume):
+        if aligned_volume not in self._engines:
             SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
             sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
             sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-            self._engine = create_engine(sql_uri, pool_recycle=3600,
+            self._engines[aligned_volume] = create_engine(sql_uri, pool_recycle=3600,
                                                   pool_size=20,
                                                   max_overflow=50)
-            Session = scoped_session(sessionmaker(bind=self._engine))
+        return self._engines[aligned_volume]
+
+    def get(self, aligned_volume):
+        if aligned_volume not in self._sessions:
+            engine = get_engine(aligned_volume)
+            Session = scoped_session(sessionmaker(bind=engine))
             self._sessions[aligned_volume] = Session
         return self._sessions[aligned_volume]
 

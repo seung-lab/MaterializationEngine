@@ -183,7 +183,7 @@ def create_missing_segmentation_table(self, mat_metadata: dict) -> dict:
     SegmentationModel = create_segmentation_model(mat_metadata)
  
     session = sqlalchemy_cache.get(aligned_volume)
-    engine = sqlalchemy_cache.engine
+    engine = sqlalchemy_cache.get_engine(aligned_volume)
     
     if not session.query(SegmentationMetadata).filter(SegmentationMetadata.table_name==segmentation_table_name).scalar():
         SegmentationModel.__table__.create(bind=engine, checkfirst=True)

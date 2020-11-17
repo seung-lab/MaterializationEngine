@@ -312,7 +312,7 @@ class FrozenTableQuery(Resource):
             return "Cannot find table {} in datastack {} at version {}".format(table_name, datastack_name, version), 404
 
         Session = sqlalchemy_cache.get("{}__mat{}".format(datastack_name, version))
-        engine = sqlalchemy_cache.engine
+        engine = sqlalchemy_cache.get_engine("{}__mat{}".format(datastack_name, version))
         max_limit = current_app.config.get('QUERY_LIMIT_SIZE', 200000)
 
         data = request.parsed_obj
@@ -388,8 +388,9 @@ class FrozenQuery(Resource):
                 return "Cannot find table {} in datastack {} at version {}".format(table_name, datastack_name, version), 404
             model_dict[table_name]=Model
 
-        Session = sqlalchemy_cache.get("{}__mat{}".format(datastack_name, version))
-        engine = sqlalchemy_cache.engine
+        db_name = "{}__mat{}".format(datastack_name, version) 
+        Session = sqlalchemy_cache.get(db_name)
+        engine = sqlalchemy_cache.get_engine(db_name)
         max_limit = current_app.config.get('QUERY_LIMIT_SIZE', 200000)
 
         data = request.parsed_obj
