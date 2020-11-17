@@ -39,7 +39,7 @@ class SqlAlchemyCache:
 
     def get(self, aligned_volume):
         if aligned_volume not in self._sessions:
-            engine = get_engine(aligned_volume)
+            engine = self.get_engine(aligned_volume)
             Session = scoped_session(sessionmaker(bind=engine))
             self._sessions[aligned_volume] = Session
         return self._sessions[aligned_volume]
