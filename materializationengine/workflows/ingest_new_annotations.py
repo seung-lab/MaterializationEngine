@@ -152,15 +152,13 @@ def get_materialization_info(aligned_volume: str,
                 'pcg_table_name': pcg_table_name,
                 'segmentation_source': segmentation_source,
                 'coord_resolution': [4,4,40],
-                'last_updated_time_stamp': last_updated_time_stamp,
-                'materialization_time_stamp': materialization_time_stamp,
+                'last_updated_time_stamp': str(last_updated_time_stamp),
+                'materialization_time_stamp': str(materialization_time_stamp,)
             }
-            if table_metadata["schema"] == "synapse":
-                table_metadata.update({
-                    'chunk_size': 20000
-                    })
-
-            metadata.append(table_metadata.copy())
+            if "synapse" in annotation_table:
+                pass
+            else:
+                metadata.append(table_metadata.copy())
     db.cached_session.close()   
     return metadata
 
@@ -359,8 +357,12 @@ def get_new_root_ids(materialization_data: dict, mat_metadata: dict) -> dict:
     pcg_table_name = mat_metadata.get("pcg_table_name")
     last_updated_time_stamp = mat_metadata.get("last_updated_time_stamp")
     aligned_volume = mat_metadata.get("aligned_volume")
-    materialization_time_stamp = datetime.datetime.strptime(
-        mat_metadata.get("materialization_time_stamp"), '%Y-%m-%dT%H:%M:%S.%f')
+    try:
+        materialization_time_stamp = datetime.datetime.strptime(
+            mat_metadata.get("materialization_time_stamp"), '%Y-%m-%d %H:%M:%S.%f')
+    except:
+        materialization_time_stamp = datetime.datetime.strptime(
+            mat_metadata.get("materialization_time_stamp"), '%Y-%m-%dT%H:%M:%S.%f')
     supervoxel_df = pd.DataFrame(materialization_data, dtype=object)
     drop_col_names = list(
         supervoxel_df.loc[:, supervoxel_df.columns.str.endswith("position")])
