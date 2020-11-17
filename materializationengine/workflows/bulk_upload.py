@@ -115,7 +115,7 @@ def create_tables(self, bulk_upload_params: dict):
     pcg_table_name = bulk_upload_params['pcg_table_name']
 
     session = sqlalchemy_cache.get(aligned_volume)
-    engine = sqlalchemy_cache.engine
+    engine = sqlalchemy_cache.get_engine(aligned_volume)
     
     creation_time = datetime.datetime.utcnow()
 
@@ -300,7 +300,7 @@ def upload_data(data: List, bulk_upload_info: dict):
     SegmentationModel = create_segmentation_model(model_data)
     
     session = sqlalchemy_cache.get(aligned_volume)
-    engine = sqlalchemy_cache.engine
+    engine = sqlalchemy_cache.get_engine(aligned_volume)
     
     try:
         with engine.begin() as connection:
