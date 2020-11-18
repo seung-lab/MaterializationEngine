@@ -2,14 +2,14 @@ from typing import List
 import datetime
 from dynamicannotationdb.models import SegmentationMetadata
 
-from celery import Task, chain, chord, chunks, group, subtask
 from celery.utils.log import get_task_logger
 from flask import current_app
-from sqlalchemy import MetaData, and_, create_engine, func, text
-from emannotationschemas import models as em_models
+from sqlalchemy import and_, func, text
 from materializationengine.celery_worker import celery
 from materializationengine.database import sqlalchemy_cache
 from materializationengine.utils import create_annotation_model
+from materializationengine.database import get_db
+from dynamicannotationdb.key_utils import build_segmentation_table_name
 
 ROW_CHUNK_SIZE = current_app.config["MATERIALIZATION_ROW_CHUNK_SIZE"]
 
@@ -43,6 +43,75 @@ def chunk_supervoxel_ids_task(mat_metadata: dict) -> List[List]:
 def fin(self, *args, **kwargs):
     return True
 
+
+def get_materialization_info(datastack_info: dict, analysis_version: int=None, skip_table:bool=False, row_size:int=1_000_000) -> List[dict]:
+    """Initialize materialization by an aligned volume name. Iterates thorugh all
+    tables in a aligned volume database and gathers metadata for each table. The list
+    of tables are passed to workers for materialization. 
+
+    Args:
+        datastack_info (dict): Datastack info
+        analysis_version (int, optional): Analysis version to use for frozen materialization. Defaults to None.
+        skip_table (bool, optional): Triggers row count for skipping tables larger than row_size arg. Defaults to False.
+        row_size (int, optional): Row size number to check. Defaults to 1_000_000.
+
+    Returns:
+        List[dict]: [description]
+    """
+
+    aligned_volume_name = datastack_info['aligned_volume']['name']
+    pcg_table_name = datastack_info['segmentation_source'].split("/")[-1]
+    segmentation_source = datastack_info.get('segmentation_source')
+    
+    db = get_db(aligned_volume_name)
+    
+    annotation_tables = db.get_valid_table_names()
+    metadata = []
+    for annotation_table in annotation_tables:
+        row_count = db._get_table_row_count(annotation_table)
+        if row_count >= row_size and skip_table:
+            continue
+        else:
+            max_id = db.get_max_id_value(annotation_table)
+            if max_id:
+                segmentation_table_name = build_segmentation_table_name(
+                    annotation_table, pcg_table_name)
+                try:
+                    segmentation_metadata = db.get_segmentation_table_metadata(annotation_table,
+                                                                               pcg_table_name)
+                except AttributeError as e:
+                    celery_logger.error(f"TABLE DOES NOT EXIST: {e}")
+                    segmentation_metadata = {'last_updated': None}
+
+                materialization_time_stamp = datetime.datetime.utcnow()
+
+                last_updated_time_stamp = segmentation_metadata.get('last_updated', None)
+
+                if not last_updated_time_stamp:
+                    last_updated_time_stamp = materialization_time_stamp
+
+                table_metadata = {
+                    'datastack': datastack_info['datastack'],
+                    'aligned_volume': str(aligned_volume_name),
+                    'schema': db.get_table_schema(annotation_table),
+                    'max_id': int(max_id),
+                    'row_count': row_count,
+                    'segmentation_table_name': segmentation_table_name,
+                    'annotation_table_name': annotation_table,
+                    'pcg_table_name': pcg_table_name,
+                    'segmentation_source': segmentation_source,
+                    'coord_resolution': [4,4,40],
+                    'materialization_time_stamp': str(materialization_time_stamp),
+                    'last_updated_time_stamp': str(last_updated_time_stamp),
+                    'chunk_size': 100000,
+                    'table_count': len(annotation_tables)
+                }
+                if analysis_version:
+                    table_metadata['analysis_version'] = analysis_version
+
+                metadata.append(table_metadata.copy())
+    db.cached_session.close()
+    return metadata
 
 @celery.task(name="process:collect_data", acks_late=True)
 def collect_data(*args, **kwargs):
