@@ -14,7 +14,8 @@ from materializationengine.chunkedgraph_gateway import chunkedgraph_cache
 from materializationengine.database import get_db, sqlalchemy_cache
 from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
                                                 query_id_range,
-                                                update_metadata)
+                                                update_metadata,
+                                                get_materialization_info)
 from materializationengine.upsert import upsert
 from materializationengine.utils import (create_annotation_model,
                                          create_segmentation_model,
@@ -29,7 +30,7 @@ celery_logger = get_task_logger(__name__)
 @celery.task(name="process:start_materialization",
              acks_late=True,
              bind=True)
-def start_materialization(self, aligned_volume_name: str, pcg_table_name: str, segmentation_source: dict):
+def start_materialization(self, datastack_info: dict):
     """Base live materialization
 
     Workflow paths:
@@ -48,7 +49,7 @@ def start_materialization(self, aligned_volume_name: str, pcg_table_name: str, s
     segmentation_source : dict
         [description]
     """
-    mat_info = get_materialization_info(aligned_volume_name, pcg_table_name, segmentation_source)
+    mat_info = get_materialization_info(datastack_info, skip_table=True)
 
     for mat_metadata in mat_info:
         if mat_metadata:
@@ -84,67 +85,6 @@ def live_update_task(self, mat_metadata, chunk):
         celery_logger.error(e)
         raise self.retry(exc=e, countdown=3)        
     return {"Table name": f"{table_name}", "Run time": f"{run_time}"}
-
-def get_materialization_info(aligned_volume: str,
-                             pcg_table_name: str,
-                             segmentation_source: str) -> List[dict]:
-    """Initialize materialization by an aligned volume name. Iterates thorugh all
-    tables in a aligned volume database and gathers metadata for each table. The list
-    of tables are passed to workers for materialization.
-
-    Parameters
-    ----------
-    aligned_volume : str
-        name of aligned volume
-    pcg_table_name: str
-        cg_table_name
-    segmentation_source:
-        infoservice data
-    Returns
-    -------
-    List[dict]
-        list of dicts containing metadata for each table
-    """
-    db = get_db(aligned_volume)
-    annotation_tables = db.get_valid_table_names()
-    metadata = []
-    for annotation_table in annotation_tables:
-        max_id = db.get_max_id_value(annotation_table)
-        if max_id:
-            segmentation_table_name = build_segmentation_table_name(annotation_table, pcg_table_name)
-            try:
-                segmentation_metadata = db.get_segmentation_table_metadata(annotation_table,
-                                                                           pcg_table_name)
-            except AttributeError as e:
-                celery_logger.error(f"TABLE DOES NOT EXIST: {e}")
-                segmentation_metadata = {'last_updated': None}
-                db.cached_session.close()
-            
-            materialization_time_stamp = datetime.datetime.utcnow() 
-
-            last_updated_time_stamp = segmentation_metadata.get('last_updated', None)
-            if not last_updated_time_stamp:
-                last_updated_time_stamp = materialization_time_stamp
-            
-            
-            table_metadata = {
-                'aligned_volume': str(aligned_volume),
-                'schema': db.get_table_schema(annotation_table),
-                'max_id': int(max_id),
-                'segmentation_table_name': segmentation_table_name,
-                'annotation_table_name': annotation_table,
-                'pcg_table_name': pcg_table_name,
-                'segmentation_source': segmentation_source,
-                'coord_resolution': [4,4,40],
-                'last_updated_time_stamp': str(last_updated_time_stamp),
-                'materialization_time_stamp': str(materialization_time_stamp,)
-            }
-            if "synapse" in annotation_table:
-                pass
-            else:
-                metadata.append(table_metadata.copy())
-    db.cached_session.close()   
-    return metadata
 
 
 @celery.task(name='process:create_missing_segmentation_table',
