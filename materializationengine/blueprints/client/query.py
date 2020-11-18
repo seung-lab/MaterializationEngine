@@ -294,7 +294,6 @@ def _make_query(this_sqlalchemy_session, query_args, join_args=None, filter_args
             query=query.offset(offset)
         if limit is not None:
             query=query.limit(limit)
-        print(query.statement)
         return query
 
 def _execute_query(session, engine, query, fix_wkb=True, fix_decimal=True, n_threads=None, index_col=None, import_via_buffer=False):
