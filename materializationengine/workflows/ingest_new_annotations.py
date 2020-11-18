@@ -285,7 +285,7 @@ def get_cloudvolume_supervoxel_ids(materialization_data: dict, mat_metadata: dic
             if np.isnan(getattr(data, supervoxel_column)):
                 pos_data = getattr(data, col)
                 pos_array = np.asarray(pos_data)
-                svid = np.squeeze(cv.download_point(pt=pos_array, size=1, coord_resolution=coord_resolution))
+                svid = np.squeeze(cv.download_point(pt=pos_array, size=1, coord_resolution=coord_resolution)) # pylint: disable=maybe-no-member
                 mat_df.loc[mat_df.id == data.id, supervoxel_column] =  svid
     return mat_df.to_dict(orient='list')
 
