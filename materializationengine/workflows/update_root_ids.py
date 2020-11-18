@@ -11,10 +11,8 @@ from materializationengine.celery_worker import celery
 from materializationengine.chunkedgraph_gateway import chunkedgraph_cache
 from materializationengine.database import get_db, sqlalchemy_cache
 from materializationengine.shared_tasks import fin, update_metadata
-from materializationengine.upsert import upsert
 from materializationengine.utils import create_segmentation_model
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.sql import func, or_
+from sqlalchemy.sql import or_
 
 celery_logger = get_task_logger(__name__)
 
@@ -99,16 +97,20 @@ def get_materialization_info(aligned_volume: str,
 
         result = db.cached_session.query(SegmentationMetadata.last_updated).filter(
             SegmentationMetadata.table_name == segmentation_table_name).first()
-
+        celery_logger.info(result)
         materialization_time_stamp = datetime.datetime.utcnow()
-
+        
+        if result is None:
+            last_updated_ts = materialization_time_stamp
+        else:
+            last_updated_ts = str(result[0])
         table_metadata = {
             'aligned_volume': str(aligned_volume),
             'schema': db.get_table_schema(annotation_table),
             'annotation_table_name': annotation_table,
             'segmentation_table_name': segmentation_table_name,
             'pcg_table_name': pcg_table_name,
-            'last_updated_time_stamp': str(result[0]),
+            'last_updated_time_stamp': last_updated_ts,
             'materialization_time_stamp': str(materialization_time_stamp)
         }
         metadata.append(table_metadata.copy())

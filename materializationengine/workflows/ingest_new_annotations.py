@@ -1,42 +1,26 @@
 import datetime
-import logging
 import time
-from copy import deepcopy
-from functools import lru_cache, partial
-from itertools import groupby, islice, repeat, takewhile
-from operator import itemgetter
 from typing import List
 
 import cloudvolume
 import numpy as np
 import pandas as pd
-from celery import Task, chain, chord, chunks, group, subtask
+from celery import chain, chord
 from celery.utils.log import get_task_logger
 from dynamicannotationdb.key_utils import build_segmentation_table_name
 from dynamicannotationdb.models import SegmentationMetadata
-from emannotationschemas import models as em_models
-from flask import current_app
 from materializationengine.celery_worker import celery
 from materializationengine.chunkedgraph_gateway import chunkedgraph_cache
-from materializationengine.database import (create_session, get_db,
-                                            sqlalchemy_cache)
-from materializationengine.errors import (AnnotationParseFailure, TaskFailure,
-                                          WrongModelType)
+from materializationengine.database import get_db, sqlalchemy_cache
 from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
-                                                query_id_range, update_metadata)
+                                                query_id_range,
+                                                update_metadata)
 from materializationengine.upsert import upsert
 from materializationengine.utils import (create_annotation_model,
                                          create_segmentation_model,
                                          get_geom_from_wkb,
-                                         get_query_columns_by_suffix,
-                                         make_root_id_column_name)
-from sqlalchemy import MetaData, and_, create_engine, func, text
-from sqlalchemy.engine.url import make_url
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.ext.automap import automap_base
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import scoped_session, sessionmaker
-from sqlalchemy.pool import NullPool
+                                         get_query_columns_by_suffix)
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.sql import or_
 
 celery_logger = get_task_logger(__name__)
@@ -301,7 +285,7 @@ def get_cloudvolume_supervoxel_ids(materialization_data: dict, mat_metadata: dic
             if np.isnan(getattr(data, supervoxel_column)):
                 pos_data = getattr(data, col)
                 pos_array = np.asarray(pos_data)
-                svid = np.squeeze(cv.download_point(pt=pos_array, size=1, coord_resolution=coord_resolution))
+                svid = np.squeeze(cv.download_point(pt=pos_array, size=1, coord_resolution=coord_resolution)) # pylint: disable=maybe-no-member
                 mat_df.loc[mat_df.id == data.id, supervoxel_column] =  svid
     return mat_df.to_dict(orient='list')
 
