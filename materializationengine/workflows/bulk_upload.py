@@ -15,6 +15,7 @@ from materializationengine.celery_worker import celery
 from materializationengine.database import sqlalchemy_cache
 from materializationengine.utils import (create_annotation_model,
                                          create_segmentation_model)
+from materializationengine.index_manager import index_cache
 
 
 celery_logger = get_task_logger(__name__)
@@ -134,6 +135,9 @@ def create_tables(self, bulk_upload_params: dict):
             }
         anno_metadata = AnnoMetadata(**anno_metadata_dict)
         session.add(anno_metadata)
+        is_dropped = index_cache.drop_table_indexes(AnnotationModel.__table__.name, engine)
+        celery_logger.info(f"Table {AnnotationModel.__table__.name} indexes have been dropped {is_dropped}.")
+
 
     if not session.query(SegmentationMetadata).filter(SegmentationMetadata.table_name==table_name).scalar():
         SegmentationModel = create_segmentation_model(bulk_upload_params)
@@ -148,7 +152,10 @@ def create_tables(self, bulk_upload_params: dict):
         }
 
         seg_metadata = SegmentationMetadata(**seg_metadata_dict)
-    
+        is_dropped = index_cache.drop_table_indexes(SegmentationModel.__table__.name, engine)
+        celery_logger.info(f"Table {SegmentationModel.__table__.name} indexes have been dropped {is_dropped}.")
+
+
         try:
             session.flush()
             session.add(seg_metadata)
