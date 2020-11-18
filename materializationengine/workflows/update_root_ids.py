@@ -5,12 +5,10 @@ import numpy as np
 import pandas as pd
 from celery import chain, chord, group
 from celery.utils.log import get_task_logger
-from dynamicannotationdb.key_utils import build_segmentation_table_name
-from dynamicannotationdb.models import SegmentationMetadata
 from materializationengine.celery_worker import celery
 from materializationengine.chunkedgraph_gateway import chunkedgraph_cache
-from materializationengine.database import get_db, sqlalchemy_cache
-from materializationengine.shared_tasks import fin, update_metadata
+from materializationengine.database import sqlalchemy_cache
+from materializationengine.shared_tasks import fin, update_metadata, get_materialization_info
 from materializationengine.utils import create_segmentation_model
 from sqlalchemy.sql import or_
 
@@ -27,10 +25,7 @@ def expired_root_id_workflow(self, datastack_info: dict):
     Args:
         datastack_info (dict): Workflow metadata
     """
-    aligned_volume_name = datastack_info['aligned_volume']['name']
-    pcg_table_name = datastack_info['segmentation_source'].split("/")[-1]
-
-    mat_info = get_materialization_info(aligned_volume_name, pcg_table_name)
+    mat_info = get_materialization_info(datastack_info)
 
     for mat_metadata in mat_info:
         if mat_metadata:
@@ -68,54 +63,6 @@ def create_chunks(data_list: List, chunk_size: int):
         chunk_size = len(data_list)
     for i in range(0, len(data_list), chunk_size):
         yield data_list[i:i + chunk_size]
-
-
-def get_materialization_info(aligned_volume: str,
-                             pcg_table_name: str) -> List[dict]:
-    """Initialize materialization by an aligned volume name. Iterates thorugh all
-    tables in a aligned volume database and gathers metadata for each table. The list
-    of tables are passed to workers for materialization.
-
-    Parameters
-    ----------
-    aligned_volume : str
-        name of aligned volume
-    pcg_table_name: str
-        cg_table_name
-
-    Returns
-    -------
-    List[dict]
-        list of dicts containing metadata for each table
-    """
-    db = get_db(aligned_volume)
-    annotation_tables = db.get_valid_table_names()
-    metadata = []
-    for annotation_table in annotation_tables:
-        segmentation_table_name = build_segmentation_table_name(
-            annotation_table, pcg_table_name)
-
-        result = db.cached_session.query(SegmentationMetadata.last_updated).filter(
-            SegmentationMetadata.table_name == segmentation_table_name).first()
-        celery_logger.info(result)
-        materialization_time_stamp = datetime.datetime.utcnow()
-        
-        if result is None:
-            last_updated_ts = materialization_time_stamp
-        else:
-            last_updated_ts = str(result[0])
-        table_metadata = {
-            'aligned_volume': str(aligned_volume),
-            'schema': db.get_table_schema(annotation_table),
-            'annotation_table_name': annotation_table,
-            'segmentation_table_name': segmentation_table_name,
-            'pcg_table_name': pcg_table_name,
-            'last_updated_time_stamp': last_updated_ts,
-            'materialization_time_stamp': str(materialization_time_stamp)
-        }
-        metadata.append(table_metadata.copy())
-    db.cached_session.close()
-    return metadata
 
 
 def get_expired_root_ids(mat_metadata: dict, expired_chunk_size: int = 10):

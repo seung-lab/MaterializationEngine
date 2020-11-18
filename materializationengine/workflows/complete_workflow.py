@@ -1,22 +1,13 @@
 
-from typing import List
-
 from celery import chain, chord, group
 from celery.utils.log import get_task_logger
-from dynamicannotationdb.models import AnnoMetadata, SegmentationMetadata
-from emannotationschemas import get_schema
-from emannotationschemas import models as em_models
-from emannotationschemas.flatten import create_flattened_schema
-from flask import current_app
 from materializationengine.celery_worker import celery
-from materializationengine.database import sqlalchemy_cache
 from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
-                                                update_metadata)
-from materializationengine.utils import (create_annotation_model,
-                                         create_segmentation_model)
+                                                update_metadata,
+                                                get_materialization_info)
 from materializationengine.workflows.create_frozen_database import (
     create_analysis_database, create_analysis_tables, create_new_version,
-    get_analysis_info, insert_annotation_data, update_analysis_metadata)
+    insert_annotation_data, update_analysis_metadata)
 from materializationengine.workflows.ingest_new_annotations import (
     create_missing_segmentation_table, get_materialization_info,
     live_update_task)
@@ -46,33 +37,27 @@ def run_complete_worflow(self, datastack_info: dict):
     segmentation_source : dict
         [description]
     """
-    aligned_volume_name = datastack_info['aligned_volume']['name']
-    segmentation_source = datastack_info['segmentation_source'].split("/")[-1]
-    pcg_table_name = datastack_info['pcg_table_name']
 
-    mat_info = get_materialization_info(
-        aligned_volume_name, pcg_table_name, segmentation_source)
-
+    new_version_number = create_new_version(datastack_info)
+    mat_info = get_materialization_info(datastack_info, new_version_number)
+    database = create_analysis_database(datastack_info, new_version_number),
+    materialized_tables = create_analysis_tables(datastack_info, new_version_number)
+    
     for mat_metadata in mat_info:
         if mat_metadata:
             supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
             chunked_roots = get_expired_root_ids(mat_metadata)
-
-            new_version_number = create_new_version(datastack_info)
-            mat_info = get_analysis_info(new_version_number, datastack_info)
             complete_workflow = chain(
                 create_missing_segmentation_table.s(mat_metadata),
                 chord([
                     chain(
                         live_update_task.s(chunk),
                     ) for chunk in supervoxel_chunks],
-                    fin.si()),  
+                    fin.si()),
                 update_metadata.s(mat_metadata),
                 chord([update_root_ids.si(root, mat_metadata)
-                       for root in chunked_roots], fin.si()), 
+                       for root in chunked_roots], fin.si()),
                 update_metadata.si(mat_metadata),
-                create_analysis_database.s(mat_metadata),
-                create_analysis_tables.s(),
                 chord([
                     chain(insert_annotation_data.si(chunk, mat_metadata)) for chunk in supervoxel_chunks], fin.si()),
                 update_analysis_metadata.si(mat_metadata))  # final task which will process a return status/timing etc...

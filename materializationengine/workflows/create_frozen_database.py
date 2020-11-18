@@ -15,7 +15,8 @@ from materializationengine.database import (create_session, get_db,
                                             sqlalchemy_cache)
 from materializationengine.models import AnalysisTable, AnalysisVersion, Base
 from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
-                                                query_id_range)
+                                                query_id_range,
+                                                get_materialization_info)
 from materializationengine.utils import (create_annotation_model,
                                          create_segmentation_model)
 from materializationengine.index_manager import index_cache                                      
@@ -55,11 +56,9 @@ def versioned_materialization(self, datastack_info: dict):
     """
 
     new_version_number = create_new_version(datastack_info)
-    mat_info = get_analysis_info(new_version_number, datastack_info)
-    setup_tables = chain(
-        create_analysis_database.si(datastack_info, new_version_number),
-        create_analysis_tables.si(datastack_info, new_version_number))
-    setup_tables.apply_async()
+    mat_info = get_materialization_info(datastack_info, new_version_number)
+    database = create_analysis_database(datastack_info, new_version_number),
+    materialized_tables = create_analysis_tables(datastack_info, new_version_number)
 
     for mat_metadata in mat_info:
         if mat_metadata:
@@ -68,7 +67,7 @@ def versioned_materialization(self, datastack_info: dict):
                 chord([
                     chain(insert_annotation_data.si(chunk, mat_metadata)) for chunk in supervoxel_chunks], fin.si()),
                 update_analysis_metadata.si(mat_metadata),
-                check_tables.si())
+                check_tables.si(mat_metadata))
             process_chunks_workflow.apply_async()
 
 
@@ -111,63 +110,7 @@ def create_new_version(datastack_info: dict):
     return new_version_number
 
 
-def get_analysis_info(analysis_version: int, datastack_info: dict) -> List[dict]:
-    """Initialize materialization by an aligned volume name. Iterates thorugh all
-    tables in a aligned volume database and gathers metadata for each table. The list
-    of tables are passed to workers for materialization.
-
-    Parameters
-    ----------
-    aligned_volume : str
-        name of aligned volume
-    pcg_table_name: str
-        cg_table_name
-    segmentation_source:
-        infoservice data
-    Returns
-    -------
-    List[dict]
-        list of dicts containing metadata for each table
-    """
-
-    aligned_volume_name = datastack_info['aligned_volume']['name']
-    pcg_table_name = datastack_info['segmentation_source'].split("/")[-1]
-    segmentation_source = datastack_info.get('segmentation_source')
-    db = get_db(aligned_volume_name)
-
-    annotation_tables = db.get_valid_table_names()
-    metadata = []
-    for annotation_table in annotation_tables:
-        max_id = db.get_max_id_value(annotation_table)
-        if max_id:
-            segmentation_table_name = build_segmentation_table_name(
-                annotation_table, pcg_table_name)
-
-            materialization_time_stamp = datetime.datetime.utcnow()
-
-            table_metadata = {
-                'datastack': datastack_info['datastack'],
-                'aligned_volume': str(aligned_volume_name),
-                'schema': db.get_table_schema(annotation_table),
-                'max_id': int(max_id),
-                'segmentation_table_name': segmentation_table_name,
-                'annotation_table_name': annotation_table,
-                'pcg_table_name': pcg_table_name,
-                'segmentation_source': segmentation_source,
-                'materialization_time_stamp': str(materialization_time_stamp),
-                'analysis_version': analysis_version,
-                'chunk_size': 100000,
-                'table_count': len(annotation_tables)
-            }
-            metadata.append(table_metadata.copy())
-    db.cached_session.close()
-    return metadata
-
-
-@celery.task(name="process:create_analysis_database",
-             bind=True,
-             acks_late=True,)
-def create_analysis_database(self, datastack_info: dict, analysis_version: int) -> str:
+def create_analysis_database(datastack_info: dict, analysis_version: int) -> str:
     """Create a new database to store materialized annotation tables
 
     Parameters
@@ -185,7 +128,7 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
     datastack = datastack_info['datastack']
 
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
-    sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
+    sql_uri = str(make_url(f"{sql_base_uri}/{aligned_volume}"))
     analysis_sql_uri = create_analysis_sql_uri(
         sql_uri, datastack, analysis_version)
 
@@ -215,12 +158,10 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
                     WHERE datname = '{analysis_sql_uri.database}'"
             )
     engine.dispose()
+    return True
 
 
-@celery.task(name="process:create_analysis_tables",
-             bind=True,
-             acks_late=True,)
-def create_analysis_tables(self, datastack_info: dict, analysis_version: int):
+def create_analysis_tables(datastack_info: dict, analysis_version: int):
     """Create all tables in flat materialized format.
 
     Parameters
@@ -288,7 +229,7 @@ def create_analysis_tables(self, datastack_info: dict, analysis_version: int):
     engine.dispose()
     analysis_session.close()
     analysis_engine.dispose()
-
+    return True
 
 @celery.task(name="process:insert_annotation_data",
              bind=True,
@@ -313,7 +254,6 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
         aligned_volume, datastack, annotation_table_name, analysis_version)
 
     chunked_id_query = query_id_range(AnnotationModel.id, chunk[0], chunk[1])
-
     if schema == 'synapse':
         r = session.query(AnnotationModel, SegmentationModel).\
             join(SegmentationModel).\
@@ -360,20 +300,24 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
              acks_late=True,)
 def update_analysis_metadata(self, mat_metadata: dict):
     aligned_volume = mat_metadata['aligned_volume']
+    version = mat_metadata['analysis_version']
     session = sqlalchemy_cache.get(aligned_volume)
+    version_id = session.query(AnalysisVersion.id).filter(AnalysisVersion.version==version).first()
 
     analysis_table = AnalysisTable(aligned_volume=aligned_volume,
                                    schema=mat_metadata['schema'],
                                    table_name=mat_metadata['annotation_table_name'],
                                    valid=True,
                                    created=mat_metadata['materialization_time_stamp'],
-                                   analysisversion_id=mat_metadata['analysis_version'])
+                                   analysisversion_id=version_id)
+
     try:
         session.add(analysis_table)
         session.commit()
     except Exception as e:
         session.rollback()
         celery_logger.error(e)
+        raise e
     finally:
         session.close()
 
@@ -384,12 +328,13 @@ def update_analysis_metadata(self, mat_metadata: dict):
 def check_tables(self, mat_metadata: dict):
     aligned_volume = mat_metadata['aligned_volume']
     analysis_version = mat_metadata['analysis_version']
-    analysis_version = mat_metadata['analysis_version']
+    table_count = mat_metadata['table_count']
 
     session = sqlalchemy_cache.get(aligned_volume)
-    
-    table_count = session.query(AnalysisTable).filter(AnalysisTable.analysisversion_id==analysis_version).count()
-    if table_count == table_count:
+    version_id = session.query(AnalysisVersion.id).filter(AnalysisVersion.version==analysis_version).first()
+    num_tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion_id==version_id).\
+        filter(AnalysisTable.valid==True).count()
+    if num_tables == table_count:
         validity = session.query(AnalysisVersion).filter(AnalysisVersion.version==analysis_version).first()
         validity.valid = True
         try:
