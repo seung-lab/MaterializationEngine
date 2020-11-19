@@ -10,10 +10,11 @@ from materializationengine.workflows.create_frozen_database import (
     insert_annotation_data, update_analysis_metadata)
 from materializationengine.workflows.ingest_new_annotations import (
     create_missing_segmentation_table, get_materialization_info,
-    live_update_task)
+    ingest_new_annotations)
 from materializationengine.workflows.update_root_ids import (
     get_expired_root_ids, update_root_ids)
 
+celery_logger = get_task_logger(__name__)
 
 @celery.task(name="process:run_complete_worflow",
              acks_late=True,
@@ -41,25 +42,35 @@ def run_complete_worflow(self, datastack_info: dict):
     new_version_number = create_new_version(datastack_info)
     mat_info = get_materialization_info(datastack_info, new_version_number)
     database = create_analysis_database(datastack_info, new_version_number),
-    materialized_tables = create_analysis_tables(datastack_info, new_version_number)
+    materialized_tables = create_analysis_tables(
+        datastack_info, new_version_number)
     
     for mat_metadata in mat_info:
-        if mat_metadata:
-            supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
-            chunked_roots = get_expired_root_ids(mat_metadata)
-            complete_workflow = chain(
+        supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
+        chunked_roots = get_expired_root_ids(mat_metadata)
+        if mat_metadata['row_count'] < 1_000_000:
+            new_annotation_workflow = chain(
                 create_missing_segmentation_table.s(mat_metadata),
                 chord([
                     chain(
-                        live_update_task.s(chunk),
+                        ingest_new_annotations.s(chunk),
                     ) for chunk in supervoxel_chunks],
-                    fin.si()),
-                update_metadata.s(mat_metadata),
-                chord([update_root_ids.si(root, mat_metadata)
-                       for root in chunked_roots], fin.si()),
-                update_metadata.si(mat_metadata),
-                chord([
-                    chain(insert_annotation_data.si(chunk, mat_metadata)) for chunk in supervoxel_chunks], fin.si()),
-                update_analysis_metadata.si(mat_metadata))  # final task which will process a return status/timing etc...
+                    fin.si()),  # return here is required for chords
+                update_metadata.si(mat_metadata))  # final task which will process a return status/timing etc...
+        else:
+            new_annotation_workflow = None
 
+        update_roots_and_freeze = chain(
+            chord([update_root_ids.si(root, mat_metadata)
+                   for root in chunked_roots], fin.si()),
+            update_metadata.si(mat_metadata),
+            chord([
+                chain(insert_annotation_data.si(chunk, mat_metadata)) for chunk in supervoxel_chunks], fin.si()),
+            update_analysis_metadata.si(mat_metadata))  # final task which will process a return status/timing etc...
+        
+        if new_annotation_workflow is not None:
+            complete_workflow = chain(
+                new_annotation_workflow, update_roots_and_freeze)
             complete_workflow.apply_async()
+        else:
+            update_roots_and_freeze.apply_async()
