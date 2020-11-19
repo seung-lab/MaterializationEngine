@@ -151,7 +151,7 @@ def create_analysis_database(datastack_info: dict, analysis_version: int) -> str
             )
             connection.execute(
                 f"CREATE DATABASE {analysis_sql_uri.database} \
-                                TEMPLATE template_postgis"
+                                TEMPLATE postgres"
             )
             result = connection.execute(
                 f"SELECT 1 FROM pg_catalog.pg_database \
