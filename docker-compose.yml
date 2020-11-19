@@ -3,7 +3,7 @@ services:
     db:
       image: mdillon/postgis
       env_file:
-        - ./.env.dev   
+        - ./.dev.env
       ports:
         - 5432:5432
       volumes:
@@ -30,7 +30,7 @@ services:
     celery-process:
       image: 'materialize:tag'
       env_file:
-        - ./.env.dev   
+        - ./.dev.env
       command: ["celery", "worker", "--app=run.celery","--pool=prefork", "--hostname=worker.process@%h", "--queues=process", "--loglevel=INFO", "-Ofair"]
       volumes:
         - ~/.cloudvolume/secrets:/home/nginx/.cloudvolume/secrets:z
@@ -49,7 +49,7 @@ services:
         - ~/.cloudvolume/secrets/google-secret.json:/home/nginx/.cloudvolume/secrets/google-secret.json:z
         - .:/app
       env_file:
-        - ./.env.dev 
+        - ./.dev.env
       depends_on:
         - db
         - redis
