@@ -34,17 +34,19 @@ services:
       command: ["celery", "worker", "--app=run.celery","--pool=prefork", "--hostname=worker.process@%h", "--queues=process", "--loglevel=INFO", "-Ofair"]
       volumes:
         - ~/.cloudvolume/secrets:/home/nginx/.cloudvolume/secrets:z
+        - ~/.cloudvolume/secrets/google-secret.json:/home/nginx/.cloudvolume/secrets/google-secret.json:z
       depends_on:
         - redis
     materialize:
       image: 'materialize:tag'
       build:
         context: .
-        dockerfile: Dockerfile_Dev
+        dockerfile: dev.Dockerfile
       ports:
         - 80:80
       volumes:
         - ~/.cloudvolume/secrets:/home/nginx/.cloudvolume/secrets:z
+        - ~/.cloudvolume/secrets/google-secret.json:/home/nginx/.cloudvolume/secrets/google-secret.json:z
         - .:/app
       env_file:
         - ./.env.dev 
