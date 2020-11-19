@@ -29,10 +29,10 @@ celery_logger = get_task_logger(__name__)
 SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
 
 
-@celery.task(name="process:versioned_materialization",
+@celery.task(name="process:create_versioned_materialization_workflow",
              bind=True,
              acks_late=True,)
-def versioned_materialization(self, datastack_info: dict):
+def create_versioned_materialization_workflow(self, datastack_info: dict):
     """Create a timelocked database of materialization annotations
     and asociated segmentation data.
 
