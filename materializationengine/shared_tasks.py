@@ -64,7 +64,7 @@ def get_materialization_info(datastack_info: dict, analysis_version: int=None, s
     segmentation_source = datastack_info.get('segmentation_source')
     
     db = get_db(aligned_volume_name)
-    
+
     annotation_tables = db.get_valid_table_names()
     metadata = []
     for annotation_table in annotation_tables:
@@ -88,8 +88,9 @@ def get_materialization_info(datastack_info: dict, analysis_version: int=None, s
                 last_updated_time_stamp = segmentation_metadata.get('last_updated', None)
 
                 if not last_updated_time_stamp:
-                    last_updated_time_stamp = materialization_time_stamp
-
+                    last_updated_time_stamp = None
+                else:
+                    last_updated_time_stamp = str(last_updated_time_stamp)
                 table_metadata = {
                     'datastack': datastack_info['datastack'],
                     'aligned_volume': str(aligned_volume_name),
@@ -102,7 +103,7 @@ def get_materialization_info(datastack_info: dict, analysis_version: int=None, s
                     'segmentation_source': segmentation_source,
                     'coord_resolution': [4,4,40],
                     'materialization_time_stamp': str(materialization_time_stamp),
-                    'last_updated_time_stamp': str(last_updated_time_stamp),
+                    'last_updated_time_stamp': last_updated_time_stamp,
                     'chunk_size': 100000,
                     'table_count': len(annotation_tables)
                 }
