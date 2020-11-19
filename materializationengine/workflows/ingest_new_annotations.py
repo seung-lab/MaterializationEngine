@@ -27,10 +27,10 @@ from sqlalchemy.sql import or_
 celery_logger = get_task_logger(__name__)
 
 
-@celery.task(name="process:start_materialization",
+@celery.task(name="process:process_new_annotations_workflow",
              acks_late=True,
              bind=True)
-def start_materialization(self, datastack_info: dict):
+def process_new_annotations_workflow(self, datastack_info: dict):
     """Base live materialization
 
     Workflow paths:
@@ -58,7 +58,7 @@ def start_materialization(self, datastack_info: dict):
                 create_missing_segmentation_table.s(mat_metadata),
                 chord([
                     chain(
-                        live_update_task.s(chunk),
+                        ingest_new_annotations.s(chunk),
                         ) for chunk in supervoxel_chunks],
                         fin.si()), # return here is required for chords
                         update_metadata.s(mat_metadata))  # final task which will process a return status/timing etc...
@@ -66,12 +66,12 @@ def start_materialization(self, datastack_info: dict):
             process_chunks_workflow.apply_async()
 
           
-@celery.task(name="process:live_update_task",
+@celery.task(name="process:ingest_new_annotations",
              acks_late=True,
              bind=True,
              autoretry_for=(Exception,),
              max_retries=6)
-def live_update_task(self, mat_metadata, chunk):
+def ingest_new_annotations(self, mat_metadata, chunk):
     try:
         start_time = time.time()
         missing_data = get_annotations_with_missing_supervoxel_ids(mat_metadata, chunk)
