@@ -66,18 +66,9 @@ def check_aligned_volume(aligned_volume):
     aligned_volumes = get_aligned_volumes()
     if aligned_volume not in aligned_volumes:
         abort(400, f"aligned volume: {aligned_volume} not valid")
-    
-@mat_bp.route("/materialize/live/datastack/<string:datastack_name>")
-class RunMaterializeResource(Resource):
-    @auth_required
-    @mat_bp.doc("run updating materialization", security="apikey")
-    def post(self, datastack_name):
-        """Run live materialization to update segmentation data 
 
-        Args:
-            datastack_name (str): name of datastack from infoservice
-        """
-        from materializationengine.workflows.ingest_new_annotations import start_materialization
+
+def get_datastack_info(datastack_name: str) -> dict:
         INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
         url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{datastack_name}"
         try:
@@ -86,13 +77,41 @@ class RunMaterializeResource(Resource):
             r.raise_for_status()
             logging.info(url)
             datastack_info = r.json()
-            aligned_volume_name = datastack_info['aligned_volume']['name']
-            pcg_table_name = datastack_info['segmentation_source'].split("/")[-1]
-            segmentation_source = datastack_info.get('segmentation_source')
-            start_materialization.s(aligned_volume_name, pcg_table_name, segmentation_source).apply_async()
-            return 200
+            datastack_info['datastack'] = datastack_name
+            return datastack_info
         except requests.exceptions.RequestException as e:
             logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
+
+@mat_bp.route("/materialize/ingest/datastack/<string:datastack_name>")
+class ProcessNewAnnotationsResource(Resource):
+    @auth_required
+    @mat_bp.doc("process new annotations workflow", security="apikey")
+    def post(self, datastack_name):
+        """Process newly added annotations and lookup segmentation data
+
+        Args:
+            datastack_name (str): name of datastack from infoservice
+        """
+        from materializationengine.workflows.ingest_new_annotations import process_new_annotations_workflow
+        datastack_info = get_datastack_info(datastack_name)
+        process_new_annotations_workflow.s(datastack_info).apply_async()
+        return 200
+        
+
+@mat_bp.route("/materialize/live/datastack/<string:datastack_name>")
+class CompleteWorkflowResource(Resource):
+    @auth_required
+    @mat_bp.doc("ingest segmentations > update roots and freeze materialization", security="apikey")
+    def post(self, datastack_name: str):
+        """Create versioned materialization, finds missing segmentations and updates roots
+
+        Args:
+            datastack_name (str): name of datastack from infoservice
+        """
+        from materializationengine.workflows.complete_workflow import run_complete_worflow
+        datastack_info = get_datastack_info(datastack_name)
+        run_complete_worflow.s(datastack_info).apply_async()
+        return 200
 
 
 @mat_bp.route("/materialize/frozen/datastack/<string:datastack_name>")
@@ -105,20 +124,10 @@ class CreateFrozenMaterializationResource(Resource):
         Args:
             datastack_name (str): name of datastack from infoservice
         """
-        from materializationengine.workflows.create_frozen_database import versioned_materialization
-        INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
-        url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{datastack_name}"
-        try:
-            auth_header = {"Authorization": f"Bearer {current_app.config['AUTH_TOKEN']}"}
-            r = requests.get(url, headers=auth_header)
-            r.raise_for_status()
-            logging.info(url)
-            datastack_info = r.json()
-            datastack_info['datastack'] = datastack_name
-            versioned_materialization.s(datastack_info).apply_async()
-        except requests.exceptions.RequestException as e:
-            logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
-
+        from materializationengine.workflows.create_frozen_database import create_versioned_materialization_workflow
+        datastack_info = get_datastack_info(datastack_name)   
+        create_versioned_materialization_workflow.s(datastack_info).apply_async()
+        return 200
 
 @mat_bp.route("/materialize/roots/datastack/<string:datastack_name>")
 class UpdateExpiredRootIdsResource(Resource):
@@ -131,21 +140,10 @@ class UpdateExpiredRootIdsResource(Resource):
             datastack_name (str): name of datastack from infoservice
         """
         from materializationengine.workflows.update_root_ids import expired_root_id_workflow
-        INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
-        url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{datastack_name}"
-        try:
-            auth_header = {"Authorization": f"Bearer {current_app.config['AUTH_TOKEN']}"}
-            r = requests.get(url, headers=auth_header)
-            r.raise_for_status()
-            logging.info(url)
-            datastack_info = r.json()
-            datastack_info['datastack'] = datastack_name
-
-            expired_root_id_workflow.s(datastack_info).apply_async()
-            return 200
-        except requests.exceptions.RequestException as e:
-            logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
-
+        datastack_info = get_datastack_info(datastack_name)   
+        expired_root_id_workflow.s(datastack_info).apply_async()
+        return 200
+        
 
 
 @mat_bp.expect(bulk_upload_parser)
@@ -170,31 +168,20 @@ class BulkUploadResource(Resource):
 
         args = bulk_upload_parser.parse_args()
 
-
-        INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
-        url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{datastack_name}"
-        try:
-            auth_header = {"Authorization": f"Bearer {current_app.config['AUTH_TOKEN']}"}
-            r = requests.get(url, headers=auth_header)
-            r.raise_for_status()
-            logging.info(url)
-            bulk_upload_info = r.json()
+        bulk_upload_info = get_datastack_info(datastack_name)
             
-            bulk_upload_info.update({
-                'column_mapping': args['column_mapping'],
-                'project': args['project'],
-                'file_path': args['file_path'],
-                'schema': args['schema'],
-                'datastack': datastack_name,
-                'description': description,
-                'annotation_table_name': table_name,
-                'segmentation_source': segmentation_source,
-            })
-            bulk_upload(bulk_upload_info)
-            return f"Uploading : {datastack_name}", 200
-        except requests.exceptions.RequestException as e:
-            logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
-
+        bulk_upload_info.update({
+            'column_mapping': args['column_mapping'],
+            'project': args['project'],
+            'file_path': args['file_path'],
+            'schema': args['schema'],
+            'datastack': datastack_name,
+            'description': description,
+            'annotation_table_name': table_name,
+            'segmentation_source': segmentation_source,
+        })
+        bulk_upload(bulk_upload_info)
+        return f"Uploading : {datastack_name}", 200
 
 @mat_bp.expect(missing_chunk_parser)
 @mat_bp.route("/missing_chunks/<string:datastack_name>/<string:table_name>/<string:segmentation_source>/<string:description>")
@@ -215,30 +202,21 @@ class InsertMissingChunks(Resource):
         from materializationengine.workflows.bulk_upload import insert_missing_data
 
         args = missing_chunk_parser.parse_args()
-        INFOSERVICE_ENDPOINT = current_app.config["INFOSERVICE_ENDPOINT"]
-        url = INFOSERVICE_ENDPOINT + f"/api/v2/datastack/full/{datastack_name}"
-        try:
-            auth_header = {"Authorization": f"Bearer {current_app.config['AUTH_TOKEN']}"}
-            r = requests.get(url, headers=auth_header)
-            r.raise_for_status()
-            logging.info(url)
-            bulk_upload_info = r.json()
-            bulk_upload_info.update({
-                'chunks': args['chunks'],
-                'column_mapping': args['column_mapping'],
-                'project': args['project'],
-                'file_path': args['file_path'],
-                'schema': args['schema'],
-                'datastack': datastack_name,
-                'description': description,
-                'annotation_table_name': table_name,
-                'segmentation_source': segmentation_source,
-            })
-            insert_missing_data(bulk_upload_info)
-            return f"Uploading : {datastack_name}", 200
-        except requests.exceptions.RequestException as e:
-            logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
 
+        bulk_upload_info = get_datastack_info(datastack_name)              
+        bulk_upload_info.update({
+            'chunks': args['chunks'],
+            'column_mapping': args['column_mapping'],
+            'project': args['project'],
+            'file_path': args['file_path'],
+            'schema': args['schema'],
+            'datastack': datastack_name,
+            'description': description,
+            'annotation_table_name': table_name,
+            'segmentation_source': segmentation_source,
+        })
+        insert_missing_data(bulk_upload_info)
+        return f"Uploading : {datastack_name}", 200
 
 @mat_bp.route("/aligned_volume/<aligned_volume_name>")
 class DatasetResource(Resource):
