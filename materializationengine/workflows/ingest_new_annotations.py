@@ -77,7 +77,7 @@ def ingest_new_annotations(self, mat_metadata, chunk):
         missing_data = get_annotations_with_missing_supervoxel_ids(mat_metadata, chunk)
         supervoxel_data = get_cloudvolume_supervoxel_ids(missing_data, mat_metadata)
         root_id_data = get_new_root_ids(supervoxel_data, mat_metadata)
-        result = update_segmentation_table(root_id_data, mat_metadata)
+        result = insert_segmentation_data(root_id_data, mat_metadata)
         celery_logger.info(result)
         run_time = time.time() - start_time
         table_name = mat_metadata["annotation_table_name"]
@@ -156,44 +156,41 @@ def get_annotations_with_missing_supervoxel_ids(mat_metadata: dict,
     AnnotationModel = create_annotation_model(mat_metadata)
     
     session = sqlalchemy_cache.get(aligned_volume)
+
     anno_model_cols, seg_model_cols, supervoxel_columns = get_query_columns_by_suffix(
-        AnnotationModel, SegmentationModel, 'supervoxel_id')
-    try:
-        query = session.query(*anno_model_cols)
-        chunked_id_query = query_id_range(AnnotationModel.id, chunk[0], chunk[1])
-        annotation_data = [data for data in query.filter(chunked_id_query).order_by(
-            AnnotationModel.id).filter(AnnotationModel.valid == True)]
+        AnnotationModel, SegmentationModel,'supervoxel_id')
 
-        annotation_dataframe = pd.DataFrame(annotation_data, dtype=object)
-        anno_ids = annotation_dataframe['id'].tolist()
-        
-        supervoxel_data = [data for data in session.query(*seg_model_cols).\
-            filter(or_(SegmentationModel.id.in_(anno_ids)))]  
-        session.close()
-    except SQLAlchemyError as e:
-        session.rollback()
-        celery_logger.error(e)
+    query = session.query(*anno_model_cols)
 
-    if not anno_ids:
-        return
+    chunked_id_query = query_id_range(AnnotationModel.id, chunk[0], chunk[1])
+    annotation_data = [data for data in query.filter(chunked_id_query).order_by(
+        AnnotationModel.id).filter(AnnotationModel.valid == True).join(
+        SegmentationModel, isouter=True).filter(SegmentationModel.id == None)]
 
-    wkb_data = annotation_dataframe.loc[:, annotation_dataframe.columns.str.endswith("position")]
+    annotation_dataframe = pd.DataFrame(annotation_data, dtype=object)
+    if not annotation_dataframe.empty:
+        wkb_data = annotation_dataframe.loc[:, annotation_dataframe.columns.str.endswith(
+            "position")]
 
-    annotation_dict = {}
-    for column, wkb_points in wkb_data.items():
-        annotation_dict[column] = [get_geom_from_wkb(wkb_point) for wkb_point in wkb_points]
-    for key, value in annotation_dict.items():
-        annotation_dataframe.loc[:, key] = value
+        annotation_dict = {}
+        for column, wkb_points in wkb_data.items():
+            annotation_dict[column] = [get_geom_from_wkb(
+                wkb_point) for wkb_point in wkb_points]
 
-    if supervoxel_data:
-        segmatation_col_list = [col for col in supervoxel_data[0].keys()]
-        segmentation_dataframe = pd.DataFrame(supervoxel_data, columns=segmatation_col_list, dtype=object).fillna(value=np.nan)
-        merged_dataframe = pd.merge(segmentation_dataframe, annotation_dataframe, how='outer', left_on='id', right_on='id')
-    else:
+        for key, value in annotation_dict.items():
+            annotation_dataframe.loc[:, key] = value
+
         segmentation_dataframe = pd.DataFrame(columns=supervoxel_columns, dtype=object)
         segmentation_dataframe = segmentation_dataframe.fillna(value=np.nan)
-        merged_dataframe = pd.concat((segmentation_dataframe, annotation_dataframe), axis=1)
-    return merged_dataframe.to_dict(orient='list')
+        mat_df = pd.concat((segmentation_dataframe, annotation_dataframe), axis=1)            
+        materialization_data = mat_df.to_dict(orient='list')
+    else:
+        materialization_data = None
+    
+    session.close()
+    
+    return materialization_data
+
 
 
 def get_cloudvolume_supervoxel_ids(materialization_data: dict, mat_metadata: dict) -> dict:
@@ -300,8 +297,9 @@ def get_new_root_ids(materialization_data: dict, mat_metadata: dict) -> dict:
     anno_ids = supervoxel_df['id'].to_list()
 
     # get current root ids from database
+    session = sqlalchemy_cache.get(aligned_volume)
+
     try:
-        session = sqlalchemy_cache.get(aligned_volume)
         current_root_ids = [data for data in session.query(*seg_model_cols).
                             filter(or_(SegmentationModel.id.in_(anno_ids)))]
     except SQLAlchemyError as e:
@@ -330,29 +328,7 @@ def get_new_root_ids(materialization_data: dict, mat_metadata: dict) -> dict:
 
     cols = [x for x in root_ids_df.columns if "root_id" in x]
 
-
-    # lookup expired roots
-    # if last_updated_time_stamp:
-    #     try:
-    #         ts_format = "%Y-%m-%dT%H:%M:%S.%f"
-    #         last_updated_time_stamp = datetime.datetime.strptime(last_updated_time_stamp, ts_format)
-    #     except:
-    #         ts_format = '%Y-%m-%d %H:%M:%S.%f'
-    #         last_updated_time_stamp = datetime.datetime.strptime(last_updated_time_stamp, ts_format)
-
-    #     # get time stamp from 5 mins ago
-    #     time_stamp = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
-    #     old_roots, new_roots = cg.get_proofread_root_ids(
-    #         last_updated_time_stamp, time_stamp)
-    #     root_id_map = dict(zip(old_roots, new_roots))
-
-    #     for col in cols:
-    #         if not root_ids_df[root_ids_df[col].isin([old_roots])].empty:
-    #             for old_root_id, new_root_id in root_id_map.items():
-    #                 root_ids_df.loc[root_ids_df[col] == old_root_id, col] = new_root_id
-    #                 updated_rows += 1
     cg = chunkedgraph_cache.init_pcg(pcg_table_name)
-    updated_rows = 0
 
     # filter missing root_ids and lookup root_ids if missing
     mask = np.logical_and.reduce([root_ids_df[col].isna() for col in cols])
@@ -365,15 +341,12 @@ def get_new_root_ids(materialization_data: dict, mat_metadata: dict) -> dict:
                 data = missing_root_rows.loc[:, col_name]
                 root_id_array = np.squeeze(cg.get_roots(data.to_list(), time_stamp=materialization_time_stamp))
                 root_ids_df.loc[data.index, root_id_name] = root_id_array
-                updated_rows += 1
 
-    if updated_rows == 0:
-        return
         
     return root_ids_df.to_dict(orient='records')
 
 
-def update_segmentation_table(materialization_data: dict, mat_metadata: dict) -> dict:
+def insert_segmentation_data(materialization_data: dict, mat_metadata: dict) -> dict:
     
     if not materialization_data:
         return {'status': 'empty'}
@@ -381,11 +354,15 @@ def update_segmentation_table(materialization_data: dict, mat_metadata: dict) ->
     SegmentationModel = create_segmentation_model(mat_metadata)
     aligned_volume = mat_metadata.get("aligned_volume")
 
+    session = sqlalchemy_cache.get(aligned_volume)
+    engine = sqlalchemy_cache.get_engine(aligned_volume)
+    
     try:
-        session = sqlalchemy_cache.get(aligned_volume)
-        upsert(session, materialization_data, SegmentationModel)
-        session.close()
-        return {'status': 'updated'}
+        with engine.begin() as connection:
+            connection.execute(SegmentationModel.__table__.insert(), materialization_data)
+        return {'New segmentations inserted': len(materialization_data)}
     except SQLAlchemyError as e:
+        session.rollback()
         celery_logger.error(e)
-
+    finally:
+        session.close()
