@@ -254,18 +254,12 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
         aligned_volume, datastack, annotation_table_name, analysis_version)
 
     chunked_id_query = query_id_range(AnnotationModel.id, chunk[0], chunk[1])
-    if schema == 'synapse':
-        r = session.query(AnnotationModel, SegmentationModel).\
-            join(SegmentationModel).\
-            filter(SegmentationModel.id == AnnotationModel.id).\
-            filter(chunked_id_query).order_by(AnnotationModel.id)
-    else:
-        r = session.query(AnnotationModel, SegmentationModel).\
-            join(SegmentationModel).\
-            filter((AnnotationModel.deleted <= datetime.datetime.utcnow()) | (AnnotationModel.valid == True)).\
-            filter(SegmentationModel.id == AnnotationModel.id).\
-            filter(chunked_id_query).order_by(AnnotationModel.id)
-
+    r = session.query(AnnotationModel, SegmentationModel).\
+        join(SegmentationModel).\
+        filter(SegmentationModel.id == AnnotationModel.id).\
+        filter(AnnotationModel.valid == True).\
+        filter(chunked_id_query).order_by(AnnotationModel.id)
+    
     annotation_data = r.all()
     annotations = []
     for (anno, seg) in annotation_data:
