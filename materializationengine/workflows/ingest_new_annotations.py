@@ -7,16 +7,14 @@ import numpy as np
 import pandas as pd
 from celery import chain, chord
 from celery.utils.log import get_task_logger
-from dynamicannotationdb.key_utils import build_segmentation_table_name
 from dynamicannotationdb.models import SegmentationMetadata
 from materializationengine.celery_worker import celery
 from materializationengine.chunkedgraph_gateway import chunkedgraph_cache
-from materializationengine.database import get_db, sqlalchemy_cache
+from materializationengine.database import sqlalchemy_cache
 from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
                                                 query_id_range,
                                                 update_metadata,
                                                 get_materialization_info)
-from materializationengine.upsert import upsert
 from materializationengine.utils import (create_annotation_model,
                                          create_segmentation_model,
                                          get_geom_from_wkb,
@@ -158,7 +156,7 @@ def get_annotations_with_missing_supervoxel_ids(mat_metadata: dict,
     
     session = sqlalchemy_cache.get(aligned_volume)
 
-    anno_model_cols, seg_model_cols, supervoxel_columns = get_query_columns_by_suffix(
+    anno_model_cols, __, supervoxel_columns = get_query_columns_by_suffix(
         AnnotationModel, SegmentationModel,'supervoxel_id')
 
     query = session.query(*anno_model_cols)
@@ -277,7 +275,6 @@ def get_new_root_ids(materialization_data: dict, mat_metadata: dict) -> dict:
         dict: root_ids to be inserted into db
     """
     pcg_table_name = mat_metadata.get("pcg_table_name")
-    last_updated_time_stamp = mat_metadata.get("last_updated_time_stamp")
     aligned_volume = mat_metadata.get("aligned_volume")
     try:
         materialization_time_stamp = datetime.datetime.strptime(
@@ -361,9 +358,9 @@ def insert_segmentation_data(materialization_data: dict, mat_metadata: dict) -> 
     try:
         with engine.begin() as connection:
             connection.execute(SegmentationModel.__table__.insert(), materialization_data)
-        return {'New segmentations inserted': len(materialization_data)}
     except SQLAlchemyError as e:
         session.rollback()
         celery_logger.error(e)
     finally:
         session.close()
+    return {'New segmentations inserted': len(materialization_data)}
