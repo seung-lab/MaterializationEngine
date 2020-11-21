@@ -75,10 +75,11 @@ def ingest_new_annotations(self, mat_metadata, chunk):
     try:
         start_time = time.time()
         missing_data = get_annotations_with_missing_supervoxel_ids(mat_metadata, chunk)
-        supervoxel_data = get_cloudvolume_supervoxel_ids(missing_data, mat_metadata)
-        root_id_data = get_new_root_ids(supervoxel_data, mat_metadata)
-        result = insert_segmentation_data(root_id_data, mat_metadata)
-        celery_logger.info(result)
+        if missing_data:
+            supervoxel_data = get_cloudvolume_supervoxel_ids(missing_data, mat_metadata)
+            root_id_data = get_new_root_ids(supervoxel_data, mat_metadata)
+            result = insert_segmentation_data(root_id_data, mat_metadata)
+            celery_logger.info(result)
         run_time = time.time() - start_time
         table_name = mat_metadata["annotation_table_name"]
     except Exception as e:
