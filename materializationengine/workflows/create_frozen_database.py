@@ -239,8 +239,6 @@ def create_analysis_tables(datastack_info: dict, analysis_version: int):
 def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
 
     aligned_volume = mat_metadata['aligned_volume']
-    schema = mat_metadata['schema']
-
     analysis_version = mat_metadata['analysis_version']
     annotation_table_name = mat_metadata['annotation_table_name']
     datastack = mat_metadata['datastack']
