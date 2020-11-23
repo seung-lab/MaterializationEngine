@@ -242,8 +242,7 @@ def parse_data(data: List, bulk_upload_info: dict):
     data_type = bulk_upload_info['data_type']
     column_mapping = bulk_upload_info['column_mapping']
 
-    if data_type in column_mapping:
-        data_columns = column_mapping[data_type]
+    data_columns = column_mapping[data_type]
        
     if not isinstance(data_columns, list):
         data = {data_columns: data}
