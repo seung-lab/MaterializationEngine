@@ -8,7 +8,7 @@ from flask import (
     url_for,
     redirect,
 )
-from flask_restx import Namespace, Resource, reqparse, fields
+from flask_restx import Namespace, Resource, reqparse, fields, inputs
 from flask_accepts import accepts, responds
 from emannotationschemas.models import format_version_db_uri
 from materializationengine.models import AnalysisTable, AnalysisVersion
@@ -31,7 +31,6 @@ from sqlalchemy.exc import NoSuchTableError
 from sqlalchemy.engine.url import make_url
 import datetime
 
-
 __version__ = "0.2.35"
 
 
@@ -47,6 +46,10 @@ missing_chunk_parser.add_argument('column_mapping', type=list, location='json')
 missing_chunk_parser.add_argument('project', type=str)
 missing_chunk_parser.add_argument('file_path', type=str)
 missing_chunk_parser.add_argument('schema', type=str)
+
+get_roots_parser = reqparse.RequestParser()
+get_roots_parser.add_argument('use_creation_time', default=False, type=inputs.boolean)
+
 
 
 authorizations = {
@@ -82,11 +85,25 @@ def get_datastack_info(datastack_name: str) -> dict:
         except requests.exceptions.RequestException as e:
             logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
 
+@mat_bp.route("/test/workflow/<int:iterator_length>")
+class TestWorkflowResource(Resource):
+    @auth_required
+    @mat_bp.doc("Test workflow pattern", security="apikey")
+    def post(self, iterator_length: int=50):
+        """Test workflow
+
+        Args:
+            iterator_length (int): Number of parallel tasks to run. Default = 5000
+        """
+        from materializationengine.workflows.test_workflow import start_test_workflow
+        status = start_test_workflow.s(iterator_length).apply_async()
+        return 200
+
 @mat_bp.route("/materialize/ingest/datastack/<string:datastack_name>")
 class ProcessNewAnnotationsResource(Resource):
     @auth_required
     @mat_bp.doc("process new annotations workflow", security="apikey")
-    def post(self, datastack_name):
+    def post(self, datastack_name: str):
         """Process newly added annotations and lookup segmentation data
 
         Args:
@@ -132,6 +149,7 @@ class CreateFrozenMaterializationResource(Resource):
 @mat_bp.route("/materialize/roots/datastack/<string:datastack_name>")
 class UpdateExpiredRootIdsResource(Resource):
     @auth_required
+    @mat_bp.expect(get_roots_parser)
     @mat_bp.doc("update expired root ids", security="apikey")
     def post(self, datastack_name: str):
         """Update expired root ids
@@ -141,6 +159,11 @@ class UpdateExpiredRootIdsResource(Resource):
         """
         from materializationengine.workflows.update_root_ids import expired_root_id_workflow
         datastack_info = get_datastack_info(datastack_name)   
+
+        args = get_roots_parser.parse_args()
+        use_creation_time = args["use_creation_time"]
+        datastack_info['use_creation_time'] = use_creation_time
+
         expired_root_id_workflow.s(datastack_info).apply_async()
         return 200
         
