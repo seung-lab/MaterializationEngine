@@ -1,5 +1,6 @@
 import datetime
 from typing import List
+from marshmallow.fields import Bool
 
 import numpy as np
 import pandas as pd
@@ -10,6 +11,7 @@ from materializationengine.chunkedgraph_gateway import chunkedgraph_cache
 from materializationengine.database import sqlalchemy_cache
 from materializationengine.shared_tasks import fin, update_metadata, get_materialization_info
 from materializationengine.utils import create_segmentation_model
+from dynamicannotationdb.models import AnnoMetadata
 from sqlalchemy.sql import or_
 
 celery_logger = get_task_logger(__name__)
@@ -26,21 +28,21 @@ def expired_root_id_workflow(self, datastack_info: dict):
         datastack_info (dict): Workflow metadata
     """
     mat_info = get_materialization_info(datastack_info)
-
+    workflow = []
+    use_creation_time = datastack_info['use_creation_time']
     for mat_metadata in mat_info:
-        if mat_metadata:
-            chunked_roots = get_expired_root_ids(mat_metadata)
-            process_root_ids = chain(
-                chord([chain(update_root_ids.si(root, mat_metadata))
-                       for root in chunked_roots], fin.si()),  # return here is required for chords
-                update_metadata.si(mat_metadata))  # final task which will process a return status/timing etc...
-            process_root_ids.apply_async()
+        chunked_roots = get_expired_root_ids(mat_metadata, use_creation_time=use_creation_time)
+        
+        process_root_ids = chain(
+            chord([group(update_root_ids(root_ids, mat_metadata))
+                for root_ids in chunked_roots], fin.si()),  # return here is required for chords
+            update_metadata.si(mat_metadata))  # final task which will process a return status/timing etc...
+        workflow.append(process_root_ids)
+    workflow = chord(workflow, fin.s())
+    status = workflow.apply_async()
+    return status
 
-
-@celery.task(name="process:update_root_ids",
-             acks_late=True,
-             bind=True,)
-def update_root_ids(self, root_ids: List[int], mat_metadata: dict) -> True:
+def update_root_ids(root_ids: List[int], mat_metadata: dict) -> True:
     """Chunks supervoxel data and distributes 
     supervoxels ids to parallel worker tasks that
     lookup new root_ids and update the database table.
@@ -50,12 +52,14 @@ def update_root_ids(self, root_ids: List[int], mat_metadata: dict) -> True:
         mat_metadata (dict): metadata for tasks
     """
     supervoxel_data = get_supervoxel_ids(root_ids, mat_metadata)
-    for __, data in supervoxel_data.items():
-        if data:
-            chunked_supervoxels = create_chunks(data, 100)
-            worker_chain = group(get_new_roots.s(chunk, mat_metadata) for chunk in chunked_supervoxels)
-            worker_chain.apply_async()
-    return True
+    groups = []
+    if supervoxel_data:
+        for __, data in supervoxel_data.items():
+            if data:
+                chunked_supervoxels = create_chunks(data, 100)
+                worker_chain = group(get_new_roots.s(chunk, mat_metadata) for chunk in chunked_supervoxels)
+                groups.append(worker_chain)
+    return groups
 
 def create_chunks(data_list: List, chunk_size: int):
     """Return successive n-sized chunks from a list."""
@@ -65,7 +69,7 @@ def create_chunks(data_list: List, chunk_size: int):
         yield data_list[i:i + chunk_size]
 
 
-def get_expired_root_ids(mat_metadata: dict, expired_chunk_size: int = 10):
+def get_expired_root_ids(mat_metadata: dict, expired_chunk_size: int = 100, use_creation_time: Bool = False):
     """[summary]
 
     Args:
@@ -80,12 +84,22 @@ def get_expired_root_ids(mat_metadata: dict, expired_chunk_size: int = 10):
     """
     last_updated_ts = mat_metadata.get('last_updated_time_stamp', None)
     pcg_table_name = mat_metadata.get("pcg_table_name")
-
-    if last_updated_ts:
-        last_updated_ts = datetime.datetime.strptime(
-            last_updated_ts, '%Y-%m-%d %H:%M:%S.%f')
+    
+    if use_creation_time:
+        aligned_volume = mat_metadata.get("aligned_volume")
+        annotation_table_name = mat_metadata['annotation_table_name']
+        session = sqlalchemy_cache.get(aligned_volume)
+        ts = session.query(AnnoMetadata.created).filter(
+            AnnoMetadata.table_name == annotation_table_name).one()
+        last_updated_ts = ts.created    
+        print(last_updated_ts)        
+        session.close()
     else:
-        last_updated_ts = datetime.datetime.utcnow() - datetime.timedelta(minutes=60)
+        if last_updated_ts:
+            last_updated_ts = datetime.datetime.strptime(
+                last_updated_ts, '%Y-%m-%d %H:%M:%S.%f')
+        else:
+            last_updated_ts = datetime.datetime.utcnow() - datetime.timedelta(days=5)
 
     cg = chunkedgraph_cache.init_pcg(pcg_table_name)
 
@@ -138,13 +152,18 @@ def get_supervoxel_ids(root_id_chunk: list, mat_metadata: dict):
                 filter(or_(getattr(SegmentationModel, root_id_column)).in_(
                     root_id_chunk))
             ]
-            expired_root_id_data[root_id_column] = pd.DataFrame(
-                supervoxels).to_dict(orient="records")
+            if supervoxels:
+                expired_root_id_data[root_id_column] = pd.DataFrame(
+                    supervoxels).to_dict(orient="records")
+            
     except Exception as e:
         raise e
     finally:
         session.close()
-    return expired_root_id_data
+    if expired_root_id_data:
+        return expired_root_id_data
+    else:
+        return None
 
 
 @celery.task(name="process:get_new_roots",
@@ -192,7 +211,6 @@ def get_new_roots(self, supervoxel_chunk: list, mat_metadata: dict):
 
     SegmentationModel = create_segmentation_model(mat_metadata)
     aligned_volume = mat_metadata.get("aligned_volume")
-
     session = sqlalchemy_cache.get(aligned_volume)
     try:
         session.bulk_update_mappings(SegmentationModel, root_ids_df.to_dict(orient='records'))
@@ -201,4 +219,4 @@ def get_new_roots(self, supervoxel_chunk: list, mat_metadata: dict):
         celery_logger.error(f"ERROR: {e}")
     finally:
         session.close()
-    return True
+    return root_ids_df.to_dict()
