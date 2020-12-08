@@ -12,7 +12,8 @@ class AnalysisVersion(Base):
     version = Column(Integer, nullable=False)
     time_stamp = Column(DateTime, nullable=False)
     valid = Column(Boolean)
-
+    expires_on = Column(DateTime, nullable=True)
+    
     def __repr__(self):
         return "{}_v{}".format(self.datastack, self.version)
 
