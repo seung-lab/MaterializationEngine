@@ -43,6 +43,13 @@ def chunk_supervoxel_ids_task(mat_metadata: dict) -> List[List]:
 def fin(self, *args, **kwargs):
     return True
 
+@celery.task(name="process:final_task",
+             bind=True,
+             acks_late=True,
+             autoretry_for=(Exception,),
+             max_retries=3)
+def final_task(self, *args, **kwargs):
+    return "FINAL TASK"  
 
 def get_materialization_info(datastack_info: dict, analysis_version: int=None, skip_table:bool=False, row_size:int=1_000_000) -> List[dict]:
     """Initialize materialization by an aligned volume name. Iterates thorugh all

@@ -4,7 +4,8 @@ from celery.utils.log import get_task_logger
 from materializationengine.celery_worker import celery
 from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
                                                 update_metadata,
-                                                get_materialization_info)
+                                                get_materialization_info,
+                                                final_task)
 from materializationengine.workflows.create_frozen_database import (
     create_analysis_database, create_analysis_tables, create_new_version,
     insert_annotation_data, update_analysis_metadata)
@@ -45,6 +46,8 @@ def run_complete_worflow(self, datastack_info: dict):
     materialized_tables = create_analysis_tables(
         datastack_info, new_version_number)
     
+    workflow = []
+
     for mat_metadata in mat_info:
         supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
         chunked_roots = get_expired_root_ids(mat_metadata)
@@ -61,16 +64,20 @@ def run_complete_worflow(self, datastack_info: dict):
             new_annotation_workflow = None
 
         update_roots_and_freeze = chain(
-            chord([update_root_ids.si(root, mat_metadata)
-                   for root in chunked_roots], fin.si()),
+            chord([group(update_root_ids(root_ids, mat_metadata))
+                for root_ids in chunked_roots], fin.si()),
             update_metadata.si(mat_metadata),
             chord([
                 chain(insert_annotation_data.si(chunk, mat_metadata)) for chunk in supervoxel_chunks], fin.si()),
             update_analysis_metadata.si(mat_metadata))  # final task which will process a return status/timing etc...
         
         if new_annotation_workflow is not None:
-            complete_workflow = chain(
+            ingest_and_freeze_workflow = chain(
                 new_annotation_workflow, update_roots_and_freeze)
-            complete_workflow.apply_async()
+            workflow.append(ingest_and_freeze_workflow)
         else:
-            update_roots_and_freeze.apply_async()
+            workflow.append(update_roots_and_freeze)
+
+    final_workflow = chord(workflow, final_task.s())
+    final_workflow.apply_async() 
+
