@@ -23,6 +23,7 @@ from materializationengine.index_manager import index_cache
 from sqlalchemy import MetaData, create_engine
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.declarative import declarative_base
+import pandas as pd
 
 celery_logger = get_task_logger(__name__)
 
@@ -107,7 +108,7 @@ def create_new_version(datastack_info: dict):
         new_version_number = top_version.version + 1
 
     time_stamp = datetime.datetime.utcnow()
-    
+
     expiration_date = datetime.datetime.utcnow() + datetime.timedelta(days=5)
 
     analysisversion = AnalysisVersion(datastack=datastack,
@@ -252,29 +253,30 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
 
     session = sqlalchemy_cache.get(aligned_volume)
     engine = sqlalchemy_cache.get_engine(aligned_volume)
-
-    AnnotationModel = create_annotation_model(mat_metadata)
+    
+    # build table models
+    AnnotationModel = create_annotation_model(mat_metadata, with_crud_columns=False)
     SegmentationModel = create_segmentation_model(mat_metadata)
     analysis_table = get_analysis_table(
         aligned_volume, datastack, annotation_table_name, analysis_version)
-
-    chunked_id_query = query_id_range(AnnotationModel.id, chunk[0], chunk[1])
-    r = session.query(AnnotationModel, SegmentationModel).\
-        join(SegmentationModel).\
-        filter(SegmentationModel.id == AnnotationModel.id).\
-        filter(AnnotationModel.valid == True).\
-        filter(chunked_id_query).order_by(AnnotationModel.id)
     
-    annotation_data = r.all()
-    annotations = []
-    for (anno, seg) in annotation_data:
-        annotation = {**anno.__dict__, **seg.__dict__}
-        del annotation['_sa_instance_state']
-        del annotation['created']
-        del annotation['deleted']
-        del annotation['superceded_id']
-        annotations.append(annotation)
+    query_columns = []
+    for col in AnnotationModel.__table__.columns:
+        query_columns.append(col)
+    for col in SegmentationModel.__table__.columns:
+        if not col.name == 'id':
+            query_columns.append(col)
+    
+    chunked_id_query = query_id_range(AnnotationModel.id, chunk[0], chunk[1])
 
+    anno_ids = session.query(AnnotationModel.id).filter(chunked_id_query).filter(AnnotationModel.valid == True)
+    query = session.query(*query_columns).join(SegmentationModel).\
+                        filter(SegmentationModel.id == AnnotationModel.id).\
+                        filter(SegmentationModel.id.in_(anno_ids))
+    data = query.all()
+    mat_df = pd.DataFrame(data)
+    mat_df = mat_df.to_dict(orient="records")
+   
     analysys_sql_uri = create_analysis_sql_uri(
         SQL_URI_CONFIG, datastack, analysis_version)
     analysis_session, analysis_engine = create_session(analysys_sql_uri)
@@ -282,7 +284,7 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
     try:
         analysis_engine.execute(
             analysis_table.insert(),
-            [data for data in annotations]
+            [data for data in mat_df]
         )
     except Exception as e:
         celery_logger.error(e)
