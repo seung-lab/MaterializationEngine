@@ -57,10 +57,10 @@ def create_segmentation_model(mat_metadata):
         annotation_table_name, schema_type, pcg_table_name)
     return SegmentationModel
 
-def create_annotation_model(mat_metadata):
+def create_annotation_model(mat_metadata, with_crud_columns: bool=True):
     annotation_table_name = mat_metadata.get('annotation_table_name')
     schema_type = mat_metadata.get("schema")
 
     AnnotationModel = em_models.make_annotation_model(
-        annotation_table_name, schema_type)
+        annotation_table_name, schema_type, with_crud_columns)
     return AnnotationModel
