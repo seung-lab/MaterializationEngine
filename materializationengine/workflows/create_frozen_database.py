@@ -398,12 +398,13 @@ def drop_indexes(self, mat_metadata: dict):
     if drop_indexes:
         analysis_version = mat_metadata.get('analysis_version', None)
         datastack = mat_metadata['datastack']
+        annotation_table_name = mat_metadata.get('annotation_table_name', None)
 
         analysis_sql_uri = create_analysis_sql_uri(
             SQL_URI_CONFIG, datastack, analysis_version)
 
         analysis_session, analysis_engine = create_session(analysis_sql_uri)
-        index_cache.drop_table_indexes('synapses_pni_1m', analysis_engine)
+        index_cache.drop_table_indexes(annotation_table_name, analysis_engine)
         analysis_session.close()
         analysis_engine.dispose()
         return "INDEXES DROPPED"  
