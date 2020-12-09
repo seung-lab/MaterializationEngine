@@ -4,7 +4,6 @@ from celery import chain, chord, group
 from celery.utils.log import get_task_logger
 from materializationengine.celery_worker import celery
 from materializationengine.shared_tasks import fin 
-from tqdm import tqdm
 
 celery_logger = get_task_logger(__name__)
 
