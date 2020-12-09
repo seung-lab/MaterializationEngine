@@ -98,12 +98,19 @@ def get_materialization_info(datastack_info: dict, analysis_version: int=None, s
                     last_updated_time_stamp = None
                 else:
                     last_updated_time_stamp = str(last_updated_time_stamp)
+
+                if row_count >= row_size:
+                    drop_indexes = True
+                else:
+                    drop_indexes = False
+                
                 table_metadata = {
                     'datastack': datastack_info['datastack'],
                     'aligned_volume': str(aligned_volume_name),
                     'schema': db.get_table_schema(annotation_table),
                     'max_id': int(max_id),
                     'row_count': row_count,
+                    'drop_indexes': drop_indexes,
                     'segmentation_table_name': segmentation_table_name,
                     'annotation_table_name': annotation_table,
                     'pcg_table_name': pcg_table_name,
