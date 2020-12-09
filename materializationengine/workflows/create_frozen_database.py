@@ -8,7 +8,7 @@ from dynamicannotationdb.key_utils import build_segmentation_table_name
 from dynamicannotationdb.models import AnnoMetadata
 from emannotationschemas import get_schema
 from emannotationschemas.flatten import create_flattened_schema
-from emannotationschemas.models import create_table_dict
+from emannotationschemas.models import create_table_dict, make_flat_model
 from flask import current_app
 from materializationengine.celery_worker import celery
 from materializationengine.database import (create_session, get_db,
@@ -60,15 +60,22 @@ def create_versioned_materialization_workflow(self, datastack_info: dict):
     database = create_analysis_database(datastack_info, new_version_number),
     materialized_tables = create_analysis_tables(datastack_info, new_version_number)
 
+    frozen_workflow = []
     for mat_metadata in mat_info:
         if mat_metadata:
             supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
             process_chunks_workflow = chain(
+                drop_indexes.si(mat_metadata),
                 chord([
                     chain(insert_annotation_data.si(chunk, mat_metadata)) for chunk in supervoxel_chunks], fin.si()),
                 update_analysis_metadata.si(mat_metadata),
+                add_indexes.si(mat_metadata),
                 check_tables.si(mat_metadata))
-            process_chunks_workflow.apply_async()
+            frozen_workflow.append(process_chunks_workflow)
+            
+    workflow = chord(frozen_workflow, fin.s())
+    status = workflow.apply_async()
+    return status
 
 
 def create_new_version(datastack_info: dict):
@@ -100,11 +107,14 @@ def create_new_version(datastack_info: dict):
         new_version_number = top_version.version + 1
 
     time_stamp = datetime.datetime.utcnow()
+    
+    expiration_date = datetime.datetime.utcnow() + datetime.timedelta(days=5)
 
     analysisversion = AnalysisVersion(datastack=datastack,
                                       time_stamp=time_stamp,
                                       version=new_version_number,
-                                      valid=False)
+                                      valid=False,
+                                      expires_on=expiration_date)
     session.add(analysisversion)
     session.commit()
     return new_version_number
@@ -221,9 +231,6 @@ def create_analysis_tables(datastack_info: dict, analysis_version: int):
                 flat_table = type(
                     table_name, (analysis_base,), annotation_dict)
                 flat_table.__table__.create(bind=analysis_engine)
-
-                if "synapse" == schema_type[0]:
-                    is_dropped = index_cache.drop_table_indexes(table_name, analysis_engine)
                 
     session.close()
     engine.dispose()
@@ -294,7 +301,9 @@ def update_analysis_metadata(self, mat_metadata: dict):
     aligned_volume = mat_metadata['aligned_volume']
     version = mat_metadata['analysis_version']
     session = sqlalchemy_cache.get(aligned_volume)
-    version_id = session.query(AnalysisVersion.id).filter(AnalysisVersion.version==version).first()
+
+    version_id = session.query(AnalysisVersion.id).filter(
+        AnalysisVersion.version == version).first()
 
     analysis_table = AnalysisTable(aligned_volume=aligned_volume,
                                    schema=mat_metadata['schema'],
@@ -377,3 +386,52 @@ def get_analysis_table(aligned_volume: str, datastack: str, table_name: str, mat
     analysis_engine.dispose()
     return analysis_table
 
+@celery.task(name="process:drop_indexes",
+             bind=True,
+             acks_late=True,
+             autoretry_for=(Exception,),
+             max_retries=3)
+def drop_indexes(self, mat_metadata: dict):
+    drop_indexes = mat_metadata.get('drop_indexes', None)
+    if drop_indexes:
+        analysis_version = mat_metadata.get('analysis_version', None)
+        datastack = mat_metadata['datastack']
+
+        analysis_sql_uri = create_analysis_sql_uri(
+            SQL_URI_CONFIG, datastack, analysis_version)
+
+        analysis_session, analysis_engine = create_session(analysis_sql_uri)
+        index_cache.drop_table_indexes('synapses_pni_1m', analysis_engine)
+        analysis_session.close()
+        analysis_engine.dispose()
+        return "INDEXES DROPPED"  
+    return "No indexes dropped"
+
+
+@celery.task(name="process:add_indexes",
+             bind=True,
+             acks_late=True,
+             autoretry_for=(Exception,),
+             max_retries=3)
+def add_indexes(self, mat_metadata: dict):
+    drop_indexes = mat_metadata.get('drop_indexes', None)
+    if drop_indexes:
+        analysis_version = mat_metadata.get('analysis_version', None)
+        datastack = mat_metadata['datastack']
+        analysis_sql_uri = create_analysis_sql_uri(
+            SQL_URI_CONFIG, datastack, analysis_version)
+
+        analysis_session, analysis_engine = create_session(analysis_sql_uri)
+
+
+        annotation_table_name = mat_metadata.get('annotation_table_name', None)
+        schema = mat_metadata.get('schema', None)
+
+        model = make_flat_model(annotation_table_name, schema)
+
+        index_cache.add_indexes(annotation_table_name, model, analysis_engine, is_flat=True)
+
+        analysis_session.close()
+        analysis_engine.dispose()
+        return "Indexes Added"  
+    return "Indexes already exist"
