@@ -92,7 +92,6 @@ def get_expired_root_ids(mat_metadata: dict, expired_chunk_size: int = 100, use_
         ts = session.query(AnnoMetadata.created).filter(
             AnnoMetadata.table_name == annotation_table_name).one()
         last_updated_ts = ts.created    
-        print(last_updated_ts)        
         session.close()
     else:
         if last_updated_ts:
