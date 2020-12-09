@@ -8,7 +8,7 @@ from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
                                                 final_task)
 from materializationengine.workflows.create_frozen_database import (
     create_analysis_database, create_analysis_tables, create_new_version,
-    insert_annotation_data, update_analysis_metadata)
+    insert_annotation_data, update_analysis_metadata, drop_indexes, add_indexes, check_tables)
 from materializationengine.workflows.ingest_new_annotations import (
     create_missing_segmentation_table, get_materialization_info,
     ingest_new_annotations)
@@ -67,9 +67,12 @@ def run_complete_worflow(self, datastack_info: dict):
             chord([group(update_root_ids(root_ids, mat_metadata))
                 for root_ids in chunked_roots], fin.si()),
             update_metadata.si(mat_metadata),
+            drop_indexes.si(mat_metadata),
             chord([
                 chain(insert_annotation_data.si(chunk, mat_metadata)) for chunk in supervoxel_chunks], fin.si()),
-            update_analysis_metadata.si(mat_metadata))  # final task which will process a return status/timing etc...
+            update_analysis_metadata.si(mat_metadata),
+            add_indexes.si(mat_metadata),
+            check_tables.si(mat_metadata))
         
         if new_annotation_workflow is not None:
             ingest_and_freeze_workflow = chain(
