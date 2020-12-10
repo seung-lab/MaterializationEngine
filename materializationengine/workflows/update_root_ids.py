@@ -57,7 +57,7 @@ def update_root_ids(root_ids: List[int], mat_metadata: dict) -> True:
         for __, data in supervoxel_data.items():
             if data:
                 chunked_supervoxels = create_chunks(data, 100)
-                worker_chain = group(get_new_roots.s(chunk, mat_metadata) for chunk in chunked_supervoxels)
+                worker_chain = group(get_new_roots.si(chunk, mat_metadata) for chunk in chunked_supervoxels)
                 groups.append(worker_chain)
     return groups
 
