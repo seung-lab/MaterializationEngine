@@ -17,6 +17,7 @@ from materializationengine.workflows.update_root_ids import (
 
 celery_logger = get_task_logger(__name__)
 
+
 @celery.task(name="process:run_complete_worflow",
              acks_late=True,
              bind=True)
@@ -45,7 +46,7 @@ def run_complete_worflow(self, datastack_info: dict):
     database = create_analysis_database(datastack_info, new_version_number),
     materialized_tables = create_analysis_tables(
         datastack_info, new_version_number)
-    
+
     workflow = []
 
     for mat_metadata in mat_info:
@@ -59,13 +60,15 @@ def run_complete_worflow(self, datastack_info: dict):
                         ingest_new_annotations.s(chunk),
                     ) for chunk in supervoxel_chunks],
                     fin.si()),  # return here is required for chords
-                update_metadata.si(mat_metadata))  # final task which will process a return status/timing etc...
+                )  # final task which will process a return status/timing etc...
         else:
             new_annotation_workflow = None
 
         update_roots_and_freeze = chain(
-            chord([group(update_root_ids(root_ids, mat_metadata))
-                for root_ids in chunked_roots], fin.si()),
+            chord([
+                group(update_root_ids(root_ids, mat_metadata))
+                   for root_ids in chunked_roots],
+                   fin.si()),
             update_metadata.si(mat_metadata),
             drop_indexes.si(mat_metadata),
             chord([
@@ -73,7 +76,7 @@ def run_complete_worflow(self, datastack_info: dict):
             update_analysis_metadata.si(mat_metadata),
             add_indexes.si(mat_metadata),
             check_tables.si(mat_metadata))
-        
+
         if new_annotation_workflow is not None:
             ingest_and_freeze_workflow = chain(
                 new_annotation_workflow, update_roots_and_freeze)
@@ -82,5 +85,4 @@ def run_complete_worflow(self, datastack_info: dict):
             workflow.append(update_roots_and_freeze)
 
     final_workflow = chord(workflow, final_task.s())
-    final_workflow.apply_async() 
-
+    final_workflow.apply_async()
