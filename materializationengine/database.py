@@ -3,6 +3,7 @@ from dynamicannotationdb.materialization_client import DynamicMaterializationCli
 from sqlalchemy.engine.url import make_url
 from sqlalchemy import create_engine
 from sqlalchemy.orm import scoped_session, sessionmaker
+from urllib.parse import urlparse
 
 cache = {}
 
@@ -10,16 +11,33 @@ cache = {}
 def get_db(aligned_volume) -> DynamicMaterializationClient:
     if aligned_volume not in cache:
         sql_uri_config = current_app.config["SQLALCHEMY_DATABASE_URI"]
-        cache[aligned_volume] = DynamicMaterializationClient(aligned_volume, sql_uri_config)
+        cache[aligned_volume] = DynamicMaterializationClient(
+            aligned_volume, sql_uri_config)
 
     return cache[aligned_volume]
 
 
 def create_session(sql_uri: str = None):
-    engine = create_engine(sql_uri, pool_recycle=3600, pool_size=20, max_overflow=50)
-    Session = scoped_session(sessionmaker(bind=engine, autocommit=False, autoflush=False))
+    engine = create_engine(sql_uri, pool_recycle=3600,
+                           pool_size=20, max_overflow=50)
+    Session = scoped_session(sessionmaker(
+        bind=engine, autocommit=False, autoflush=False))
     session = Session()
     return session, engine
+
+
+def get_sql_url_params(sql_url):
+    if not isinstance(sql_url, str):
+        sql_url = str(sql_url)
+    result = urlparse(sql_url)
+    url_mapping = {
+        'user': result.username,
+        'password': result.password,
+        'dbname': result.path[1:],
+        "host": result.hostname,
+    }
+    return url_mapping
+
 
 class SqlAlchemyCache:
 
@@ -33,8 +51,8 @@ class SqlAlchemyCache:
             sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
             sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
             self._engines[aligned_volume] = create_engine(sql_uri, pool_recycle=3600,
-                                                  pool_size=20,
-                                                  max_overflow=50)
+                                                          pool_size=20,
+                                                          max_overflow=50)
         return self._engines[aligned_volume]
 
     def get(self, aligned_volume):
@@ -43,5 +61,6 @@ class SqlAlchemyCache:
             Session = scoped_session(sessionmaker(bind=engine))
             self._sessions[aligned_volume] = Session
         return self._sessions[aligned_volume]
+
 
 sqlalchemy_cache = SqlAlchemyCache()
