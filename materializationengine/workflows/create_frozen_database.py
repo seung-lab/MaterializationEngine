@@ -1,10 +1,15 @@
 import datetime
 import logging
+import re
+import time
+from collections import OrderedDict
+from io import StringIO
 from typing import List
 
+import pandas as pd
+import psycopg2
 from celery import chain, chord
 from celery.utils.log import get_task_logger
-from dynamicannotationdb.key_utils import build_segmentation_table_name
 from dynamicannotationdb.models import AnnoMetadata
 from emannotationschemas import get_schema
 from emannotationschemas.flatten import create_flattened_schema
@@ -12,18 +17,17 @@ from emannotationschemas.models import create_table_dict, make_flat_model
 from flask import current_app
 from materializationengine.celery_worker import celery
 from materializationengine.database import (create_session, get_db,
-                                            sqlalchemy_cache)
+                                            sqlalchemy_cache, get_sql_url_params)
+from materializationengine.index_manager import index_cache
 from materializationengine.models import AnalysisTable, AnalysisVersion, Base
 from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
-                                                query_id_range,
-                                                get_materialization_info)
+                                                get_materialization_info,
+                                                query_id_range)
 from materializationengine.utils import (create_annotation_model,
                                          create_segmentation_model)
-from materializationengine.index_manager import index_cache                                      
 from sqlalchemy import MetaData, create_engine
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.declarative import declarative_base
-import pandas as pd
 
 celery_logger = get_task_logger(__name__)
 
@@ -64,11 +68,12 @@ def create_versioned_materialization_workflow(self, datastack_info: dict):
     frozen_workflow = []
     for mat_metadata in mat_info:
         if mat_metadata:
-            supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
+            # supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
             process_chunks_workflow = chain(
                 drop_indexes.si(mat_metadata),
-                chord([
-                    chain(insert_annotation_data.si(chunk, mat_metadata)) for chunk in supervoxel_chunks], fin.si()),
+                copy_data_from_live_table.si(mat_metadata),
+                # chord([
+                #     chain(insert_annotation_data.si(chunk, mat_metadata)) for chunk in supervoxel_chunks], fin.si()),
                 update_analysis_metadata.si(mat_metadata),
                 add_indexes.si(mat_metadata),
                 check_tables.si(mat_metadata))
@@ -294,6 +299,105 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
         analysis_engine.dispose()
         session.close()
         engine.dispose()
+
+
+
+@celery.task(name="process:copy_data_from_live_table",
+             bind=True,
+             acks_late=True,
+             autoretry_for=(Exception,),
+             max_retries=3)
+def copy_data_from_live_table(self, mat_metadata: dict):
+
+    aligned_volume = mat_metadata['aligned_volume']
+    analysis_version = mat_metadata['analysis_version']
+    annotation_table_name = mat_metadata['annotation_table_name']
+    schema = mat_metadata['schema']
+
+    datastack = mat_metadata['datastack']
+    # create dynamic sql_uri
+    sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
+
+    sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
+
+    analysis_sql_uri = create_analysis_sql_uri(
+        SQL_URI_CONFIG, datastack, analysis_version)
+
+    # get schema and match column order for sql query
+    anno_schema = get_schema(schema)
+    flat_schema = create_flattened_schema(anno_schema)
+
+    ordered_model_columns = create_table_dict(
+        table_name=annotation_table_name,
+        Schema=flat_schema,
+        segmentation_source=None,
+        table_metadata=None,
+        with_crud_columns=False,
+    )
+
+    AnnotationModel = create_annotation_model(
+        mat_metadata, with_crud_columns=False)
+    SegmentationModel = create_segmentation_model(mat_metadata)
+
+    query_columns = {}
+    crud_columns = ['created', 'deleted', 'superceded_id']
+    for col in AnnotationModel.__table__.columns:
+        if col.name not in crud_columns:
+            query_columns[col.name] = col
+    for col in SegmentationModel.__table__.columns:
+        if not col.name == 'id':
+            query_columns[col.name] = col
+
+    sorted_columns = OrderedDict([(key, query_columns[key])
+                                  for key in ordered_model_columns if key in query_columns.keys()])
+    sorted_columns_list = list(sorted_columns.values())
+
+    # generate db url for psycopg2
+    live_db_uri = get_sql_url_params(sql_uri)
+    mat_db_uri = get_sql_url_params(analysis_sql_uri)
+
+    # create psycopg2 db connections
+    live_engine = psycopg2.connect(**live_db_uri)
+    mat_engine = psycopg2.connect(**mat_db_uri)
+
+    mat_cur = mat_engine.cursor(name=f"{annotation_table_name}_mat_cursor")
+    session, __ = create_session(sql_uri)
+
+    start = time.time()
+    try:
+        # generate sql string query
+        query = session.query(*sorted_columns_list).join(SegmentationModel).\
+            filter(SegmentationModel.id == AnnotationModel.id).\
+            filter(AnnotationModel.valid == True)
+        statement = str(query)
+
+        # drop ST_AsEWKB prefix and parentheses of geometry columns
+        geo_prefix = re.sub('ST_AsEWKB', '', re.sub(
+            r'\((.*?)\)', r'(\1)', statement))
+        sql_query_string = re.sub('[()]', '', geo_prefix)
+
+        with live_engine.cursor(name=f'{annotation_table_name}_live_cursor') as live_cur:
+            input = StringIO()
+            live_cur.copy_expert(f'COPY ({sql_query_string}) TO STDOUT', input)
+            input.seek(0)
+            mat_cur.copy_expert(
+                f'COPY {annotation_table_name} FROM STDOUT', input)
+            mat_engine.commit()
+
+    except Exception as e:
+        session.rollback()
+        celery_logger.error(e)
+    finally:
+        mat_cur.close()
+        live_engine.close()
+        mat_engine.close()
+        session.close()
+    total_time = time.time() - start
+    celery_logger.info(f"TOTAL QUERY RUN TIME: {total_time}")
+
+    return True
+
+
 
 
 @celery.task(name="process:update_analysis_metadata",
