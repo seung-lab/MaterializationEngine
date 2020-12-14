@@ -54,13 +54,13 @@ def run_complete_worflow(self, datastack_info: dict):
         chunked_roots = get_expired_root_ids(mat_metadata)
         if mat_metadata['row_count'] < 1_000_000:
             new_annotation_workflow = chain(
-                create_missing_segmentation_table.s(mat_metadata),
+                create_missing_segmentation_table.si(mat_metadata),
                 chord([
                     chain(
-                        ingest_new_annotations.s(chunk),
+                        ingest_new_annotations.si(mat_metadata, chunk),
                     ) for chunk in supervoxel_chunks],
                     fin.si()),  # return here is required for chords
-                )  # final task which will process a return status/timing etc...
+                fin.si())  # final task which will process a return status/timing etc...
         else:
             new_annotation_workflow = None
 
