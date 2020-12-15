@@ -34,7 +34,9 @@ def get_sql_url_params(sql_url):
         'user': result.username,
         'password': result.password,
         'dbname': result.path[1:],
-        "host": result.hostname,
+        'host': result.hostname,
+        'port': result.port
+
     }
     return url_mapping
 
