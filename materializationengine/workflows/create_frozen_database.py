@@ -28,6 +28,7 @@ from materializationengine.utils import (create_annotation_model,
 from sqlalchemy import MetaData, create_engine
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.declarative import declarative_base
+from psycopg2 import sql
 
 celery_logger = get_task_logger(__name__)
 
@@ -172,24 +173,24 @@ def create_analysis_database(datastack_info: dict, analysis_version: int) -> str
        
     mat_engine = sqlalchemy_cache.get_engine(analysis_sql_uri.database)
     with mat_engine.connect() as mat_connection:
-            # mat_engine.execute(
-            #     "CREATE EXTENSION IF NOT EXISTS postgres_fdw;")
+            mat_engine.execute(
+                "CREATE EXTENSION IF NOT EXISTS postgres_fdw;")
 
-            # mat_engine.execute(
-            #     f"CREATE SERVER foreign_server \
-            #         FOREIGN DATA WRAPPER postgres_fdw \
-            #             OPTIONS(host '{sql_uri.host}', port '{sql_uri.port}', dbname '{sql_uri.database}', sslmode 'disable');"
-            # )
-            # mat_engine.execute(
-            #     f"CREATE USER MAPPING IF NOT EXISTS FOR CURRENT_USER  \
-            #          SERVER foreign_server \
-            #               OPTIONS (user '{sql_uri.username}', password '{sql_uri.password}');"
-            # )
-            # mat_connection.execute(
-            #     f"CREATE SCHEMA IF NOT EXISTS foreign_live_schema;")
+            mat_engine.execute(
+                f"CREATE SERVER foreign_server \
+                    FOREIGN DATA WRAPPER postgres_fdw \
+                        OPTIONS(host '{sql_uri.host}', port '{sql_uri.port}', dbname '{sql_uri.database}', sslmode 'disable');"
+            )
+            mat_engine.execute(
+                f"CREATE USER MAPPING IF NOT EXISTS FOR CURRENT_USER  \
+                     SERVER foreign_server \
+                          OPTIONS (user '{sql_uri.username}', password '{sql_uri.password}');"
+            )
+            mat_connection.execute(
+                f"CREATE SCHEMA IF NOT EXISTS foreign_live_schema;")
             
-            # mat_connection.execute(
-            #     f"IMPORT FOREIGN SCHEMA public FROM SERVER foreign_server INTO foreign_live_schema;")
+            mat_connection.execute(
+                f"IMPORT FOREIGN SCHEMA public FROM SERVER foreign_server INTO foreign_live_schema;")
 
 
             result = mat_connection.execute(
@@ -333,20 +334,15 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
              max_retries=3)
 def copy_data_from_live_table(self, mat_metadata: dict):
 
-    aligned_volume = mat_metadata['aligned_volume']
     analysis_version = mat_metadata['analysis_version']
     annotation_table_name = mat_metadata['annotation_table_name']
-    schema = mat_metadata['schema']
-
+    min_id = mat_metadata.get('min_id', 0)
     datastack = mat_metadata['datastack']
+    schema = mat_metadata['schema']
+    chunk_size = mat_metadata['chunk_size']
     # create dynamic sql_uri
-    sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
-
-    sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-
-    analysis_sql_uri = create_analysis_sql_uri(
-        SQL_URI_CONFIG, datastack, analysis_version)
-
+    analysis_sql_uri = create_analysis_sql_uri(SQL_URI_CONFIG, datastack, analysis_version)
+    
     # get schema and match column order for sql query
     anno_schema = get_schema(schema)
     flat_schema = create_flattened_schema(anno_schema)
@@ -357,10 +353,9 @@ def copy_data_from_live_table(self, mat_metadata: dict):
         segmentation_source=None,
         table_metadata=None,
         with_crud_columns=False,
-    )
-
-    AnnotationModel = create_annotation_model(
-        mat_metadata, with_crud_columns=False)
+    )  
+    
+    AnnotationModel = create_annotation_model(mat_metadata, with_crud_columns=True)
     SegmentationModel = create_segmentation_model(mat_metadata)
 
     query_columns = {}
@@ -372,113 +367,69 @@ def copy_data_from_live_table(self, mat_metadata: dict):
         if not col.name == 'id':
             query_columns[col.name] = col
 
-    sorted_columns = OrderedDict([(key, query_columns[key])
-                                  for key in ordered_model_columns if key in query_columns.keys()])
-    sorted_columns_list = list(sorted_columns.values())
-
-    # generate db url for psycopg2
-    live_db_uri = get_sql_url_params(sql_uri)
+                
+    sorted_columns = OrderedDict([(key, query_columns[key]) for key in ordered_model_columns if key in query_columns.keys()])
+    sorted_columns_list = list(sorted_columns.values())            
+    columns = ([f"{col.table}.{col.name}" for col in sorted_columns_list])
+    print(analysis_sql_uri)
     mat_db_uri = get_sql_url_params(analysis_sql_uri)
-
-    # create psycopg2 db connections
-    live_engine = psycopg2.connect(**live_db_uri)
+    
+    # create db connections 
     mat_engine = psycopg2.connect(**mat_db_uri)
-
-    mat_cur = mat_engine.cursor(name=f"{annotation_table_name}_mat_cursor")
-    session, __ = create_session(sql_uri)
+    mat_cur =  mat_engine.cursor()
+    mat_cur.itersize = chunk_size
 
     start = time.time()
-    try:
-        # generate sql string query
-        query = session.query(*sorted_columns_list).join(SegmentationModel).\
-            filter(SegmentationModel.id == AnnotationModel.id).\
-            filter(AnnotationModel.valid == True)
-        statement = str(query)
-
-        # drop ST_AsEWKB prefix and parentheses of geometry columns
-        geo_prefix = re.sub('ST_AsEWKB', '', re.sub(
-            r'\((.*?)\)', r'(\1)', statement))
-        sql_query_string = re.sub('[()]', '', geo_prefix)
-
-        with live_engine.cursor(name=f'{annotation_table_name}_live_cursor') as live_cur:
-            # input = StringIO()
-            live_cur.itersize = 100_000
-            live_cur.execute(sql_query_string)
-            while True:
-                rows = live_cur.fetchmany(live_cur.itersize)
-                if not rows:
-                    print("finished")
-                    break
-
-                data_iterator = StringIteratorIO((','.join(map(clean_csv_value,(
-                                                        row
-                                                        ))) + '\n'
-                                                        for row in rows
-                                                    ))            
-
-                mat_cur.copy_from(data_iterator, annotation_table_name, sep=',')
-                mat_engine.commit()
-            # live_cur.copy_expert(f'COPY ({sql_query_string}) TO STDOUT', input)
-            # input.seek(0)
-            # mat_cur.copy_expert(
-            #     f'COPY {annotation_table_name} FROM STDOUT', input)
-            # mat_engine.commit()
+    try:          
+        
+        query = f"""
+            INSERT INTO public.{AnnotationModel.__table__.name}
+            SELECT 
+                {", ".join(str(col) for col in columns)}
+            FROM 
+                foreign_live_schema.{AnnotationModel.__table__.name}
+            JOIN 
+                foreign_live_schema.{SegmentationModel.__table__.name}
+                ON {AnnotationModel.id} = {SegmentationModel.id}
+            WHERE
+                {AnnotationModel.id} = {SegmentationModel.id}
+            AND {AnnotationModel.valid} = true
+            
+        """
+        insert_chunked_data(annotation_table_name, query, mat_cur, mat_engine, min_id, chunk_size)
 
     except Exception as e:
-        session.rollback()
         celery_logger.error(e)
     finally:
         mat_cur.close()
-        live_engine.close()
         mat_engine.close()
-        session.close()
     total_time = time.time() - start
-    celery_logger.info(f"TOTAL QUERY RUN TIME: {total_time}")
+    
+    return f"TOTAL INSERT RUN TIME: {total_time}"
 
-    return f"TOTAL QUERY RUN TIME: {total_time}"
+def insert_chunked_data(annotation_table_name: str, sql_statement: str, cur, engine, next_key: int, batch_size: int=100_000):
+    pagination_query = f"""AND 
+                {annotation_table_name}.id > {next_key} 
+            ORDER BY {annotation_table_name}.id ASC 
+            LIMIT {batch_size} RETURNING  {annotation_table_name}.id"""
+    insert_statement = sql.SQL(sql_statement + pagination_query)
 
-class StringIteratorIO(TextIOBase):
-    """https://stackoverflow.com/a/12604375/2221667
-    """
-    def __init__(self, iter: Iterator[str]):
-        self._iter = iter
-        self._buffer = ''
+    try:
+        cur.execute(insert_statement)
+        engine.commit()
+    except Exception as e:
+        celery_logger.error(e)
+    
+    results = cur.fetchmany(batch_size)
 
-    def readable(self) -> bool:
-        return True
+    # If there were less than the limit then it is the last page of data
+    if len(results) < batch_size:
+        return  
+    else:
+    # Find highest returned uid in results to get next key
+        next_key = results[-1][0]
+        return insert_chunked_data(annotation_table_name, sql_statement, cur, engine, next_key)
 
-    def _read_single_line(self, n: Optional[int] = None) -> str:
-        while not self._buffer:
-            try:
-                self._buffer = next(self._iter)
-            except StopIteration:
-                break
-        ret = self._buffer[:n]
-        self._buffer = self._buffer[len(ret):]
-        return ret
-
-    def read(self, n: Optional[int] = None) -> str:
-        line = []
-        if n is None or n < 0:
-            while True:
-                m = self._read_single_line()
-                if not m:
-                    break
-                line.append(m)
-        else:
-            while n > 0:
-                m = self._read_single_line(n)
-                if not m:
-                    break
-                n -= len(m)
-                line.append(m)
-        return ''.join(line)
-
-
-def clean_csv_value(value: Optional[Any]) -> str:
-    if value is None:
-        return r'\N'
-    return str(value).replace('\n', '\\n')
 
 @celery.task(name="process:update_analysis_metadata",
              bind=True,
