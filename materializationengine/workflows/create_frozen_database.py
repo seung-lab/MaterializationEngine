@@ -3,9 +3,9 @@ import logging
 import re
 import time
 from collections import OrderedDict
-from io import StringIO
+from typing import Iterator, Dict, Any, Optional
 from typing import List
-
+from io import TextIOBase
 import pandas as pd
 import psycopg2
 from celery import chain, chord
@@ -144,9 +144,9 @@ def create_analysis_database(datastack_info: dict, analysis_version: int) -> str
     datastack = datastack_info['datastack']
 
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
-    sql_uri = str(make_url(f"{sql_base_uri}/{aligned_volume}"))
+    sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
     analysis_sql_uri = create_analysis_sql_uri(
-        sql_uri, datastack, analysis_version)
+        str(sql_uri), datastack, analysis_version)
 
     engine = sqlalchemy_cache.get_engine(aligned_volume)
 
@@ -163,17 +163,41 @@ def create_analysis_database(datastack_info: dict, analysis_version: int) -> str
             connection.execute(
                 f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
                         WHERE pid <> pg_backend_pid() \
-                        AND datname = '{analysis_sql_uri.database}';"
+                        AND datname = 'postgres';"
             )
             connection.execute(
                 f"CREATE DATABASE {analysis_sql_uri.database} \
-                                TEMPLATE postgres"
-            )
-            result = connection.execute(
+                                TEMPLATE postgres")
+
+       
+    mat_engine = sqlalchemy_cache.get_engine(analysis_sql_uri.database)
+    with mat_engine.connect() as mat_connection:
+            # mat_engine.execute(
+            #     "CREATE EXTENSION IF NOT EXISTS postgres_fdw;")
+
+            # mat_engine.execute(
+            #     f"CREATE SERVER foreign_server \
+            #         FOREIGN DATA WRAPPER postgres_fdw \
+            #             OPTIONS(host '{sql_uri.host}', port '{sql_uri.port}', dbname '{sql_uri.database}', sslmode 'disable');"
+            # )
+            # mat_engine.execute(
+            #     f"CREATE USER MAPPING IF NOT EXISTS FOR CURRENT_USER  \
+            #          SERVER foreign_server \
+            #               OPTIONS (user '{sql_uri.username}', password '{sql_uri.password}');"
+            # )
+            # mat_connection.execute(
+            #     f"CREATE SCHEMA IF NOT EXISTS foreign_live_schema;")
+            
+            # mat_connection.execute(
+            #     f"IMPORT FOREIGN SCHEMA public FROM SERVER foreign_server INTO foreign_live_schema;")
+
+
+            result = mat_connection.execute(
                 f"SELECT 1 FROM pg_catalog.pg_database \
                     WHERE datname = '{analysis_sql_uri.database}'"
             )
     engine.dispose()
+    mat_engine.dispose()
     return True
 
 
@@ -377,12 +401,28 @@ def copy_data_from_live_table(self, mat_metadata: dict):
         sql_query_string = re.sub('[()]', '', geo_prefix)
 
         with live_engine.cursor(name=f'{annotation_table_name}_live_cursor') as live_cur:
-            input = StringIO()
-            live_cur.copy_expert(f'COPY ({sql_query_string}) TO STDOUT', input)
-            input.seek(0)
-            mat_cur.copy_expert(
-                f'COPY {annotation_table_name} FROM STDOUT', input)
-            mat_engine.commit()
+            # input = StringIO()
+            live_cur.itersize = 100_000
+            live_cur.execute(sql_query_string)
+            while True:
+                rows = live_cur.fetchmany(live_cur.itersize)
+                if not rows:
+                    print("finished")
+                    break
+
+                data_iterator = StringIteratorIO((','.join(map(clean_csv_value,(
+                                                        row
+                                                        ))) + '\n'
+                                                        for row in rows
+                                                    ))            
+
+                mat_cur.copy_from(data_iterator, annotation_table_name, sep=',')
+                mat_engine.commit()
+            # live_cur.copy_expert(f'COPY ({sql_query_string}) TO STDOUT', input)
+            # input.seek(0)
+            # mat_cur.copy_expert(
+            #     f'COPY {annotation_table_name} FROM STDOUT', input)
+            # mat_engine.commit()
 
     except Exception as e:
         session.rollback()
@@ -395,10 +435,50 @@ def copy_data_from_live_table(self, mat_metadata: dict):
     total_time = time.time() - start
     celery_logger.info(f"TOTAL QUERY RUN TIME: {total_time}")
 
-    return True
+    return f"TOTAL QUERY RUN TIME: {total_time}"
+
+class StringIteratorIO(TextIOBase):
+    """https://stackoverflow.com/a/12604375/2221667
+    """
+    def __init__(self, iter: Iterator[str]):
+        self._iter = iter
+        self._buffer = ''
+
+    def readable(self) -> bool:
+        return True
+
+    def _read_single_line(self, n: Optional[int] = None) -> str:
+        while not self._buffer:
+            try:
+                self._buffer = next(self._iter)
+            except StopIteration:
+                break
+        ret = self._buffer[:n]
+        self._buffer = self._buffer[len(ret):]
+        return ret
+
+    def read(self, n: Optional[int] = None) -> str:
+        line = []
+        if n is None or n < 0:
+            while True:
+                m = self._read_single_line()
+                if not m:
+                    break
+                line.append(m)
+        else:
+            while n > 0:
+                m = self._read_single_line(n)
+                if not m:
+                    break
+                n -= len(m)
+                line.append(m)
+        return ''.join(line)
 
 
-
+def clean_csv_value(value: Optional[Any]) -> str:
+    if value is None:
+        return r'\N'
+    return str(value).replace('\n', '\\n')
 
 @celery.task(name="process:update_analysis_metadata",
              bind=True,
