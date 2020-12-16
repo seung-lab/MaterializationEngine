@@ -80,6 +80,7 @@ def get_materialization_info(datastack_info: dict, analysis_version: int=None, s
             continue
         else:
             max_id = db.get_max_id_value(annotation_table)
+            min_id = db.get_min_id_value(annotation_table)
             if max_id:
                 segmentation_table_name = build_segmentation_table_name(
                     annotation_table, pcg_table_name)
@@ -109,6 +110,7 @@ def get_materialization_info(datastack_info: dict, analysis_version: int=None, s
                     'aligned_volume': str(aligned_volume_name),
                     'schema': db.get_table_schema(annotation_table),
                     'max_id': int(max_id),
+                    'min_id': int(min_id),
                     'row_count': row_count,
                     'drop_indexes': drop_indexes,
                     'segmentation_table_name': segmentation_table_name,
