@@ -36,6 +36,9 @@ class BaseConfig:
     SEGMENTATION_ENDPOINT = "https://global.daf-apis.com/"
     MATERIALIZATION_ROW_CHUNK_SIZE = 500
     QUERY_LIMIT_SIZE = 200000
+
+    CELERY_WORKER_IP = os.environ.get("CELERY_WORKER_IP", "127.0.0.1")
+
     if os.environ.get("DAF_CREDENTIALS", None) is not None:
         with open(os.environ.get("DAF_CREDENTIALS"), "r") as f:
             AUTH_TOKEN = json.load(f)["token"]
