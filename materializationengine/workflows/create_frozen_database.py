@@ -34,6 +34,7 @@ celery_logger = get_task_logger(__name__)
 
 SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
 
+CELERY_WORKER_IP = current_app.config["CELERY_WORKER_IP"]
 
 @celery.task(name="process:create_versioned_materialization_workflow",
              bind=True,
@@ -170,35 +171,7 @@ def create_analysis_database(datastack_info: dict, analysis_version: int) -> str
                 f"CREATE DATABASE {analysis_sql_uri.database} \
                                 TEMPLATE postgres")
 
-       
-    mat_engine = sqlalchemy_cache.get_engine(analysis_sql_uri.database)
-    with mat_engine.connect() as mat_connection:
-            mat_engine.execute(
-                "CREATE EXTENSION IF NOT EXISTS postgres_fdw;")
-
-            mat_engine.execute(
-                f"CREATE SERVER foreign_server \
-                    FOREIGN DATA WRAPPER postgres_fdw \
-                        OPTIONS(host '{sql_uri.host}', port '{sql_uri.port}', dbname '{sql_uri.database}', sslmode 'disable');"
-            )
-            mat_engine.execute(
-                f"CREATE USER MAPPING IF NOT EXISTS FOR CURRENT_USER  \
-                     SERVER foreign_server \
-                          OPTIONS (user '{sql_uri.username}', password '{sql_uri.password}');"
-            )
-            mat_connection.execute(
-                f"CREATE SCHEMA IF NOT EXISTS foreign_live_schema;")
-            
-            mat_connection.execute(
-                f"IMPORT FOREIGN SCHEMA public FROM SERVER foreign_server INTO foreign_live_schema;")
-
-
-            result = mat_connection.execute(
-                f"SELECT 1 FROM pg_catalog.pg_database \
-                    WHERE datname = '{analysis_sql_uri.database}'"
-            )
     engine.dispose()
-    mat_engine.dispose()
     return True
 
 
@@ -326,7 +299,6 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
         engine.dispose()
 
 
-
 @celery.task(name="process:copy_data_from_live_table",
              bind=True,
              acks_late=True,
@@ -334,15 +306,20 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
              max_retries=3)
 def copy_data_from_live_table(self, mat_metadata: dict):
 
+    aligned_volume = mat_metadata['aligned_volume']
     analysis_version = mat_metadata['analysis_version']
     annotation_table_name = mat_metadata['annotation_table_name']
-    min_id = mat_metadata.get('min_id', 0)
-    datastack = mat_metadata['datastack']
     schema = mat_metadata['schema']
-    chunk_size = mat_metadata['chunk_size']
+
+    datastack = mat_metadata['datastack']
     # create dynamic sql_uri
-    analysis_sql_uri = create_analysis_sql_uri(SQL_URI_CONFIG, datastack, analysis_version)
-    
+    sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
+
+    sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
+
+    analysis_sql_uri = create_analysis_sql_uri(
+        SQL_URI_CONFIG, datastack, analysis_version)
+
     # get schema and match column order for sql query
     anno_schema = get_schema(schema)
     flat_schema = create_flattened_schema(anno_schema)
@@ -353,9 +330,10 @@ def copy_data_from_live_table(self, mat_metadata: dict):
         segmentation_source=None,
         table_metadata=None,
         with_crud_columns=False,
-    )  
-    
-    AnnotationModel = create_annotation_model(mat_metadata, with_crud_columns=True)
+    )
+
+    AnnotationModel = create_annotation_model(
+        mat_metadata, with_crud_columns=False)
     SegmentationModel = create_segmentation_model(mat_metadata)
 
     query_columns = {}
@@ -367,45 +345,44 @@ def copy_data_from_live_table(self, mat_metadata: dict):
         if not col.name == 'id':
             query_columns[col.name] = col
 
-                
     sorted_columns = OrderedDict([(key, query_columns[key]) for key in ordered_model_columns if key in query_columns.keys()])
     sorted_columns_list = list(sorted_columns.values())            
-    columns = ([f"{col.table}.{col.name}" for col in sorted_columns_list])
-    print(analysis_sql_uri)
-    mat_db_uri = get_sql_url_params(analysis_sql_uri)
-    
-    # create db connections 
-    mat_engine = psycopg2.connect(**mat_db_uri)
-    mat_cur =  mat_engine.cursor()
-    mat_cur.itersize = chunk_size
+   
+    live_session, live_engine = create_session(sql_uri)
+    __, mat_engine = create_session(analysis_sql_uri)
 
-    start = time.time()
-    try:          
+
+    query = live_session.query(*sorted_columns_list).join(SegmentationModel).\
+        filter(SegmentationModel.id == AnnotationModel.id).\
+        filter(AnnotationModel.valid == True)
+    statement = str(query)
+
+    # drop ST_AsEWKB prefix and parentheses of geometry columns
+    geo_prefix = re.sub('ST_AsEWKB', '', re.sub(
+        r'\((.*?)\)', r'(\1)', statement))
+    sql_query_string = re.sub('[()]', '', geo_prefix)
+
+   
+    server_temp_file_path = f'/tmp/temp_{annotation_table_name}'
+    
+    live_db_connection = live_engine.connect()
+    with live_db_connection.begin():
+        try:
+            copied_rows = live_db_connection.execute(f"COPY ({sql_query_string}) TO '{server_temp_file_path}' WITH (FORMAT binary);")
+        except Exception as e:
+            celery_logger.error(e)
+
+    
+    mat_db_connection = mat_engine.connect()
+    with mat_db_connection.begin():
+        try:
+            inserted_rows = mat_db_connection.execute(f"COPY {annotation_table_name} FROM '{server_temp_file_path}' WITH (FORMAT binary);")
+            is_deleted = mat_db_connection.execute(f"COPY (SELECT 1) TO PROGRAM 'rm {server_temp_file_path}'")
+        except Exception as e:
+            celery_logger.error(e)
         
-        query = f"""
-            INSERT INTO public.{AnnotationModel.__table__.name}
-            SELECT 
-                {", ".join(str(col) for col in columns)}
-            FROM 
-                foreign_live_schema.{AnnotationModel.__table__.name}
-            JOIN 
-                foreign_live_schema.{SegmentationModel.__table__.name}
-                ON {AnnotationModel.id} = {SegmentationModel.id}
-            WHERE
-                {AnnotationModel.id} = {SegmentationModel.id}
-            AND {AnnotationModel.valid} = true
-            
-        """
-        insert_chunked_data(annotation_table_name, query, mat_cur, mat_engine, min_id, chunk_size)
-
-    except Exception as e:
-        celery_logger.error(e)
-    finally:
-        mat_cur.close()
-        mat_engine.close()
-    total_time = time.time() - start
-    
-    return f"TOTAL INSERT RUN TIME: {total_time}"
+    return f"Number of rows copied: {copied_rows.rowcount}, Number of rows inserted in new table: {inserted_rows.rowcount}"
+     
 
 def insert_chunked_data(annotation_table_name: str, sql_statement: str, cur, engine, next_key: int, batch_size: int=100_000):
     pagination_query = f"""AND 
