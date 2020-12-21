@@ -316,11 +316,11 @@ def copy_data_from_live_table(self, mat_metadata: dict):
     aligned_volume = mat_metadata['aligned_volume']
     analysis_version = mat_metadata['analysis_version']
     annotation_table_name = mat_metadata['annotation_table_name']
-    pcg_table_name = mat_metadata['pcg_table_name']
+    segmentation_table_name = mat_metadata['segmentation_table_name']
     temp_table_name = mat_metadata['temp_mat_table_name']
     schema = mat_metadata['schema']
     datastack = mat_metadata['datastack']
-
+    
     # create dynamic sql_uri
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
 
@@ -376,7 +376,6 @@ def copy_data_from_live_table(self, mat_metadata: dict):
     
     mat_db_connection = mat_engine.connect()
     with mat_db_connection.begin():
-        segmentation_table_name = f"{annotation_table_name}__{pcg_table_name}" 
         try:
             insert_query = mat_db_connection.execute(f"CREATE TABLE {temp_table_name} AS ({query});")       
             drop_query = mat_db_connection.execute(f"DROP TABLE {annotation_table_name}, {segmentation_table_name};")
