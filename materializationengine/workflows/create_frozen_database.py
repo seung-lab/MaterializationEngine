@@ -83,7 +83,7 @@ def create_versioned_materialization_workflow(self, datastack_info: dict):
             
     workflow = chord(frozen_workflow, fin.s())
     status = workflow.apply_async()
-    return status
+    return True
 
 
 def create_new_version(datastack_info: dict):
@@ -165,11 +165,16 @@ def create_analysis_database(datastack_info: dict, analysis_version: int) -> str
             connection.execute(
                 f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
                         WHERE pid <> pg_backend_pid() \
-                        AND datname = 'postgres';"
+                        AND datname = '{aligned_volume}';"
             )
             connection.execute(
                 f"CREATE DATABASE {analysis_sql_uri.database} \
-                                TEMPLATE postgres")
+                                TEMPLATE {aligned_volume}")
+
+            result = connection.execute(
+                f"SELECT 1 FROM pg_catalog.pg_database \
+                    WHERE datname = '{analysis_sql_uri.database}'"
+            )
 
     engine.dispose()
     return True
@@ -197,6 +202,7 @@ def create_analysis_tables(datastack_info: dict, analysis_version: int):
     """
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info['datastack']
+    
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
 
@@ -223,9 +229,10 @@ def create_analysis_tables(datastack_info: dict, analysis_version: int):
                 anno_schema = get_schema(schema_type[0])
                 flat_schema = create_flattened_schema(anno_schema)
                 # construct dict of sqlalchemy columns
-
+                
+                temp_table_name = f"temp__{table_name}"
                 annotation_dict = create_table_dict(
-                    table_name=table_name,
+                    table_name=temp_table_name,
                     Schema=flat_schema,
                     segmentation_source=None,
                     table_metadata=None,
@@ -233,7 +240,7 @@ def create_analysis_tables(datastack_info: dict, analysis_version: int):
                 )
 
                 flat_table = type(
-                    table_name, (analysis_base,), annotation_dict)
+                    temp_table_name, (analysis_base,), annotation_dict)
                 flat_table.__table__.create(bind=analysis_engine)
                 
     session.close()
@@ -309,9 +316,11 @@ def copy_data_from_live_table(self, mat_metadata: dict):
     aligned_volume = mat_metadata['aligned_volume']
     analysis_version = mat_metadata['analysis_version']
     annotation_table_name = mat_metadata['annotation_table_name']
+    pcg_table_name = mat_metadata['pcg_table_name']
+    temp_table_name = mat_metadata['temp_mat_table_name']
     schema = mat_metadata['schema']
-
     datastack = mat_metadata['datastack']
+
     # create dynamic sql_uri
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
 
@@ -347,41 +356,34 @@ def copy_data_from_live_table(self, mat_metadata: dict):
 
     sorted_columns = OrderedDict([(key, query_columns[key]) for key in ordered_model_columns if key in query_columns.keys()])
     sorted_columns_list = list(sorted_columns.values())            
+    columns = ([f"{col.table}.{col.name}" for col in sorted_columns_list])
    
-    live_session, live_engine = create_session(sql_uri)
     __, mat_engine = create_session(analysis_sql_uri)
 
+    query = f"""
+        SELECT 
+            {", ".join(str(col) for col in columns)}
+        FROM 
+            {AnnotationModel.__table__.name}
+        JOIN 
+            {SegmentationModel.__table__.name}
+            ON {AnnotationModel.id} = {SegmentationModel.id}
+        WHERE
+            {AnnotationModel.id} = {SegmentationModel.id}
+        AND {AnnotationModel.valid} = true
 
-    query = live_session.query(*sorted_columns_list).join(SegmentationModel).\
-        filter(SegmentationModel.id == AnnotationModel.id).\
-        filter(AnnotationModel.valid == True)
-    statement = str(query)
-
-    # drop ST_AsEWKB prefix and parentheses of geometry columns
-    geo_prefix = re.sub('ST_AsEWKB', '', re.sub(
-        r'\((.*?)\)', r'(\1)', statement))
-    sql_query_string = re.sub('[()]', '', geo_prefix)
-
-   
-    server_temp_file_path = f'/tmp/temp_{annotation_table_name}'
-    
-    live_db_connection = live_engine.connect()
-    with live_db_connection.begin():
-        try:
-            copied_rows = live_db_connection.execute(f"COPY ({sql_query_string}) TO '{server_temp_file_path}' WITH (FORMAT binary);")
-        except Exception as e:
-            celery_logger.error(e)
-
+    """
     
     mat_db_connection = mat_engine.connect()
     with mat_db_connection.begin():
+        segmentation_table_name = f"{annotation_table_name}__{pcg_table_name}" 
         try:
-            inserted_rows = mat_db_connection.execute(f"COPY {annotation_table_name} FROM '{server_temp_file_path}' WITH (FORMAT binary);")
-            is_deleted = mat_db_connection.execute(f"COPY (SELECT 1) TO PROGRAM 'rm {server_temp_file_path}'")
+            insert_query = mat_db_connection.execute(f"CREATE TABLE {temp_table_name} AS ({query});")       
+            drop_query = mat_db_connection.execute(f"DROP TABLE {annotation_table_name}, {segmentation_table_name};")
+            alter_query = mat_db_connection.execute(f"ALTER TABLE {temp_table_name} RENAME TO {annotation_table_name};")
         except Exception as e:
             celery_logger.error(e)
-        
-    return f"Number of rows copied: {copied_rows.rowcount}, Number of rows inserted in new table: {inserted_rows.rowcount}"
+    return f"Number of rows copied: {insert_query.rowcount}"
      
 
 def insert_chunked_data(annotation_table_name: str, sql_statement: str, cur, engine, next_key: int, batch_size: int=100_000):
@@ -510,13 +512,13 @@ def drop_indexes(self, mat_metadata: dict):
     if drop_indexes:
         analysis_version = mat_metadata.get('analysis_version', None)
         datastack = mat_metadata['datastack']
-        annotation_table_name = mat_metadata.get('annotation_table_name', None)
+        temp_mat_table_name = mat_metadata['temp_mat_table_name']
 
         analysis_sql_uri = create_analysis_sql_uri(
             SQL_URI_CONFIG, datastack, analysis_version)
 
         analysis_session, analysis_engine = create_session(analysis_sql_uri)
-        index_cache.drop_table_indexes(annotation_table_name, analysis_engine)
+        index_cache.drop_table_indexes(temp_mat_table_name, analysis_engine)
         analysis_session.close()
         analysis_engine.dispose()
         return "INDEXES DROPPED"  
