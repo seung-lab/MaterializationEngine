@@ -115,6 +115,7 @@ def get_materialization_info(datastack_info: dict, analysis_version: int=None, s
                     'drop_indexes': drop_indexes,
                     'segmentation_table_name': segmentation_table_name,
                     'annotation_table_name': annotation_table,
+                    'temp_mat_table_name': f"temp__{annotation_table}",
                     'pcg_table_name': pcg_table_name,
                     'segmentation_source': segmentation_source,
                     'coord_resolution': [4,4,40],
