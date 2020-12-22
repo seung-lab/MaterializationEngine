@@ -19,7 +19,7 @@ def get_db(aligned_volume) -> DynamicMaterializationClient:
 
 def create_session(sql_uri: str = None):
     engine = create_engine(sql_uri, pool_recycle=3600,
-                           pool_size=20, max_overflow=50)
+                           pool_size=20, max_overflow=50, pool_pre_ping=True)
     Session = scoped_session(sessionmaker(
         bind=engine, autocommit=False, autoflush=False))
     session = Session()
@@ -52,9 +52,11 @@ class SqlAlchemyCache:
             SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
             sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
             sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-            self._engines[aligned_volume] = create_engine(sql_uri, pool_recycle=3600,
+            self._engines[aligned_volume] = create_engine(sql_uri, 
+                                                          pool_recycle=3600,
                                                           pool_size=20,
-                                                          max_overflow=50)
+                                                          max_overflow=50,
+                                                          pool_pre_ping=True)
         return self._engines[aligned_volume]
 
     def get(self, aligned_volume):
