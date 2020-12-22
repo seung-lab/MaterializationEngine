@@ -51,7 +51,11 @@ def fin(self, *args, **kwargs):
 def final_task(self, *args, **kwargs):
     return "FINAL TASK"  
 
-def get_materialization_info(datastack_info: dict, analysis_version: int=None, skip_table:bool=False, row_size:int=1_000_000) -> List[dict]:
+def get_materialization_info(datastack_info: dict,
+                             analysis_version: int=None,
+                             materialization_time_stamp: datetime.datetime.utcnow=None,
+                             skip_table:bool=False,
+                             row_size:int=1_000_000) -> List[dict]:
     """Initialize materialization by an aligned volume name. Iterates thorugh all
     tables in a aligned volume database and gathers metadata for each table. The list
     of tables are passed to workers for materialization. 
@@ -70,66 +74,74 @@ def get_materialization_info(datastack_info: dict, analysis_version: int=None, s
     pcg_table_name = datastack_info['segmentation_source'].split("/")[-1]
     segmentation_source = datastack_info.get('segmentation_source')
     
+    if not materialization_time_stamp:
+        materialization_time_stamp = datetime.datetime.utcnow()
+    
     db = get_db(aligned_volume_name)
 
-    annotation_tables = db.get_valid_table_names()
-    metadata = []
-    for annotation_table in annotation_tables:
-        row_count = db._get_table_row_count(annotation_table)
-        if row_count >= row_size and skip_table:
-            continue
-        else:
-            max_id = db.get_max_id_value(annotation_table)
-            min_id = db.get_min_id_value(annotation_table)
-            if max_id:
-                segmentation_table_name = build_segmentation_table_name(
-                    annotation_table, pcg_table_name)
-                try:
-                    segmentation_metadata = db.get_segmentation_table_metadata(annotation_table,
-                                                                               pcg_table_name)
-                except AttributeError as e:
-                    celery_logger.error(f"TABLE DOES NOT EXIST: {e}")
-                    segmentation_metadata = {'last_updated': None}
+    try:
+        annotation_tables = db.get_valid_table_names()
 
-                materialization_time_stamp = datetime.datetime.utcnow()
+        metadata = []
+        for annotation_table in annotation_tables:
+            row_count = db._get_table_row_count(annotation_table)
+            if row_count >= row_size and skip_table:
+                continue
+            else:
+                max_id = db.get_max_id_value(annotation_table)
+                min_id = db.get_min_id_value(annotation_table)
+                if max_id:
+                    segmentation_table_name = build_segmentation_table_name(
+                        annotation_table, pcg_table_name)
+                    try:
+                        segmentation_metadata = db.get_segmentation_table_metadata(annotation_table,
+                                                                                   pcg_table_name)
+                    except AttributeError as e:
+                        celery_logger.error(f"TABLE DOES NOT EXIST: {e}")
+                        segmentation_metadata = {'last_updated': None}
 
-                last_updated_time_stamp = segmentation_metadata.get('last_updated', None)
+                    last_updated_time_stamp = segmentation_metadata.get('last_updated', None)
 
-                if not last_updated_time_stamp:
-                    last_updated_time_stamp = None
-                else:
-                    last_updated_time_stamp = str(last_updated_time_stamp)
+                    if not last_updated_time_stamp:
+                        last_updated_time_stamp = None
+                    else:
+                        last_updated_time_stamp = str(last_updated_time_stamp)
 
-                if row_count >= row_size:
-                    drop_indexes = True
-                else:
-                    drop_indexes = False
-                
-                table_metadata = {
-                    'datastack': datastack_info['datastack'],
-                    'aligned_volume': str(aligned_volume_name),
-                    'schema': db.get_table_schema(annotation_table),
-                    'max_id': int(max_id),
-                    'min_id': int(min_id),
-                    'row_count': row_count,
-                    'drop_indexes': drop_indexes,
-                    'segmentation_table_name': segmentation_table_name,
-                    'annotation_table_name': annotation_table,
-                    'temp_mat_table_name': f"temp__{annotation_table}",
-                    'pcg_table_name': pcg_table_name,
-                    'segmentation_source': segmentation_source,
-                    'coord_resolution': [4,4,40],
-                    'materialization_time_stamp': str(materialization_time_stamp),
-                    'last_updated_time_stamp': last_updated_time_stamp,
-                    'chunk_size': 100000,
-                    'table_count': len(annotation_tables)
-                }
-                if analysis_version:
-                    table_metadata['analysis_version'] = analysis_version
+                    if row_count >= row_size:
+                        drop_indexes = True
+                    else:
+                        drop_indexes = False
 
-                metadata.append(table_metadata.copy())
-    db.cached_session.close()
-    return metadata
+                    table_metadata = {
+                        'datastack': datastack_info['datastack'],
+                        'aligned_volume': str(aligned_volume_name),
+                        'schema': db.get_table_schema(annotation_table),
+                        'max_id': int(max_id),
+                        'min_id': int(min_id),
+                        'row_count': row_count,
+                        'drop_indexes': drop_indexes,
+                        'segmentation_table_name': segmentation_table_name,
+                        'annotation_table_name': annotation_table,
+                        'temp_mat_table_name': f"temp__{annotation_table}",
+                        'pcg_table_name': pcg_table_name,
+                        'segmentation_source': segmentation_source,
+                        'coord_resolution': [4,4,40],
+                        'materialization_time_stamp': str(materialization_time_stamp),
+                        'last_updated_time_stamp': last_updated_time_stamp,
+                        'chunk_size': 100000,
+                        'table_count': len(annotation_tables),
+                    }
+                    if analysis_version:
+                        table_metadata['analysis_version'] = analysis_version
+                        table_metadata['analysis_database'] = f"{datastack_info['datastack']}__mat{analysis_version}"
+
+                    metadata.append(table_metadata.copy())
+        db.cached_session.close()
+        return metadata
+    except Exception as e:
+        db.cached_session.rollback()
+        celery_logger.error(e)
+
 
 @celery.task(name="process:collect_data", acks_late=True)
 def collect_data(*args, **kwargs):
