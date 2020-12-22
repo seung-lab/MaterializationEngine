@@ -1,4 +1,4 @@
-
+import datetime
 from celery import chain, chord, group
 from celery.utils.log import get_task_logger
 from materializationengine.celery_worker import celery
@@ -40,14 +40,13 @@ def run_complete_worflow(self, datastack_info: dict):
     segmentation_source : dict
         [description]
     """
+    materialization_time_stamp = datetime.datetime.utcnow()
 
     new_version_number = create_new_version(datastack_info)
-    mat_info = get_materialization_info(datastack_info, new_version_number)
-    database = create_analysis_database(datastack_info, new_version_number),
-    materialized_tables = create_analysis_tables(
-        datastack_info, new_version_number)
+    mat_info = get_materialization_info(datastack_info, new_version_number, materialization_time_stamp)
 
-    workflow = []
+
+    update_live_database_tasks = []
 
     for mat_metadata in mat_info:
         supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
@@ -60,30 +59,43 @@ def run_complete_worflow(self, datastack_info: dict):
                         ingest_new_annotations.si(mat_metadata, chunk),
                     ) for chunk in supervoxel_chunks],
                     fin.si()),  # return here is required for chords
-                fin.si())  # final task which will process a return status/timing etc...
+                fin.si())
         else:
             new_annotation_workflow = None
-
-        update_roots_and_freeze = chain(
+    
+        update_expired_roots_workflow = chain(
             chord([
                 group(update_root_ids(root_ids, mat_metadata))
                    for root_ids in chunked_roots],
                    fin.si()),
             update_metadata.si(mat_metadata),
-            drop_indexes.si(mat_metadata),
-            copy_data_from_live_table.si(mat_metadata),
-            # chord([
-            #     chain(insert_annotation_data.si(chunk, mat_metadata)) for chunk in supervoxel_chunks], fin.si()),
-            update_analysis_metadata.si(mat_metadata),
-            add_indexes.si(mat_metadata),
-            check_tables.si(mat_metadata))
+        )
 
         if new_annotation_workflow is not None:
             ingest_and_freeze_workflow = chain(
-                new_annotation_workflow, update_roots_and_freeze)
-            workflow.append(ingest_and_freeze_workflow)
+                new_annotation_workflow, update_expired_roots_workflow)
+            update_live_database_tasks.append(ingest_and_freeze_workflow)
         else:
-            workflow.append(update_roots_and_freeze)
+            update_live_database_tasks.append(update_expired_roots_workflow)
 
-    final_workflow = chord(workflow, final_task.s())
+    create_frozen_database_tasks = []
+
+    for mat_metadata in mat_info:       
+        create_frozen_database_workflow = chain(
+            drop_indexes.si(mat_metadata),
+            copy_data_from_live_table.si(mat_metadata),
+            update_analysis_metadata.si(mat_metadata),
+            add_indexes.si(mat_metadata),
+            check_tables.si(mat_metadata))
+        create_frozen_database_tasks.append(create_frozen_database_workflow)
+
+
+    setup_versioned_database = chain(create_analysis_database.si(datastack_info, new_version_number),
+                                     create_analysis_tables.si(datastack_info, new_version_number))
+
+    final_workflow = chain(
+        chord(update_live_database_tasks, fin.si()),
+        setup_versioned_database,
+        chord(create_frozen_database_tasks, final_task.s()),        
+        )
     final_workflow.apply_async()
