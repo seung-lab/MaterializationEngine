@@ -47,7 +47,11 @@ def process_new_annotations_workflow(self, datastack_info: dict):
     segmentation_source : dict
         [description]
     """
-    mat_info = get_materialization_info(datastack_info, skip_table=True)
+    materialization_time_stamp = datetime.datetime.utcnow()
+
+    mat_info = get_materialization_info(datastack_info=datastack_info,
+                                        materialization_time_stamp=materialization_time_stamp,
+                                        skip_table=True)
 
     for mat_metadata in mat_info:
         if mat_metadata:
