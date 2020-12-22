@@ -27,7 +27,11 @@ def expired_root_id_workflow(self, datastack_info: dict):
     Args:
         datastack_info (dict): Workflow metadata
     """
-    mat_info = get_materialization_info(datastack_info)
+
+    materialization_time_stamp = datetime.datetime.utcnow()
+
+    mat_info = get_materialization_info(datastack_info=datastack_info,
+                                        materialization_time_stamp=materialization_time_stamp)
     workflow = []
     use_creation_time = datastack_info['use_creation_time']
     for mat_metadata in mat_info:
