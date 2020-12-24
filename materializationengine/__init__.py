@@ -1,13 +1,14 @@
 from flask_sqlalchemy import SQLAlchemy
-from flask import Flask, Blueprint, jsonify, redirect
+from flask import Flask, Blueprint, jsonify, redirect, current_app
 from materializationengine.config import configure_app
 from materializationengine.admin import setup_admin
 from materializationengine.views import views_bp
 from materializationengine.utils import get_instance_folder_path
 from materializationengine.schemas import ma
+from materializationengine.database import sqlalchemy_cache
 from materializationengine.blueprints.materialize.api import mat_bp
 from materializationengine.blueprints.client.api import client_bp
-from materializationengine.models import Base
+from materializationengine.models import Base, AnalysisVersion
 import numpy as np
 from celery.signals import after_setup_logger
 from flask_restx import Api
@@ -69,12 +70,21 @@ def create_app(test_config=None):
 
     @app.route("/health")
     def health():
-        return jsonify("healthy"), 200
+        aligned_volume=current_app.config.get('TEST_DB_NAME', 'annotation')
+        session = sqlalchemy_cache.get(aligned_volume)
+        n_versions = session.query(AnalysisVersion).count()
+        return jsonify({aligned_volume:n_versions}), 200
 
     @app.route("/materialize/")
     def index():
         return redirect("/materialize/views")
 
+    @app.teardown_appcontext
+    def shutdown_session(exception=None):
+        for key in sqlalchemy_cache._sessions:
+            session = sqlalchemy_cache.get(key)
+            session.remove()
+            
     return app
 
 
