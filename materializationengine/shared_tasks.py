@@ -84,7 +84,7 @@ def get_materialization_info(datastack_info: dict,
 
         metadata = []
         for annotation_table in annotation_tables:
-            row_count = db._get_valid_id_row_count(annotation_table)
+            row_count = db._get_table_row_count(annotation_table, filter_valid=True)
             if row_count >= row_size and skip_table:
                 continue
             else:
