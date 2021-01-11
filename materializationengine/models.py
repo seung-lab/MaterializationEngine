@@ -15,7 +15,7 @@ class AnalysisVersion(Base):
     expires_on = Column(DateTime, nullable=True)
     
     def __repr__(self):
-        return "{}_v{}".format(self.datastack, self.version)
+        return "{}__mat{}".format(self.datastack, self.version)
 
 
 class AnalysisTable(Base):
