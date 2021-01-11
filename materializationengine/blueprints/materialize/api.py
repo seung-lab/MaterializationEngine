@@ -50,6 +50,8 @@ missing_chunk_parser.add_argument('schema', type=str)
 get_roots_parser = reqparse.RequestParser()
 get_roots_parser.add_argument('use_creation_time', default=False, type=inputs.boolean)
 
+expires_on_parser = reqparse.RequestParser()
+expires_on_parser.add_argument('database_expires', default=True, type=inputs.boolean)
 
 
 authorizations = {
@@ -118,6 +120,7 @@ class ProcessNewAnnotationsResource(Resource):
 @mat_bp.route("/materialize/live/datastack/<string:datastack_name>")
 class CompleteWorkflowResource(Resource):
     @auth_required
+    @mat_bp.expect(expires_on_parser)
     @mat_bp.doc("ingest segmentations > update roots and freeze materialization", security="apikey")
     def post(self, datastack_name: str):
         """Create versioned materialization, finds missing segmentations and updates roots
@@ -126,7 +129,11 @@ class CompleteWorkflowResource(Resource):
             datastack_name (str): name of datastack from infoservice
         """
         from materializationengine.workflows.complete_workflow import run_complete_worflow
+        
+        args = expires_on_parser.parse_args()
+        database_expires = args["database_expires"]
         datastack_info = get_datastack_info(datastack_name)
+        datastack_info['database_expires'] = database_expires  
         run_complete_worflow.s(datastack_info).apply_async()
         return 200
 
@@ -134,6 +141,7 @@ class CompleteWorkflowResource(Resource):
 @mat_bp.route("/materialize/frozen/datastack/<string:datastack_name>")
 class CreateFrozenMaterializationResource(Resource):
     @auth_required
+    @mat_bp.expect(expires_on_parser)
     @mat_bp.doc("create frozen materialization", security="apikey")
     def post(self, datastack_name: str):
         """Create a new frozen (versioned) materialization
@@ -142,7 +150,10 @@ class CreateFrozenMaterializationResource(Resource):
             datastack_name (str): name of datastack from infoservice
         """
         from materializationengine.workflows.create_frozen_database import create_versioned_materialization_workflow
-        datastack_info = get_datastack_info(datastack_name)   
+        args = expires_on_parser.parse_args()
+        database_expires = args["database_expires"]
+        datastack_info = get_datastack_info(datastack_name)
+        datastack_info['database_expires'] = database_expires     
         create_versioned_materialization_workflow.s(datastack_info).apply_async()
         return 200
 
