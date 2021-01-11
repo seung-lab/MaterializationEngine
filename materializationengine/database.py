@@ -2,6 +2,7 @@ from flask import current_app
 from dynamicannotationdb.materialization_client import DynamicMaterializationClient
 from sqlalchemy.engine.url import make_url
 from sqlalchemy import create_engine
+from sqlalchemy import MetaData
 from sqlalchemy.orm import scoped_session, sessionmaker
 from urllib.parse import urlparse
 
@@ -40,6 +41,15 @@ def get_sql_url_params(sql_url):
     }
     return url_mapping
 
+
+def reflect_tables(sql_base, database_name):
+    sql_uri = f"{sql_base}/{database_name}"
+    engine = create_engine(sql_uri)
+    meta = MetaData(engine)
+    meta.reflect(views=True)
+    tables = [table for table in meta.tables]
+    engine.dispose()
+    return tables
 
 class SqlAlchemyCache:
 
