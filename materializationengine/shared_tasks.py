@@ -84,7 +84,7 @@ def get_materialization_info(datastack_info: dict,
 
         metadata = []
         for annotation_table in annotation_tables:
-            row_count = db._get_table_row_count(annotation_table)
+            row_count = db._get_valid_id_row_count(annotation_table)
             if row_count >= row_size and skip_table:
                 continue
             else:
@@ -107,10 +107,6 @@ def get_materialization_info(datastack_info: dict,
                     else:
                         last_updated_time_stamp = str(last_updated_time_stamp)
 
-                    if row_count >= row_size:
-                        drop_indexes = True
-                    else:
-                        drop_indexes = False
 
                     table_metadata = {
                         'datastack': datastack_info['datastack'],
@@ -119,7 +115,7 @@ def get_materialization_info(datastack_info: dict,
                         'max_id': int(max_id),
                         'min_id': int(min_id),
                         'row_count': row_count,
-                        'drop_indexes': drop_indexes,
+                        'add_indices': True,
                         'segmentation_table_name': segmentation_table_name,
                         'annotation_table_name': annotation_table,
                         'temp_mat_table_name': f"temp__{annotation_table}",
