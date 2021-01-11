@@ -47,7 +47,7 @@ def create_versioned_materialization_workflow(self, datastack_info: dict):
 
     new_version_number = create_new_version(datastack_info, materialization_time_stamp)
     mat_info = get_materialization_info(datastack_info, new_version_number, materialization_time_stamp)
-
+    
     setup_versioned_database = chain(
         create_analysis_database.si(datastack_info, new_version_number),
         create_analysis_tables.si(datastack_info, new_version_number),
@@ -59,11 +59,10 @@ def create_versioned_materialization_workflow(self, datastack_info: dict):
         process_chunks_workflow = chain(
             drop_indices.si(mat_metadata),
             copy_data_from_live_table.si(mat_metadata),
-            add_indices.si(mat_metadata),
-            check_tables.si(mat_metadata))
+            add_indices.si(mat_metadata))
         frozen_workflow.append(process_chunks_workflow)
             
-    workflow = chain(setup_versioned_database, chord(frozen_workflow, fin.s()))
+    workflow = chain(setup_versioned_database, chord(frozen_workflow, fin.s()), check_tables.si(mat_info, new_version_number))
     status = workflow.apply_async()
     return True
 
@@ -495,20 +494,27 @@ def insert_chunked_data(annotation_table_name: str, sql_statement: str, cur, eng
 @celery.task(name="process:check_tables",
              bind=True,
              acks_late=True,)
-def check_tables(self, mat_metadata: dict):
-    aligned_volume = mat_metadata['aligned_volume']
-    analysis_version = mat_metadata['analysis_version']
-    analysis_database = mat_metadata['analysis_database']
-    annotation_table_name = mat_metadata['annotation_table_name']
-    live_table_row_count = mat_metadata['row_count']
+def check_tables(self, mat_info: dict, analysis_version: int):
+    table_count = len(mat_info)
+    valid_row_counts = 0
+    for mat_metadata in mat_info:
+        aligned_volume = mat_metadata['aligned_volume']
+        analysis_database = mat_metadata['analysis_database']
+        annotation_table_name = mat_metadata['annotation_table_name']
+        live_table_row_count = mat_metadata['row_count']
 
-    sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
-    sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-    session, engine = create_session(sql_uri)
+        mat_db = get_db(analysis_database)
+        mat_row_count = mat_db._get_table_row_count(annotation_table_name)
+        if live_table_row_count == mat_row_count:
+            valid_row_counts += 1
 
-    mat_db = get_db(analysis_database)
-    mat_row_count = mat_db._get_table_row_count(annotation_table_name)
-    if live_table_row_count == mat_row_count:
+    if valid_row_counts == table_count:
+        aligned_volume = mat_info[0]['aligned_volume'] # get aligned_volume name from datastack
+
+        sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
+        sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
+        session, engine = create_session(sql_uri)
+
         validity = session.query(AnalysisVersion).filter(AnalysisVersion.version==analysis_version).first()
         validity.valid = True
         try:
@@ -519,7 +525,7 @@ def check_tables(self, mat_metadata: dict):
         finally:
             session.close()
             engine.dispose()
-        return f"Annotation table '{annotation_table_name}' has {mat_row_count} rows."
+        return f"All materialized tables match valid row number from live tables"
     else:
         return None
 

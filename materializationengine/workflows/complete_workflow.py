@@ -45,6 +45,7 @@ def run_complete_worflow(self, datastack_info: dict):
     new_version_number = create_new_version(datastack_info, materialization_time_stamp)
 
     mat_info = get_materialization_info(datastack_info, new_version_number, materialization_time_stamp)
+    celery_logger.info(mat_info)
 
     update_live_database_tasks = []
 
@@ -84,8 +85,7 @@ def run_complete_worflow(self, datastack_info: dict):
         create_frozen_database_workflow = chain(
             drop_indices.si(mat_metadata),
             copy_data_from_live_table.si(mat_metadata),
-            add_indices.si(mat_metadata),
-            check_tables.si(mat_metadata))
+            add_indices.si(mat_metadata))
         create_frozen_database_tasks.append(create_frozen_database_workflow)
 
 
@@ -97,6 +97,7 @@ def run_complete_worflow(self, datastack_info: dict):
     final_workflow = chain(
         chord(update_live_database_tasks, fin.si()),
         setup_versioned_database,
-        chord(create_frozen_database_tasks, final_task.s()),        
+        chord(create_frozen_database_tasks, final_task.s()),
+        check_tables.si(mat_info, new_version_number)        
         )
     final_workflow.apply_async()
