@@ -8,7 +8,7 @@ from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
                                                 final_task)
 from materializationengine.workflows.create_frozen_database import (
     create_analysis_database, create_analysis_tables, create_new_version,
-    copy_data_from_live_table, update_analysis_metadata, drop_indexes, add_indexes, check_tables)
+    copy_data_from_live_table, update_analysis_metadata, drop_tables, drop_indices, add_indices, check_tables)
 from materializationengine.workflows.ingest_new_annotations import (
     create_missing_segmentation_table, get_materialization_info,
     ingest_new_annotations)
@@ -42,9 +42,9 @@ def run_complete_worflow(self, datastack_info: dict):
     """
     materialization_time_stamp = datetime.datetime.utcnow()
 
-    new_version_number = create_new_version(datastack_info)
-    mat_info = get_materialization_info(datastack_info, new_version_number, materialization_time_stamp)
+    new_version_number = create_new_version(datastack_info, materialization_time_stamp)
 
+    mat_info = get_materialization_info(datastack_info, new_version_number, materialization_time_stamp)
 
     update_live_database_tasks = []
 
@@ -82,16 +82,17 @@ def run_complete_worflow(self, datastack_info: dict):
 
     for mat_metadata in mat_info:       
         create_frozen_database_workflow = chain(
-            drop_indexes.si(mat_metadata),
+            drop_indices.si(mat_metadata),
             copy_data_from_live_table.si(mat_metadata),
-            update_analysis_metadata.si(mat_metadata),
-            add_indexes.si(mat_metadata),
+            add_indices.si(mat_metadata),
             check_tables.si(mat_metadata))
         create_frozen_database_tasks.append(create_frozen_database_workflow)
 
 
     setup_versioned_database = chain(create_analysis_database.si(datastack_info, new_version_number),
-                                     create_analysis_tables.si(datastack_info, new_version_number))
+                                     create_analysis_tables.si(datastack_info, new_version_number),
+                                     update_analysis_metadata.si(mat_info),
+                                     drop_tables.si(datastack_info, new_version_number))
 
     final_workflow = chain(
         chord(update_live_database_tasks, fin.si()),
