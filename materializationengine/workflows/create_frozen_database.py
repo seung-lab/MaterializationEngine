@@ -649,10 +649,7 @@ def drop_indices(self, mat_metadata: dict):
 
 
 @celery.task(name="process:add_indices",
-             bind=True,
-             acks_late=True,
-             autoretry_for=(Exception,),
-             max_retries=3)
+             bind=True)
 def add_indices(self, mat_metadata: dict):
     add_indices = mat_metadata.get('add_indices', False)
     if add_indices:
