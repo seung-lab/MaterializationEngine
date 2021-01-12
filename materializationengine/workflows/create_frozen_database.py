@@ -20,7 +20,7 @@ from materializationengine.shared_tasks import (fin, get_materialization_info,
 from materializationengine.utils import (create_annotation_model,
                                          create_segmentation_model)
 from psycopg2 import sql
-from sqlalchemy import MetaData, create_engine
+from sqlalchemy import MetaData, create_engine, func
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -97,9 +97,7 @@ def create_new_version(datastack_info: dict,
         if not engine.dialect.has_table(engine, table):
             Base.metadata.tables[table].create(bind=engine)
 
-    top_version = (session.query(AnalysisVersion)
-                   .order_by(AnalysisVersion.version.desc())
-                   .one())
+    top_version = session.query(func.max(AnalysisVersion.version)).scalar()
 
     if top_version is None:
         new_version_number = 1
