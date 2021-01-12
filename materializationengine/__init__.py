@@ -73,6 +73,7 @@ def create_app(test_config=None):
         aligned_volume=current_app.config.get('TEST_DB_NAME', 'annotation')
         session = sqlalchemy_cache.get(aligned_volume)
         n_versions = session.query(AnalysisVersion).count()
+        session.close()
         return jsonify({aligned_volume:n_versions}), 200
 
     @app.route("/materialize/")
