@@ -4,8 +4,7 @@ from celery.utils.log import get_task_logger
 from materializationengine.celery_worker import celery
 from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
                                                 update_metadata,
-                                                get_materialization_info,
-                                                final_task)
+                                                get_materialization_info)
 from materializationengine.workflows.create_frozen_database import (
     create_analysis_database, create_analysis_tables, create_new_version,
     merge_tables, update_table_metadata, drop_tables, drop_indices, add_indices, check_tables)
