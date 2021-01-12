@@ -55,6 +55,8 @@ def update_root_ids(root_ids: List[int], mat_metadata: dict) -> True:
         root_ids (List[int]): List of expired root_ids 
         mat_metadata (dict): metadata for tasks
     """
+    celery_logger.info("Starting root_id updating...")
+
     supervoxel_data = get_supervoxel_ids(root_ids, mat_metadata)
     groups = []
     if supervoxel_data:
@@ -88,7 +90,8 @@ def get_expired_root_ids(mat_metadata: dict, expired_chunk_size: int = 100, use_
     """
     last_updated_ts = mat_metadata.get('last_updated_time_stamp', None)
     pcg_table_name = mat_metadata.get("pcg_table_name")
-    
+    celery_logger.info(f"Looking up expired root ids since: {last_updated_ts}")
+ 
     if use_creation_time:
         aligned_volume = mat_metadata.get("aligned_volume")
         annotation_table_name = mat_metadata['annotation_table_name']
