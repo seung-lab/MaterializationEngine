@@ -102,7 +102,7 @@ def create_new_version(datastack_info: dict,
     if top_version is None:
         new_version_number = 1
     else:
-        new_version_number = top_version.version + 1
+        new_version_number = top_version + 1
     if database_expires:
         expiration_date = materialization_time_stamp + datetime.timedelta(days=expires_in_n_days)
     else:
@@ -270,7 +270,7 @@ def update_table_metadata(self, mat_info: List[dict]):
     aligned_volume = mat_info[0]['aligned_volume']
     version = mat_info[0]['analysis_version']
 
-    session = sqlalchemy_cache.get(aligned_volume)
+    session = sqlalchemy_cache.get(aligned_volume)()
     engine = sqlalchemy_cache.get_engine(aligned_volume)
 
     tables = []
@@ -324,10 +324,7 @@ def drop_tables(self, datastack_info: dict, analysis_version: int):
     session = sqlalchemy_cache.get(aligned_volume)
     engine = sqlalchemy_cache.get_engine(aligned_volume)   
     
-    version_id = session.query(AnalysisVersion.id).filter(AnalysisVersion.version==analysis_version).one()
-
-    anno_tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion_id==version_id).\
-        filter(AnalysisTable.valid==True).all()
+    anno_tables = session.query(AnnoMetadata).filter(AnnoMetadata.valid==True).all()
         
     annotation_tables = [table.__dict__['table_name'] for table in anno_tables]
     segmentation_tables = [f"{anno_table}__{pcg_table_name}" for anno_table in annotation_tables]
@@ -356,7 +353,7 @@ def drop_tables(self, datastack_info: dict, analysis_version: int):
         engine.dispose()
         mat_engine.dispose()
 
-    return {f"Tables dropped {tables}"}
+    return {f"Tables dropped {tables_to_drop}"}
 
     
 
