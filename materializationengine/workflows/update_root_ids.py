@@ -225,4 +225,4 @@ def get_new_roots(self, supervoxel_chunk: list, mat_metadata: dict):
         celery_logger.error(f"ERROR: {e}")
     finally:
         session.close()
-    return root_ids_df.to_dict()
+    return len(root_ids_df.to_dict())
