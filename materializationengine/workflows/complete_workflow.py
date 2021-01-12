@@ -38,7 +38,7 @@ def run_complete_worflow(self, datastack_info: dict, expires_in_n_days: int = 5)
     """
     materialization_time_stamp = datetime.datetime.utcnow()
 
-    new_version_number = create_new_version(datastack_info, materialization_time_stamp)
+    new_version_number = create_new_version(datastack_info, materialization_time_stamp, expires_in_n_days)
 
     mat_info = get_materialization_info(datastack_info, new_version_number, materialization_time_stamp)
     celery_logger.info(mat_info)

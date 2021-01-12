@@ -35,7 +35,7 @@ def run_periodic_materialzation() -> None:
         try:
             print(f"Start periodic materialziation job for {datastack}")
             datastack_info = get_datastack_info(datastack)
-            task = run_complete_worflow.s(datastack_info)
+            task = run_complete_worflow.s(datastack_info, expires_in_n_days=7)
             task.apply_async()
         except Exception as e:
             raise e
