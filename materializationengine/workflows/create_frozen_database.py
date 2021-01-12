@@ -84,15 +84,13 @@ def create_new_version(datastack_info: dict,
     datastack = datastack_info.get('datastack')
     database_expires = datastack_info['database_expires']
     
-    sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
-
     table_objects = [
         AnalysisVersion.__tablename__,
         AnalysisTable.__tablename__,
     ]
-    sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
 
-    session, engine = create_session(sql_uri)
+    session = sqlalchemy_cache.get(aligned_volume)
+    engine = sqlalchemy_cache.get_engine(aligned_volume)
 
     # create analysis metadata table if not exists
     for table in table_objects:
@@ -150,7 +148,9 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
 
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-    session, engine = create_session(sql_uri)
+
+    session = sqlalchemy_cache.get(aligned_volume)
+    engine = sqlalchemy_cache.get_engine(aligned_volume)
 
     analysis_sql_uri = create_analysis_sql_uri(
         str(sql_uri), datastack, analysis_version)
@@ -209,15 +209,13 @@ def create_analysis_tables(self, datastack_info: dict, analysis_version: int):
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info['datastack']
     
-    
-    sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
-    sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-
     analysis_sql_uri = create_analysis_sql_uri(
         SQL_URI_CONFIG, datastack, analysis_version)
     
     analysis_session, analysis_engine = create_session(analysis_sql_uri)
-    session, engine = create_session(sql_uri)
+    
+    session = sqlalchemy_cache.get(aligned_volume)
+    engine = sqlalchemy_cache.get_engine(aligned_volume)
 
     analysis_base = declarative_base(bind=analysis_engine)
     try:
@@ -273,9 +271,10 @@ def update_table_metadata(self, mat_info: List[dict]):
     """
     aligned_volume = mat_info[0]['aligned_volume']
     version = mat_info[0]['analysis_version']
-    sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
-    sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-    session, engine = create_session(sql_uri)
+
+    session = sqlalchemy_cache.get(aligned_volume)
+    engine = sqlalchemy_cache.get_engine(aligned_volume)
+
     tables = []
     for mat_metadata in mat_info:
         version_id = session.query(AnalysisVersion.id).filter(
@@ -377,8 +376,7 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
     datastack = mat_metadata['datastack']
 
 
-    Session = sqlalchemy_cache.get(aligned_volume)
-    session = Session()
+    session = sqlalchemy_cache.get(aligned_volume)
     engine = sqlalchemy_cache.get_engine(aligned_volume)
     
     # build table models
