@@ -97,7 +97,7 @@ class TestWorkflowResource(Resource):
         Args:
             iterator_length (int): Number of parallel tasks to run. Default = 5000
         """
-        from materializationengine.workflows.test_workflow import start_test_workflow
+        from materializationengine.workflows.dummy_workflow import start_test_workflow
         status = start_test_workflow.s(iterator_length).apply_async()
         return 200
 
