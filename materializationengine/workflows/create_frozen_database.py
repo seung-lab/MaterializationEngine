@@ -542,8 +542,25 @@ def insert_chunked_data(annotation_table_name: str, sql_statement: str, cur, eng
 @celery.task(name="process:check_tables",
              bind=True,
              acks_late=True,)
-def check_tables(self, mat_info: dict, analysis_version: int):
-    table_count = len(mat_info)
+def check_tables(self, mat_info: list, analysis_version: int):
+    """Check if each materialized table has the same number of rows as 
+    the aligned volumes tables in the live databse that are set as valid. 
+    If row numbers match, set the validity of both the analysis tables as well
+    as the analysis version (materialzied database) as True.
+
+    Args:
+        mat_info (list): list of dicts containing metadata for each materialzied table
+        analysis_version (int): the materialized version number
+
+    Returns:
+        [str]: [description]
+    """
+    aligned_volume = mat_info[0]['aligned_volume'] # get aligned_volume name from datastack
+    table_count = mat_info[0]['table_count']
+
+    session = sqlalchemy_cache.get(aligned_volume)
+    versioned_database = session.query(AnalysisVersion).filter(AnalysisVersion.version==analysis_version).one()
+
     valid_row_counts = 0
     for mat_metadata in mat_info:
         aligned_volume = mat_metadata['aligned_volume']
@@ -554,17 +571,13 @@ def check_tables(self, mat_info: dict, analysis_version: int):
         mat_db = get_db(analysis_database)
         mat_row_count = mat_db._get_table_row_count(annotation_table_name)
         if live_table_row_count == mat_row_count:
+            table_validity = session.query(AnalysisTable).filter(AnalysisTable.analysisversion_id==versioned_database.id).\
+                filter(AnalysisTable.table_name==annotation_table_name).one()
+            table_validity.valid = True
             valid_row_counts += 1
 
     if valid_row_counts == table_count:
-        aligned_volume = mat_info[0]['aligned_volume'] # get aligned_volume name from datastack
-
-        sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
-        sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-        session, engine = create_session(sql_uri)
-
-        validity = session.query(AnalysisVersion).filter(AnalysisVersion.version==analysis_version).first()
-        validity.valid = True
+        versioned_database.valid = True
         try:
             session.commit()
         except Exception as e:
@@ -616,9 +629,7 @@ def get_analysis_table(aligned_volume: str, datastack: str, table_name: str, mat
 
 @celery.task(name="process:drop_indices",
              bind=True,
-             acks_late=True,
-             autoretry_for=(Exception,),
-             max_retries=3)
+             acks_late=True)
 def drop_indices(self, mat_metadata: dict):
     add_indices = mat_metadata.get('add_indices', False)
     if add_indices:
