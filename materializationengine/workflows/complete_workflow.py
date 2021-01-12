@@ -8,7 +8,7 @@ from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
                                                 final_task)
 from materializationengine.workflows.create_frozen_database import (
     create_analysis_database, create_analysis_tables, create_new_version,
-    copy_data_from_live_table, update_analysis_metadata, drop_tables, drop_indices, add_indices, check_tables)
+    merge_tables, update_table_metadata, drop_tables, drop_indices, add_indices, check_tables)
 from materializationengine.workflows.ingest_new_annotations import (
     create_missing_segmentation_table, get_materialization_info,
     ingest_new_annotations)
@@ -21,24 +21,21 @@ celery_logger = get_task_logger(__name__)
 @celery.task(name="process:run_complete_worflow",
              acks_late=True,
              bind=True)
-def run_complete_worflow(self, datastack_info: dict):
-    """Base live materialization
+def run_complete_worflow(self, datastack_info: dict, expires_in_n_days: int = 5):
+    """Run complete materialziation workflow. 
+    Workflow overview:
+        - Find all annotations with missing segmentation rows 
+        and lookup supervoxel_id and root_id
+        - Lookup all expired root_ids and update them
+        - Copy the database to a new versioned database
+        - Merge annotation and segmentation tables
 
-    Workflow paths:
-        check if supervoxel column is empty:
-            if last_updated is NULL:
-                -> workflow : find missing supervoxels > cloudvolume lookup supervoxels > get root ids > 
-                            find missing root_ids > lookup supervoxel ids from sql > get root_ids > merge root_ids list > insert root_ids
-            else:
-                -> find missing supervoxels > cloudvolume lookup |
-                    - > find new root_ids between time stamps  ---> merge root_ids list > upsert root_ids
+    Args:
+        datastack_info (dict): [description]
+        expires_in_n_days (int, optional): [description]. Defaults to 5.
 
-    Parameters
-    ----------
-    aligned_volume_name : str
-        [description]
-    segmentation_source : dict
-        [description]
+    Returns:
+        [type]: [description]
     """
     materialization_time_stamp = datetime.datetime.utcnow()
 
@@ -49,6 +46,7 @@ def run_complete_worflow(self, datastack_info: dict):
 
     update_live_database_tasks = []
 
+    # lookup missing segmentation data for new annotations and update expired root_ids
     for mat_metadata in mat_info:
         supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
         chunked_roots = get_expired_root_ids(mat_metadata)
@@ -79,25 +77,26 @@ def run_complete_worflow(self, datastack_info: dict):
         else:
             update_live_database_tasks.append(update_expired_roots_workflow)
 
-    create_frozen_database_tasks = []
-
+    # copy live database as a materialized version and drop uneeded tables
+    setup_versioned_database = chain(create_analysis_database.si(datastack_info, new_version_number),
+                                     create_analysis_tables.si(datastack_info, new_version_number),
+                                     update_table_metadata.si(mat_info),
+                                     drop_tables.si(datastack_info, new_version_number))
+    
+    # drop indices, merge annotation and segmentation tables and re-add indices on merged table
+    create_frozen_database_tasks = []    
     for mat_metadata in mat_info:       
         create_frozen_database_workflow = chain(
             drop_indices.si(mat_metadata),
-            copy_data_from_live_table.si(mat_metadata),
+            merge_tables.si(mat_metadata),
             add_indices.si(mat_metadata))
         create_frozen_database_tasks.append(create_frozen_database_workflow)
 
 
-    setup_versioned_database = chain(create_analysis_database.si(datastack_info, new_version_number),
-                                     create_analysis_tables.si(datastack_info, new_version_number),
-                                     update_analysis_metadata.si(mat_info),
-                                     drop_tables.si(datastack_info, new_version_number))
-
     final_workflow = chain(
         chord(update_live_database_tasks, fin.si()),
         setup_versioned_database,
-        chord(create_frozen_database_tasks, final_task.s()),
+        chord(create_frozen_database_tasks, fin.si()),
         check_tables.si(mat_info, new_version_number)        
         )
     final_workflow.apply_async()
