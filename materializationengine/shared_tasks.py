@@ -29,6 +29,7 @@ def chunk_supervoxel_ids_task(mat_metadata: dict) -> List[List]:
     List[List]
         list of list containg start and end indices
     """
+    celery_logger.info("Chunking supervoxel ids")
     AnnotationModel = create_annotation_model(mat_metadata)
     chunk_size = mat_metadata.get('chunk_size', None)
     
@@ -42,14 +43,6 @@ def chunk_supervoxel_ids_task(mat_metadata: dict) -> List[List]:
 @celery.task(name="process:fin", acks_late=True, bind=True)
 def fin(self, *args, **kwargs):
     return True
-
-@celery.task(name="process:final_task",
-             bind=True,
-             acks_late=True,
-             autoretry_for=(Exception,),
-             max_retries=3)
-def final_task(self, *args, **kwargs):
-    return "FINAL TASK"  
 
 def get_materialization_info(datastack_info: dict,
                              analysis_version: int=None,
@@ -84,7 +77,7 @@ def get_materialization_info(datastack_info: dict,
 
         metadata = []
         for annotation_table in annotation_tables:
-            row_count = db._get_valid_id_row_count(annotation_table)
+            row_count = db._get_table_row_count(annotation_table, filter_valid=True)
             if row_count >= row_size and skip_table:
                 continue
             else:

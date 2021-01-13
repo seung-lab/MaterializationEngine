@@ -1,35 +1,18 @@
-from flask import (
-    Blueprint,
-    jsonify,
-    abort,
-    current_app,
-    request,
-    render_template,
-    url_for,
-    redirect,
-)
-from flask_restx import Namespace, Resource, reqparse, fields, inputs
-from flask_accepts import accepts, responds
-from emannotationschemas.models import format_version_db_uri
-from materializationengine.models import AnalysisTable, AnalysisVersion
-from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
-from materializationengine.database import get_db, sqlalchemy_cache, create_session
-from materializationengine.info_client import get_aligned_volumes
-from emannotationschemas.flatten import create_flattened_schema
-from emannotationschemas import get_schema
-from emannotationschemas.models import create_table_dict
-from middle_auth_client import auth_required, auth_requires_permission
-import requests
 import logging
-import numpy as np
-import json
-from sqlalchemy import Table
-from sqlalchemy import create_engine, MetaData
-from sqlalchemy.orm import scoped_session, sessionmaker
-from sqlalchemy.orm.exc import NoResultFound
-from sqlalchemy.exc import NoSuchTableError
+
+import requests
+from flask import abort, current_app
+from flask_restx import Namespace, Resource, inputs, reqparse
+from materializationengine.database import (create_session, get_db,
+                                            sqlalchemy_cache)
+from materializationengine.info_client import get_aligned_volumes
+from materializationengine.models import AnalysisTable, AnalysisVersion
+from materializationengine.schemas import (AnalysisTableSchema,
+                                           AnalysisVersionSchema)
+from middle_auth_client import auth_required
+from sqlalchemy import MetaData, Table
 from sqlalchemy.engine.url import make_url
-import datetime
+from sqlalchemy.exc import NoSuchTableError
 
 __version__ = "0.2.35"
 
@@ -97,7 +80,8 @@ class TestWorkflowResource(Resource):
         Args:
             iterator_length (int): Number of parallel tasks to run. Default = 5000
         """
-        from materializationengine.workflows.test_workflow import start_test_workflow
+        from materializationengine.workflows.dummy_workflow import \
+            start_test_workflow
         status = start_test_workflow.s(iterator_length).apply_async()
         return 200
 
@@ -111,7 +95,8 @@ class ProcessNewAnnotationsResource(Resource):
         Args:
             datastack_name (str): name of datastack from infoservice
         """
-        from materializationengine.workflows.ingest_new_annotations import process_new_annotations_workflow
+        from materializationengine.workflows.ingest_new_annotations import \
+            process_new_annotations_workflow
         datastack_info = get_datastack_info(datastack_name)
         process_new_annotations_workflow.s(datastack_info).apply_async()
         return 200
@@ -128,7 +113,8 @@ class CompleteWorkflowResource(Resource):
         Args:
             datastack_name (str): name of datastack from infoservice
         """
-        from materializationengine.workflows.complete_workflow import run_complete_worflow
+        from materializationengine.workflows.complete_workflow import \
+            run_complete_worflow
         
         args = expires_on_parser.parse_args()
         database_expires = args["database_expires"]
@@ -149,7 +135,8 @@ class CreateFrozenMaterializationResource(Resource):
         Args:
             datastack_name (str): name of datastack from infoservice
         """
-        from materializationengine.workflows.create_frozen_database import create_versioned_materialization_workflow
+        from materializationengine.workflows.create_frozen_database import \
+            create_versioned_materialization_workflow
         args = expires_on_parser.parse_args()
         database_expires = args["database_expires"]
         datastack_info = get_datastack_info(datastack_name)
@@ -168,7 +155,8 @@ class UpdateExpiredRootIdsResource(Resource):
         Args:
             datastack_name (str): name of datastack from infoservice
         """
-        from materializationengine.workflows.update_root_ids import expired_root_id_workflow
+        from materializationengine.workflows.update_root_ids import \
+            expired_root_id_workflow
         datastack_info = get_datastack_info(datastack_name)   
 
         args = get_roots_parser.parse_args()
@@ -233,7 +221,8 @@ class InsertMissingChunks(Resource):
             description (str): text field added to annotation metadata table for reference
 
         """
-        from materializationengine.workflows.bulk_upload import insert_missing_data
+        from materializationengine.workflows.bulk_upload import \
+            insert_missing_data
 
         args = missing_chunk_parser.parse_args()
 
