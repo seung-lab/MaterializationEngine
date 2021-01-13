@@ -14,7 +14,11 @@ from materializationengine.celery_worker import celery
 from materializationengine.database import (create_session, get_db,
                                             reflect_tables, sqlalchemy_cache)
 from materializationengine.index_manager import index_cache
-from materializationengine.models import AnalysisTable, AnalysisVersion, Base
+from materializationengine.models import (AnalysisTable, 
+                                          AnalysisVersion,
+                                          MaterializedMetadata,
+                                          Base,
+                                          MatBase)
 from materializationengine.shared_tasks import (fin, get_materialization_info,
                                                 query_id_range)
 from materializationengine.utils import (create_annotation_model,
@@ -212,6 +216,12 @@ def create_analysis_tables(self, datastack_info: dict, analysis_version: int):
     
     analysis_session, analysis_engine = create_session(analysis_sql_uri)
     
+    try:
+        mat_table = MaterializedMetadata()
+        mat_table.__table__.create(bind=analysis_engine) # pylint: disable=maybe-no-member
+    except Exception as e:
+        celery_logger.error(f"Table creation failed {e}")
+
     session = sqlalchemy_cache.get(aligned_volume)
     engine = sqlalchemy_cache.get_engine(aligned_volume)
 
@@ -244,6 +254,7 @@ def create_analysis_tables(self, datastack_info: dict, analysis_version: int):
                     flat_table = type(
                         temp_table_name, (analysis_base,), annotation_dict)
                     flat_table.__table__.create(bind=analysis_engine)
+
     except Exception as e:
         session.rollback()
         celery_logger.error(e)            
@@ -336,11 +347,12 @@ def drop_tables(self, datastack_info: dict, analysis_version: int):
 
     mat_engine = create_engine(analysis_sql_uri)
     
-    mat_base =  declarative_base()
+    mat_base = declarative_base()
     mat_meta = MetaData(mat_engine)
     mat_meta.reflect(views=True)
 
     tables_to_drop = set(materialized_tables) - set(filtered_tables)
+    tables_to_drop.remove('materializedmetadata') # preserve metadata table
     tables = [mat_meta.tables.get(table) for table in tables_to_drop]
 
     try:    
@@ -562,7 +574,7 @@ def check_tables(self, mat_info: list, analysis_version: int):
 
         mat_db = get_db(analysis_database)
         mat_row_count = mat_db._get_table_row_count(annotation_table_name)
-        if live_table_row_count == mat_row_count:
+        if live_table_row_count == mat_row_count: #TODO add index checking as well
             table_validity = session.query(AnalysisTable).filter(AnalysisTable.analysisversion_id==versioned_database.id).\
                 filter(AnalysisTable.table_name==annotation_table_name).one()
             table_validity.valid = True

@@ -4,6 +4,7 @@ from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
 
+MatBase = declarative_base()
 
 class AnalysisVersion(Base):
     __tablename__ = "analysisversion"
@@ -38,3 +39,15 @@ class AnalysisMetadata(Base):
     valid = Column(Boolean)
     created = Column(DateTime, nullable=False)
     last_updated = Column(DateTime, nullable=True)
+
+
+class MaterializedMetadata(MatBase):
+    __tablename__ = "materializedmetadata"
+    id = Column(Integer, primary_key=True)
+    schema = Column(String(100), nullable=False)
+    table_name = Column(String(100), nullable=False)
+    row_count = Column(Integer, nullable=False)
+    updated_root_ids_count = Column(Integer, nullable=True)
+    materialized_timestamp = Column(DateTime, nullable=False)
+    
+    
