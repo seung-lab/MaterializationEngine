@@ -45,7 +45,6 @@ def remove_expired_databases(aligned_volume_databases) -> None:
         expired_versions = (session.query(AnalysisVersion).
                             filter(AnalysisVersion.expires_on <= current_time).all())
 
-        print(expired_versions)
         session.close()
         engine.dispose()
 
