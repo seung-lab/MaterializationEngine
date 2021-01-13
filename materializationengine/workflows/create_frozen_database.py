@@ -1,5 +1,4 @@
 import datetime
-import logging
 from collections import OrderedDict
 from typing import List
 
@@ -21,7 +20,7 @@ from materializationengine.shared_tasks import (fin, get_materialization_info,
 from materializationengine.utils import (create_annotation_model,
                                          create_segmentation_model)
 from psycopg2 import sql
-from sqlalchemy import MetaData, create_engine
+from sqlalchemy import MetaData, create_engine, func
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -36,7 +35,7 @@ CELERY_WORKER_IP = current_app.config["CELERY_WORKER_IP"]
              acks_late=True,)
 def create_versioned_materialization_workflow(self, datastack_info: dict):
     """Create a timelocked database of materialization annotations
-    and asociated segmentation data.
+    and associated segmentation data.
 
     Parameters
     ----------
@@ -47,23 +46,22 @@ def create_versioned_materialization_workflow(self, datastack_info: dict):
 
     new_version_number = create_new_version(datastack_info, materialization_time_stamp)
     mat_info = get_materialization_info(datastack_info, new_version_number, materialization_time_stamp)
-
+    
     setup_versioned_database = chain(
         create_analysis_database.si(datastack_info, new_version_number),
         create_analysis_tables.si(datastack_info, new_version_number),
-        update_analysis_metadata.si(mat_info),
+        update_table_metadata.si(mat_info),
         drop_tables.si(datastack_info, new_version_number)) #TODO drop tables should come after update_metadata, break out 
 
     frozen_workflow = []
     for mat_metadata in mat_info:
         process_chunks_workflow = chain(
             drop_indices.si(mat_metadata),
-            copy_data_from_live_table.si(mat_metadata),
-            add_indices.si(mat_metadata),
-            check_tables.si(mat_metadata))
+            merge_tables.si(mat_metadata),
+            add_indices.si(mat_metadata))
         frozen_workflow.append(process_chunks_workflow)
             
-    workflow = chain(setup_versioned_database, chord(frozen_workflow, fin.s()))
+    workflow = chain(setup_versioned_database, chord(frozen_workflow, fin.s()), check_tables.si(mat_info, new_version_number))
     status = workflow.apply_async()
     return True
 
@@ -71,34 +69,40 @@ def create_versioned_materialization_workflow(self, datastack_info: dict):
 def create_new_version(datastack_info: dict, 
                        materialization_time_stamp: datetime.datetime.utcnow,
                        expires_in_n_days: int = 5):
+    """Create new versioned database row in the anaylsis_version table.
+    Sets the expiration date for the database.
 
+    Args:
+        datastack_info (dict): [description]
+        materialization_time_stamp (datetime.datetime.utcnow): [description]
+        expires_in_n_days (int, optional): [description]. Defaults to 5.
+
+    Returns:
+        [int]: version number of materialzied database
+    """
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info.get('datastack')
     database_expires = datastack_info['database_expires']
     
-    sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
-
     table_objects = [
         AnalysisVersion.__tablename__,
         AnalysisTable.__tablename__,
     ]
-    sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
 
-    session, engine = create_session(sql_uri)
+    session = sqlalchemy_cache.get(aligned_volume)
+    engine = sqlalchemy_cache.get_engine(aligned_volume)
 
     # create analysis metadata table if not exists
     for table in table_objects:
         if not engine.dialect.has_table(engine, table):
             Base.metadata.tables[table].create(bind=engine)
 
-    top_version = (session.query(AnalysisVersion)
-                   .order_by(AnalysisVersion.version.desc())
-                   .first())
+    top_version = session.query(func.max(AnalysisVersion.version)).scalar()
 
     if top_version is None:
         new_version_number = 1
     else:
-        new_version_number = top_version.version + 1
+        new_version_number = top_version + 1
     if database_expires:
         expiration_date = materialization_time_stamp + datetime.timedelta(days=expires_in_n_days)
     else:
@@ -124,7 +128,7 @@ def create_new_version(datastack_info: dict,
              bind=True,
              acks_late=True,)
 def create_analysis_database(self, datastack_info: dict, analysis_version: int) -> str:
-    """Create a new database to store materialized annotation tables
+    """Copies live database to new versioned database for materializied annotations.
 
     Parameters
     ----------
@@ -142,7 +146,9 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
 
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-    session, engine = create_session(sql_uri)
+
+    session = sqlalchemy_cache.get(aligned_volume)
+    engine = sqlalchemy_cache.get_engine(aligned_volume)
 
     analysis_sql_uri = create_analysis_sql_uri(
         str(sql_uri), datastack, analysis_version)
@@ -156,7 +162,7 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
         )
         if not result.fetchone():
             # create new database from template_postgis database
-            logging.info(
+            celery_logger.info(
                 f"Creating new materialized database {analysis_sql_uri.database}")
             connection.execute(
                 f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
@@ -201,15 +207,13 @@ def create_analysis_tables(self, datastack_info: dict, analysis_version: int):
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info['datastack']
     
-    
-    sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
-    sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-
     analysis_sql_uri = create_analysis_sql_uri(
         SQL_URI_CONFIG, datastack, analysis_version)
     
     analysis_session, analysis_engine = create_session(analysis_sql_uri)
-    session, engine = create_session(sql_uri)
+    
+    session = sqlalchemy_cache.get(aligned_volume)
+    engine = sqlalchemy_cache.get_engine(aligned_volume)
 
     analysis_base = declarative_base(bind=analysis_engine)
     try:
@@ -222,7 +226,7 @@ def create_analysis_tables(self, datastack_info: dict, analysis_version: int):
                 # create name of table to be materialized
                 if not engine.dialect.has_table(analysis_engine, table_name):
                     schema_type = session.query(AnnoMetadata.schema_type).\
-                        filter(AnnoMetadata.table_name == table_name).first()
+                        filter(AnnoMetadata.table_name == table_name).one()
 
                     anno_schema = get_schema(schema_type[0])
                     flat_schema = create_flattened_schema(anno_schema)
@@ -250,25 +254,36 @@ def create_analysis_tables(self, datastack_info: dict, analysis_version: int):
         analysis_engine.dispose()
     return True
 
-@celery.task(name="process:update_analysis_metadata",
+@celery.task(name="process:update_table_metadata",
              bind=True,
              acks_late=True,)
-def update_analysis_metadata(self, mat_info: list):
+def update_table_metadata(self, mat_info: List[dict]):
+    """Update 'analysistables' with all the tables
+    to be created in the frozen materialized database. 
+
+    Args:
+        mat_info (List[dict]): list of dicts containing table metadata
+
+    Returns:
+        list: list of tables that were added to 'analysistables' 
+    """
     aligned_volume = mat_info[0]['aligned_volume']
     version = mat_info[0]['analysis_version']
-    sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
-    sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-    session, engine = create_session(sql_uri)
 
+    session = sqlalchemy_cache.get(aligned_volume)()
+    engine = sqlalchemy_cache.get_engine(aligned_volume)
+
+    tables = []
     for mat_metadata in mat_info:
         version_id = session.query(AnalysisVersion.id).filter(
             AnalysisVersion.version == version).first()
         analysis_table = AnalysisTable(aligned_volume=aligned_volume,
                                     schema=mat_metadata['schema'],
                                     table_name=mat_metadata['annotation_table_name'],
-                                    valid=True,
+                                    valid=False,
                                     created=mat_metadata['materialization_time_stamp'],
                                     analysisversion_id=version_id)
+        tables.append(analysis_table.table_name)
         session.add(analysis_table)
     try:
         session.commit()
@@ -278,11 +293,26 @@ def update_analysis_metadata(self, mat_info: list):
     finally:
         session.close()
         engine.dispose()
+    return tables
 
 @celery.task(name="process:drop_tables",
              bind=True,
              acks_late=True,)
 def drop_tables(self, datastack_info: dict, analysis_version: int):
+    """Drop all tables that dont match valid in the live 'aligned_volume' database
+    as well as tables that were copied from the live table that are not needed in
+    the frozen version (e.g. metadata tables).
+
+    Args:
+        datastack_info (dict): datastack info for the aligned_volume from the infoservice
+        analysis_version (int): materialized verison number
+
+    Raises:
+        e: [description]
+
+    Returns:
+        [type]: [description]
+    """
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info['datastack']
     pcg_table_name = datastack_info['segmentation_source'].split("/")[-1]
@@ -294,10 +324,7 @@ def drop_tables(self, datastack_info: dict, analysis_version: int):
     session = sqlalchemy_cache.get(aligned_volume)
     engine = sqlalchemy_cache.get_engine(aligned_volume)   
     
-    version_id = session.query(AnalysisVersion.id).filter(AnalysisVersion.version==analysis_version).first()
-
-    anno_tables = session.query(AnalysisTable).filter(AnalysisTable.analysisversion_id==version_id).\
-        filter(AnalysisTable.valid==True).all()
+    anno_tables = session.query(AnnoMetadata).filter(AnnoMetadata.valid==True).all()
         
     annotation_tables = [table.__dict__['table_name'] for table in anno_tables]
     segmentation_tables = [f"{anno_table}__{pcg_table_name}" for anno_table in annotation_tables]
@@ -326,7 +353,7 @@ def drop_tables(self, datastack_info: dict, analysis_version: int):
         engine.dispose()
         mat_engine.dispose()
 
-    return {f"Tables dropped {tables}"}
+    return {f"Tables dropped {tables_to_drop}"}
 
     
 
@@ -344,8 +371,7 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
     datastack = mat_metadata['datastack']
 
 
-    Session = sqlalchemy_cache.get(aligned_volume)
-    session = Session()
+    session = sqlalchemy_cache.get(aligned_volume)
     engine = sqlalchemy_cache.get_engine(aligned_volume)
     
     # build table models
@@ -390,13 +416,26 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
         engine.dispose()
 
 
-@celery.task(name="process:copy_data_from_live_table",
+@celery.task(name="process:merge_tables",
              bind=True,
              acks_late=True,
              autoretry_for=(Exception,),
              max_retries=3)
-def copy_data_from_live_table(self, mat_metadata: dict):
+def merge_tables(self, mat_metadata: dict):
+    """Merge all the annotation and segmentation rows into a new table that are
+    flagged as valid. Drop the original split tables after inserting all the rows
+    into the new table.
 
+    Args:
+        mat_metadata (dict): datastack info for the aligned_volume from the infoservice
+        analysis_version (int): materialized verison number
+
+    Raises:
+        e: [description]
+
+    Returns:
+        [type]: [description]
+    """
     analysis_version = mat_metadata['analysis_version']
     annotation_table_name = mat_metadata['annotation_table_name']
     segmentation_table_name = mat_metadata['segmentation_table_name']
@@ -495,22 +534,42 @@ def insert_chunked_data(annotation_table_name: str, sql_statement: str, cur, eng
 @celery.task(name="process:check_tables",
              bind=True,
              acks_late=True,)
-def check_tables(self, mat_metadata: dict):
-    aligned_volume = mat_metadata['aligned_volume']
-    analysis_version = mat_metadata['analysis_version']
-    analysis_database = mat_metadata['analysis_database']
-    annotation_table_name = mat_metadata['annotation_table_name']
-    live_table_row_count = mat_metadata['row_count']
+def check_tables(self, mat_info: list, analysis_version: int):
+    """Check if each materialized table has the same number of rows as 
+    the aligned volumes tables in the live databse that are set as valid. 
+    If row numbers match, set the validity of both the analysis tables as well
+    as the analysis version (materialzied database) as True.
 
-    sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
-    sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-    session, engine = create_session(sql_uri)
+    Args:
+        mat_info (list): list of dicts containing metadata for each materialzied table
+        analysis_version (int): the materialized version number
 
-    mat_db = get_db(analysis_database)
-    mat_row_count = mat_db._get_table_row_count(annotation_table_name)
-    if live_table_row_count == mat_row_count:
-        validity = session.query(AnalysisVersion).filter(AnalysisVersion.version==analysis_version).first()
-        validity.valid = True
+    Returns:
+        [str]: [description]
+    """
+    aligned_volume = mat_info[0]['aligned_volume'] # get aligned_volume name from datastack
+    table_count = mat_info[0]['table_count']
+
+    session = sqlalchemy_cache.get(aligned_volume)
+    versioned_database = session.query(AnalysisVersion).filter(AnalysisVersion.version==analysis_version).one()
+
+    valid_row_counts = 0
+    for mat_metadata in mat_info:
+        aligned_volume = mat_metadata['aligned_volume']
+        analysis_database = mat_metadata['analysis_database']
+        annotation_table_name = mat_metadata['annotation_table_name']
+        live_table_row_count = mat_metadata['row_count']
+
+        mat_db = get_db(analysis_database)
+        mat_row_count = mat_db._get_table_row_count(annotation_table_name)
+        if live_table_row_count == mat_row_count:
+            table_validity = session.query(AnalysisTable).filter(AnalysisTable.analysisversion_id==versioned_database.id).\
+                filter(AnalysisTable.table_name==annotation_table_name).one()
+            table_validity.valid = True
+            valid_row_counts += 1
+
+    if valid_row_counts == table_count:
+        versioned_database.valid = True
         try:
             session.commit()
         except Exception as e:
@@ -518,8 +577,7 @@ def check_tables(self, mat_metadata: dict):
             celery_logger.error(e)
         finally:
             session.close()
-            engine.dispose()
-        return f"Annotation table '{annotation_table_name}' has {mat_row_count} rows."
+        return f"All materialized tables match valid row number from live tables"
     else:
         return None
 
@@ -563,9 +621,7 @@ def get_analysis_table(aligned_volume: str, datastack: str, table_name: str, mat
 
 @celery.task(name="process:drop_indices",
              bind=True,
-             acks_late=True,
-             autoretry_for=(Exception,),
-             max_retries=3)
+             acks_late=True)
 def drop_indices(self, mat_metadata: dict):
     add_indices = mat_metadata.get('add_indices', False)
     if add_indices:
@@ -585,10 +641,7 @@ def drop_indices(self, mat_metadata: dict):
 
 
 @celery.task(name="process:add_indices",
-             bind=True,
-             acks_late=True,
-             autoretry_for=(Exception,),
-             max_retries=3)
+             bind=True)
 def add_indices(self, mat_metadata: dict):
     add_indices = mat_metadata.get('add_indices', False)
     if add_indices:

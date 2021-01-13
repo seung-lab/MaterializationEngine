@@ -31,11 +31,13 @@ def run_periodic_materialzation() -> None:
     5. Drop non-materializied tables
     """
     datastacks = json.loads(os.environ['DATASTACKS'])
+    expires_in_n_days = os.environ['EXPIRES_IN_N_DAYS']
+
     for datastack in datastacks:
         try:
             print(f"Start periodic materialziation job for {datastack}")
             datastack_info = get_datastack_info(datastack)
-            task = run_complete_worflow.s(datastack_info)
+            task = run_complete_worflow.s(datastack_info, expires_in_n_days=expires_in_n_days)
             task.apply_async()
         except Exception as e:
             raise e
