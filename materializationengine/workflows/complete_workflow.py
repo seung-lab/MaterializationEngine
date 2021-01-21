@@ -78,7 +78,7 @@ def run_complete_worflow(self, datastack_info: dict, expires_in_n_days: int = 5)
 
     # copy live database as a materialized version and drop uneeded tables
     setup_versioned_database = chain(create_analysis_database.si(datastack_info, new_version_number),
-                                     create_analysis_tables.si(datastack_info, new_version_number),
+                                     create_analysis_tables.si(datastack_info, new_version_number, materialization_time_stamp),
                                      update_table_metadata.si(mat_info),
                                      drop_tables.si(datastack_info, new_version_number))
     
