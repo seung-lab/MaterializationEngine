@@ -54,7 +54,7 @@ def process_new_annotations_workflow(self, datastack_info: dict):
                                         skip_table=True)
 
     for mat_metadata in mat_info:
-        if mat_metadata:
+        if mat_metadata['row_count'] < 1_000_000:
             supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
             process_chunks_workflow = chain(
                 create_missing_segmentation_table.s(mat_metadata),
