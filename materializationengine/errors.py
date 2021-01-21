@@ -29,3 +29,6 @@ class TaskFailure(Exception):
 
 class WrongModelType(KeyError):
     pass
+
+class IndexMatchError(KeyError):
+    pass
