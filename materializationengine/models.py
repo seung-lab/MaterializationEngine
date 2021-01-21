@@ -47,7 +47,6 @@ class MaterializedMetadata(MatBase):
     schema = Column(String(100), nullable=False)
     table_name = Column(String(100), nullable=False)
     row_count = Column(Integer, nullable=False)
-    updated_root_ids_count = Column(Integer, nullable=True)
     materialized_timestamp = Column(DateTime, nullable=False)
     
     
