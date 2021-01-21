@@ -8,6 +8,7 @@ celery_app = Celery(include=[
     'materializationengine.workflows.bulk_upload',
     'materializationengine.workflows.complete_workflow',
     'materializationengine.workflows.dummy_workflow',
+    'materializationengine.workflows.periodic_database_removal',
     'materializationengine.shared_tasks',
     ])
 
