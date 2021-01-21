@@ -36,7 +36,6 @@ class BaseConfig:
     SEGMENTATION_ENDPOINT = "https://global.daf-apis.com/"
     MATERIALIZATION_ROW_CHUNK_SIZE = 500
     QUERY_LIMIT_SIZE = 200000
-
     CELERY_WORKER_IP = os.environ.get("CELERY_WORKER_IP", "127.0.0.1")
 
     if os.environ.get("DAF_CREDENTIALS", None) is not None:
@@ -51,7 +50,12 @@ class DevConfig(BaseConfig):
 
 class TestConfig(BaseConfig):
     TESTING = True
-
+    SQLALCHEMY_DATABASE_URI = "sqlite://"
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    REDIS_HOST = os.environ.get("REDIS_SERVICE_HOST")
+    REDIS_PORT = os.environ.get("REDIS_SERVICE_PORT")
+    REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
+    CELERY_BROKER_URL = REDIS_URL
 
 class ProductionConfig(BaseConfig):
     LOGGING_LEVEL = logging.INFO
