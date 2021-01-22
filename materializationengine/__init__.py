@@ -41,15 +41,15 @@ def create_app(test_config=None):
                 static_url_path='/materialize/static',
                 instance_relative_config=True,
                 template_folder="../templates")
-    # load configuration (from test_config if passed)
     logging.basicConfig(level=logging.INFO)
     app.json_encoder = AEEncoder
     app.config["RESTX_JSON"] = {"cls": AEEncoder}
-
-    if test_config is None:
-        app = configure_app(app)
+    
+    # load configuration (from test_config if passed)
+    if test_config:
+        app.config.from_object('materializationengine.config.TestConfig')
     else:
-        app.config.update(test_config)
+        app = configure_app(app)
     # register blueprints
 
     apibp = Blueprint('api', __name__, url_prefix='/materialize/api')
