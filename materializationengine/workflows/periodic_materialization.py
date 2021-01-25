@@ -31,7 +31,7 @@ def run_periodic_materialzation() -> None:
     5. Drop non-materializied tables
     """
     datastacks = json.loads(os.environ['DATASTACKS'])
-    expires_in_n_days = os.environ['EXPIRES_IN_N_DAYS']
+    expires_in_n_days = int(os.environ['EXPIRES_IN_N_DAYS'])
 
     for datastack in datastacks:
         try:
