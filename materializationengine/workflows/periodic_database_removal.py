@@ -50,7 +50,7 @@ def remove_expired_databases(self, aligned_volume_databases) -> None:
 
         expired_versions = session.query(AnalysisVersion).\
                             filter(AnalysisVersion.expires_on <= current_time).all()
-        if len(expired_versions) >= delete_threshold:
+        if len(expired_versions) > delete_threshold:
             with engine.connect() as conn:
                 conn.execution_options(isolation_level="AUTOCOMMIT")
                 for database in expired_versions:
