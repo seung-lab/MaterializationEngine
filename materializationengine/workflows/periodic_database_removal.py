@@ -1,6 +1,7 @@
 """
-Create frozen dataset.
+Periodically clean up expired materialized databases.
 """
+import os
 from datetime import datetime
 
 import psycopg2
@@ -38,6 +39,7 @@ def remove_expired_databases(self, aligned_volume_databases) -> None:
     """
     Remove expired database from time this method is called.
     """
+    delete_threshold = int(os.environ['DELETE_THRESHOLD'])
     current_time = datetime.datetime.utcnow()
     dropped_dbs = []                            
 
@@ -48,30 +50,35 @@ def remove_expired_databases(self, aligned_volume_databases) -> None:
 
         expired_versions = session.query(AnalysisVersion).\
                             filter(AnalysisVersion.expires_on <= current_time).all()
-        with engine.connect() as conn:
-            conn.execution_options(isolation_level="AUTOCOMMIT")
-            for database in expired_versions:
-                try:
-                    sql = "SELECT 1 FROM pg_database WHERE datname='%s'" % database
-                
-                    result_proxy = conn.execute(sql)
-                    result = result_proxy.scalar()
-
-                    if result:
-                        sql = "DROP DATABASE %s" % database
+        if len(expired_versions) >= delete_threshold:
+            with engine.connect() as conn:
+                conn.execution_options(isolation_level="AUTOCOMMIT")
+                for database in expired_versions:
+                    try:
+                        sql = "SELECT 1 FROM pg_database WHERE datname='%s'" % database
+                    
                         result_proxy = conn.execute(sql)
-                        
-                        expired_database = session.query(AnalysisVersion).\
-                                    filter(AnalysisVersion.version==database.version).one()
-                        expired_database.valid = False
-                        dropped_dbs.append(expired_database)
-                        celery_logger.info(f"Database '{expired_database}' dropped")
-                except Exception as e:
-                    celery_logger.error(f"ERROR: {e}: {database} does not exist")
-        session.commit()
-        session.close()
-    return dropped_dbs
+                        result = result_proxy.scalar()
+
+                        if result:
+                            sql = "DROP DATABASE %s" % database
+                            result_proxy = conn.execute(sql)
+                            
+                            expired_database = session.query(AnalysisVersion).\
+                                        filter(AnalysisVersion.version==database.version).one()
+                            expired_database.valid = False
+                            dropped_dbs.append(expired_database)
+                            celery_logger.info(f"Database '{expired_database}' dropped")
+                    except Exception as e:
+                        celery_logger.error(f"ERROR: {e}: {database} does not exist")
+            session.commit()
+            session.close()
+            return dropped_dbs
+        else:
+            return f"Number of expired databases is: ({len(expired_versions)}) which is less than the threshold: {delete_threshold}"
+    
 
 if __name__ == "__main__":
+
     aligned_volume_databases = get_aligned_volumes_databases()
     dropped_dbs = remove_expired_databases.s(aligned_volume_databases).apply_async()
