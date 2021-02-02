@@ -1,6 +1,6 @@
 import datetime
 from typing import List
-
+import os
 import gcsfs
 import numpy as np
 import pandas as pd
@@ -11,16 +11,17 @@ from emannotationschemas import get_schema
 from emannotationschemas import models as em_models
 from emannotationschemas.flatten import create_flattened_schema
 from flask import current_app
-from materializationengine.celery_worker import celery
+from materializationengine.celery_init import celery
 from materializationengine.database import sqlalchemy_cache
 from materializationengine.utils import (create_annotation_model,
-                                         create_segmentation_model)
+                                         create_segmentation_model,
+                                         get_config_param)
 from materializationengine.index_manager import index_cache
 
 
 celery_logger = get_task_logger(__name__)
 
-SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
+# SQL_URI_CONFIG = get_config_param('SQLALCHEMY_DATABASE_URI')
 
 def bulk_upload(bulk_upload_params: dict):
 
