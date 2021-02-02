@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from celery import chain, chord, group
 from celery.utils.log import get_task_logger
-from materializationengine.celery_worker import celery
+from materializationengine.celery_init import celery
 from materializationengine.chunkedgraph_gateway import chunkedgraph_cache
 from materializationengine.database import sqlalchemy_cache
 from materializationengine.shared_tasks import fin, update_metadata, get_materialization_info
@@ -17,10 +17,8 @@ from sqlalchemy.sql import or_
 celery_logger = get_task_logger(__name__)
 
 
-@celery.task(name="process:update_root_ids_task",
-             bind=True,
-             acks_late=True,)
-def expired_root_id_workflow(self, datastack_info: dict):
+@celery.task(name="process:update_root_ids_task")
+def expired_root_id_workflow(datastack_info: dict):
     """Workflow to process expired root ids and lookup and
     update table with current root ids.
 
