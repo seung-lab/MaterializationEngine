@@ -1,7 +1,7 @@
 import datetime
 from collections import OrderedDict
 from typing import List
-
+import os
 import pandas as pd
 from celery import chain, chord
 from celery.utils.log import get_task_logger
@@ -10,7 +10,7 @@ from emannotationschemas import get_schema
 from emannotationschemas.flatten import create_flattened_schema
 from emannotationschemas.models import create_table_dict, make_flat_model
 from flask import current_app
-from materializationengine.celery_worker import celery
+from materializationengine.celery_init import celery
 from materializationengine.database import (create_session, get_db,
                                             reflect_tables, sqlalchemy_cache)
 from materializationengine.index_manager import index_cache
@@ -22,7 +22,8 @@ from materializationengine.errors import IndexMatchError
 from materializationengine.shared_tasks import (fin, get_materialization_info,
                                                 query_id_range)
 from materializationengine.utils import (create_annotation_model,
-                                         create_segmentation_model)
+                                         create_segmentation_model,
+                                         get_config_param)
 from psycopg2 import sql
 from sqlalchemy import MetaData, create_engine, func
 from sqlalchemy.engine.url import make_url
@@ -30,14 +31,11 @@ from sqlalchemy.ext.declarative import declarative_base
 
 celery_logger = get_task_logger(__name__)
 
-SQL_URI_CONFIG = current_app.config["SQLALCHEMY_DATABASE_URI"]
+# SQL_URI_CONFIG = get_config_param('SQLALCHEMY_DATABASE_URI')
 
-CELERY_WORKER_IP = current_app.config["CELERY_WORKER_IP"]
 
-@celery.task(name="process:create_versioned_materialization_workflow",
-             bind=True,
-             acks_late=True,)
-def create_versioned_materialization_workflow(self, datastack_info: dict):
+@celery.task(name="process:create_versioned_materialization_workflow")
+def create_versioned_materialization_workflow(datastack_info: dict):
     """Create a timelocked database of materialization annotations
     and associated segmentation data.
 
@@ -72,14 +70,14 @@ def create_versioned_materialization_workflow(self, datastack_info: dict):
 
 def create_new_version(datastack_info: dict, 
                        materialization_time_stamp: datetime.datetime.utcnow,
-                       expires_in_n_days: int = 5):
+                       days_to_expire: int = 5):
     """Create new versioned database row in the anaylsis_version table.
     Sets the expiration date for the database.
 
     Args:
         datastack_info (dict): [description]
         materialization_time_stamp (datetime.datetime.utcnow): [description]
-        expires_in_n_days (int, optional): [description]. Defaults to 5.
+        days_to_expire (int, optional): [description]. Defaults to 5.
 
     Returns:
         [int]: version number of materialzied database
@@ -92,8 +90,7 @@ def create_new_version(datastack_info: dict,
         AnalysisVersion.__tablename__,
         AnalysisTable.__tablename__,
     ]
-
-
+    SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
 
@@ -111,7 +108,7 @@ def create_new_version(datastack_info: dict,
     else:
         new_version_number = top_version + 1
     if database_expires:
-        expiration_date = materialization_time_stamp + datetime.timedelta(days=expires_in_n_days)
+        expiration_date = materialization_time_stamp + datetime.timedelta(days=days_to_expire)
     else:
         expiration_date = None
 
@@ -150,7 +147,7 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
 
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info['datastack']
-
+    SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
 
@@ -185,6 +182,7 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
             )
     session.close()
     engine.dispose()
+
     return True
 
 @celery.task(name="process:create_analysis_tables",
@@ -214,7 +212,7 @@ def create_analysis_tables(self, datastack_info: dict,
     """
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info['datastack']
-    
+    SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
     analysis_sql_uri = create_analysis_sql_uri(
@@ -278,7 +276,6 @@ def update_table_metadata(self, mat_info: List[dict]):
     version = mat_info[0]['analysis_version']
 
     session = sqlalchemy_cache.get(aligned_volume)()
-    engine = sqlalchemy_cache.get_engine(aligned_volume)
 
     tables = []
     for mat_metadata in mat_info:
@@ -299,7 +296,6 @@ def update_table_metadata(self, mat_info: List[dict]):
         celery_logger.error(e)
     finally:
         session.close()
-        engine.dispose()
     return tables
 
 @celery.task(name="process:drop_tables",
@@ -323,7 +319,7 @@ def drop_tables(self, datastack_info: dict, analysis_version: int):
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info['datastack']
     pcg_table_name = datastack_info['segmentation_source'].split("/")[-1]
-
+    SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     analysis_sql_uri = create_analysis_sql_uri(
         SQL_URI_CONFIG, datastack, analysis_version)
@@ -402,7 +398,7 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
     data = query.all()
     mat_df = pd.DataFrame(data)
     mat_df = mat_df.to_dict(orient="records")
-   
+    SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")
     analysys_sql_uri = create_analysis_sql_uri(
         SQL_URI_CONFIG, datastack, analysis_version)
     analysis_session, analysis_engine = create_session(analysys_sql_uri)
@@ -450,6 +446,7 @@ def merge_tables(self, mat_metadata: dict):
     datastack = mat_metadata['datastack']
     
     # create dynamic sql_uri
+    SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")
     analysis_sql_uri = create_analysis_sql_uri(
         SQL_URI_CONFIG, datastack, analysis_version)
 
@@ -620,7 +617,7 @@ def get_analysis_table(aligned_volume: str, datastack: str, table_name: str, mat
 
     anno_db = get_db(aligned_volume)
     schema_name = anno_db.get_table_schema(table_name)
-
+    SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")
     analysis_sql_uri = create_analysis_sql_uri(
         SQL_URI_CONFIG, datastack, mat_version)
     analysis_engine = create_engine(analysis_sql_uri)
@@ -655,7 +652,7 @@ def drop_indices(self, mat_metadata: dict):
         analysis_version = mat_metadata.get('analysis_version', None)
         datastack = mat_metadata['datastack']
         temp_mat_table_name = mat_metadata['temp_mat_table_name']
-
+        SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")
         analysis_sql_uri = create_analysis_sql_uri(
             SQL_URI_CONFIG, datastack, analysis_version)
 
@@ -674,6 +671,7 @@ def add_indices(self, mat_metadata: dict):
     if add_indices:
         analysis_version = mat_metadata.get('analysis_version', None)
         datastack = mat_metadata['datastack']
+        SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")        
         analysis_sql_uri = create_analysis_sql_uri(
             SQL_URI_CONFIG, datastack, analysis_version)
 
