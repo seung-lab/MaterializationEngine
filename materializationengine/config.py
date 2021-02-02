@@ -10,7 +10,7 @@ class BaseConfig:
     ENV="base"
     HOME = os.path.expanduser("~")
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-
+    DEBUG=True
     TESTING = False
     LOGGING_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
     LOGGING_LOCATION = HOME + "/.materializationengine/bookshelf.log"
@@ -31,7 +31,10 @@ class BaseConfig:
     MATERIALIZATION_ROW_CHUNK_SIZE = 500
     QUERY_LIMIT_SIZE = 200000
     CELERY_WORKER_IP = os.environ.get("CELERY_WORKER_IP", "127.0.0.1")
-
+    DATASTACKS = ["minnie65_phase3_v1"]
+    DAYS_TO_EXPIRE = 7
+    LTS_DAYS_TO_EXPIRE = 30
+    INFO_API_VERSION = 2
     if os.environ.get("DAF_CREDENTIALS", None) is not None:
         with open(os.environ.get("DAF_CREDENTIALS"), "r") as f:
             AUTH_TOKEN = json.load(f)["token"]
@@ -48,11 +51,8 @@ class TestConfig(BaseConfig):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = "sqlite://"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    REDIS_HOST = "redis"
-    REDIS_PORT = 6379
-    REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
-    CELERY_BROKER_URL = REDIS_URL
-    CELERY_RESULT_BACKEND = REDIS_URL
+    CELERY_BROKER_URL = "memory://"
+    CELERY_RESULT_BACKEND = "redis://"
 
 class ProductionConfig(BaseConfig):
     ENV="production"
