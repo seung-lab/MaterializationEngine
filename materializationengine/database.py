@@ -5,16 +5,24 @@ from sqlalchemy import create_engine
 from sqlalchemy import MetaData
 from sqlalchemy.orm import scoped_session, sessionmaker
 from urllib.parse import urlparse
-
+from materializationengine.utils import get_config_param
 cache = {}
 
 
 def get_db(aligned_volume) -> DynamicMaterializationClient:
     if aligned_volume not in cache:
-        sql_uri_config = current_app.config["SQLALCHEMY_DATABASE_URI"]
-        cache[aligned_volume] = DynamicMaterializationClient(
-            aligned_volume, sql_uri_config)
+        db_client = _get_mat_client(aligned_volume)
+    db_client = cache[aligned_volume]
+    connection_ok = ping_connection(db_client.cached_session)
+        
+    if not connection_ok:
+        return _get_mat_client(aligned_volume) 
+    return db_client
 
+def _get_mat_client(aligned_volume):
+    sql_uri_config = get_config_param("SQLALCHEMY_DATABASE_URI")
+    cache[aligned_volume] = DynamicMaterializationClient(
+        aligned_volume, sql_uri_config)
     return cache[aligned_volume]
 
 
@@ -51,6 +59,15 @@ def reflect_tables(sql_base, database_name):
     engine.dispose()
     return tables
 
+def ping_connection(session):
+    is_database_working = True
+    try:
+        # to check database we will execute raw query
+        session.execute('SELECT 1')
+    except Exception as e:
+        is_database_working = False
+    return is_database_working
+
 class SqlAlchemyCache:
 
     def __init__(self):
@@ -69,12 +86,26 @@ class SqlAlchemyCache:
                                                           pool_pre_ping=True)
         return self._engines[aligned_volume]
 
+
     def get(self, aligned_volume):
         if aligned_volume not in self._sessions:
-            engine = self.get_engine(aligned_volume)
-            Session = scoped_session(sessionmaker(bind=engine))
-            self._sessions[aligned_volume] = Session
+            session = self._create_session(aligned_volume)
+        session = self._sessions[aligned_volume]
+        connection_ok = ping_connection(session)
+            
+        if not connection_ok:
+            return self._create_session(aligned_volume) 
+        return session
+    
+    def _create_session(self, aligned_volume):
+        engine = self.get_engine(aligned_volume)
+        Session = scoped_session(sessionmaker(bind=engine))
+        self._sessions[aligned_volume] = Session
         return self._sessions[aligned_volume]
+
+    def invalidate_cache(self):
+        self._engines = {}
+        self._sessions = {}
 
 
 sqlalchemy_cache = SqlAlchemyCache()
