@@ -2,16 +2,14 @@ import time
 
 from celery import chain, chord
 from celery.utils.log import get_task_logger
-from materializationengine.celery_worker import celery
+from materializationengine.celery_init import celery
 from materializationengine.shared_tasks import fin 
 
 celery_logger = get_task_logger(__name__)
 
 
-@celery.task(name="process:start_test_workflow",
-             bind=True,
-             acks_late=True,)
-def start_test_workflow(self, iterator_length: int=5000):
+@celery.task(name="process:start_test_workflow")
+def start_test_workflow(iterator_length: int=5000):
     """Test workflow for exploring scaling in kubernetes
     Args:
         iterator_length (int): Number of parallel tasks to run. Default = 5000
@@ -54,6 +52,15 @@ def start_test_workflow(self, iterator_length: int=5000):
 def dummy_task(self, i):
     time.sleep(1)
     return True
+
+@celery.task(name="process:dummy_arg_task",
+             bind=True,
+             acks_late=True,
+             autoretry_for=(Exception,),
+             max_retries=3)
+def dummy_arg_task(self, arg: str=None):
+    time.sleep(1)
+    return arg    
 
 @celery.task(name="process:final_task",
              bind=True,
