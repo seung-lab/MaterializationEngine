@@ -1,43 +1,41 @@
-from re import S
 from materializationengine.models import AnalysisVersion, AnalysisTable, AnalysisMetadata
-from .conftest import DATASTACK, TEST_TIMESTAMP, MAT_VERSION, ALIGNED_VOLUME, SCHEMA, ANNOTATION_TABLE_NAME
-import datetime
-
-EXPIRES_TIMESTAMP = TEST_TIMESTAMP + datetime.timedelta(days=5)
 
 
-def test_analysis_version():
-    analysisversion = AnalysisVersion(datastack=DATASTACK,
-                                      time_stamp=TEST_TIMESTAMP,
-                                      version=MAT_VERSION,
+def test_analysis_version(mat_metadata):
+    analysisversion = AnalysisVersion(datastack=mat_metadata['datastack'],
+                                      time_stamp=mat_metadata['timestamp'],
+                                      version=mat_metadata['version'],
                                       valid=False,
-                                      expires_on=EXPIRES_TIMESTAMP)
-    assert analysisversion.datastack == DATASTACK
-    assert analysisversion.time_stamp == TEST_TIMESTAMP
-    assert analysisversion.version == MAT_VERSION
+                                      expires_on=mat_metadata['expires_timestamp'])
+    assert analysisversion.datastack == mat_metadata['datastack']
+    assert analysisversion.time_stamp == mat_metadata['timestamp']
+    assert analysisversion.version == mat_metadata['version']
     assert analysisversion.valid == False
-    assert analysisversion.expires_on == EXPIRES_TIMESTAMP
+    assert analysisversion.expires_on == mat_metadata['expires_timestamp']
 
 
-def test_analysis_table():
-    analysis_table = AnalysisTable(aligned_volume=ALIGNED_VOLUME,
-                                   schema=SCHEMA,
-                                   table_name=ANNOTATION_TABLE_NAME,
+def test_analysis_table(mat_metadata):
+    analysis_table = AnalysisTable(aligned_volume=mat_metadata['aligned_volume'],
+                                   schema=mat_metadata['schema'],
+                                   table_name=mat_metadata['annotation_table_name'],
                                    valid=True,
-                                   created=TEST_TIMESTAMP,
-                                   analysisversion_id=1)
-    assert analysis_table.aligned_volume == ALIGNED_VOLUME
+                                   created=mat_metadata['timestamp'],
+                                   analysisversion_id=mat_metadata['version'])
+    assert analysis_table.aligned_volume == mat_metadata['aligned_volume']
+    assert analysis_table.schema == mat_metadata['schema']
+    assert analysis_table.table_name == mat_metadata['annotation_table_name']
+    assert analysis_table.created == mat_metadata['timestamp']
+    assert analysis_table.analysisversion_id == mat_metadata['version']
 
 
-
-def test_analysis_metadata():
-    analysis_metadata = AnalysisMetadata(schema=SCHEMA,
-                                        table_name=ANNOTATION_TABLE_NAME,
-                                        valid=True,
-                                        created=TEST_TIMESTAMP,
-                                        last_updated=None)
-    assert analysis_metadata.schema == SCHEMA
-    assert analysis_metadata.table_name == ANNOTATION_TABLE_NAME
+def test_analysis_metadata(mat_metadata):
+    analysis_metadata = AnalysisMetadata(schema=mat_metadata['schema'],
+                                         table_name=mat_metadata['annotation_table_name'],
+                                         valid=True,
+                                         created=mat_metadata['timestamp'],
+                                         last_updated=None)
+    assert analysis_metadata.schema == mat_metadata['schema']
+    assert analysis_metadata.table_name == mat_metadata['annotation_table_name']
     assert analysis_metadata.valid == True
-    assert analysis_metadata.created == TEST_TIMESTAMP
+    assert analysis_metadata.created == mat_metadata['timestamp']
     assert analysis_metadata.last_updated == None
