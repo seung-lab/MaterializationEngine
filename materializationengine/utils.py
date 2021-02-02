@@ -1,6 +1,7 @@
 import os
 from emannotationschemas import models as em_models
 from geoalchemy2.shape import to_shape
+from flask import current_app
 
 
 def get_app_base_path():
@@ -64,3 +65,9 @@ def create_annotation_model(mat_metadata, with_crud_columns: bool=True):
     AnnotationModel = em_models.make_annotation_model(
         annotation_table_name, schema_type, with_crud_columns)
     return AnnotationModel
+
+def get_config_param(config_param: str):
+    try:
+        return current_app.config[config_param]
+    except Exception:
+        return os.environ[config_param]
