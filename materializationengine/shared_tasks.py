@@ -1,19 +1,19 @@
 from typing import List
 import datetime
 from dynamicannotationdb.models import SegmentationMetadata
-
+import os
 from celery.utils.log import get_task_logger
 from flask import current_app
 from sqlalchemy import and_, func, text
-from materializationengine.celery_worker import celery
+from materializationengine.celery_init import celery
 from materializationengine.database import sqlalchemy_cache
-from materializationengine.utils import create_annotation_model
+from materializationengine.utils import create_annotation_model, get_config_param
 from materializationengine.database import get_db
 from dynamicannotationdb.key_utils import build_segmentation_table_name
 
-ROW_CHUNK_SIZE = current_app.config["MATERIALIZATION_ROW_CHUNK_SIZE"]
 
 celery_logger = get_task_logger(__name__)
+
 
 
 def chunk_supervoxel_ids_task(mat_metadata: dict) -> List[List]:
@@ -34,6 +34,7 @@ def chunk_supervoxel_ids_task(mat_metadata: dict) -> List[List]:
     chunk_size = mat_metadata.get('chunk_size', None)
     
     if not chunk_size:
+        ROW_CHUNK_SIZE = get_config_param("MATERIALIZATION_ROW_CHUNK_SIZE")
         chunk_size = ROW_CHUNK_SIZE
 
     chunked_ids = chunk_ids(mat_metadata, AnnotationModel.id, chunk_size)
@@ -71,7 +72,7 @@ def get_materialization_info(datastack_info: dict,
         materialization_time_stamp = datetime.datetime.utcnow()
     
     db = get_db(aligned_volume_name)
-
+    
     try:
         annotation_tables = db.get_valid_table_names()
 
