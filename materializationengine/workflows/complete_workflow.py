@@ -1,7 +1,7 @@
 import datetime
 from celery import chain, chord, group
 from celery.utils.log import get_task_logger
-from materializationengine.celery_worker import celery
+from materializationengine.celery_init import celery
 from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
                                                 update_metadata,
                                                 get_materialization_info)
@@ -17,10 +17,8 @@ from materializationengine.workflows.update_root_ids import (
 celery_logger = get_task_logger(__name__)
 
 
-@celery.task(name="process:run_complete_worflow",
-             acks_late=True,
-             bind=True)
-def run_complete_worflow(self, datastack_info: dict, expires_in_n_days: int = 5):
+@celery.task(name="process:run_complete_worflow")
+def run_complete_worflow(datastack_info: dict, days_to_expire: int = 5):
     """Run complete materialziation workflow. 
     Workflow overview:
         - Find all annotations with missing segmentation rows 
@@ -31,14 +29,14 @@ def run_complete_worflow(self, datastack_info: dict, expires_in_n_days: int = 5)
 
     Args:
         datastack_info (dict): [description]
-        expires_in_n_days (int, optional): [description]. Defaults to 5.
+        days_to_expire (int, optional): [description]. Defaults to 5.
 
     Returns:
         [type]: [description]
     """
     materialization_time_stamp = datetime.datetime.utcnow()
 
-    new_version_number = create_new_version(datastack_info, materialization_time_stamp, expires_in_n_days)
+    new_version_number = create_new_version(datastack_info, materialization_time_stamp, days_to_expire)
 
     mat_info = get_materialization_info(datastack_info, new_version_number, materialization_time_stamp)
     celery_logger.info(mat_info)
