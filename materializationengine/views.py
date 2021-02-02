@@ -1,29 +1,18 @@
-from flask import (
-    Blueprint,
-    jsonify,
-    abort,
-    current_app,
-    request,
-    render_template,
-    url_for,
-    redirect,
-)
-from emannotationschemas import get_types, get_schema
-from materializationengine.models import AnalysisTable, AnalysisVersion
-from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
-from materializationengine.info_client import get_aligned_volumes, get_datastacks, get_datastack_info
-from materializationengine.database import get_db, sqlalchemy_cache, create_session
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, scoped_session
-from annotationframeworkclient import auth, infoservice
-from sqlalchemy import func, and_, or_
 import pandas as pd
-from emannotationschemas.models import (
-    make_annotation_model,
-    make_dataset_models,
-)
-import requests
 
+from emannotationschemas.models import (make_annotation_model,
+                                        make_dataset_models)
+from flask import (Blueprint, abort, redirect,
+                   render_template, request, url_for)
+from sqlalchemy import and_, func, or_
+
+from materializationengine.celery_init import celery
+from materializationengine.database import sqlalchemy_cache
+from materializationengine.info_client import (get_datastack_info,
+                                               get_datastacks)
+from materializationengine.models import AnalysisTable, AnalysisVersion
+from materializationengine.schemas import (AnalysisTableSchema,
+                                           AnalysisVersionSchema)
 
 __version__ = "0.2.35"
 
@@ -36,6 +25,15 @@ def index():
     return render_template("datastacks.html",
                            datastacks=get_datastacks(),
                            version=__version__)
+
+@views_bp.route("/jobs")
+def jobs():
+    return render_template("jobs.html",
+                           jobs=get_jobs(),
+                           version=__version__)
+
+def get_jobs():
+    return celery.conf.CELERYBEAT_SCHEDULE
 
 
 def make_df_with_links_to_id(objects, schema, url, col, **urlkwargs):
