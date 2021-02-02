@@ -8,7 +8,7 @@ import pandas as pd
 from celery import chain, chord
 from celery.utils.log import get_task_logger
 from dynamicannotationdb.models import SegmentationMetadata
-from materializationengine.celery_worker import celery
+from materializationengine.celery_init import celery
 from materializationengine.chunkedgraph_gateway import chunkedgraph_cache
 from materializationengine.database import sqlalchemy_cache
 from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
@@ -25,10 +25,8 @@ from sqlalchemy.sql import or_
 celery_logger = get_task_logger(__name__)
 
 
-@celery.task(name="process:process_new_annotations_workflow",
-             acks_late=True,
-             bind=True)
-def process_new_annotations_workflow(self, datastack_info: dict):
+@celery.task(name="process:process_new_annotations_workflow")
+def process_new_annotations_workflow(datastack_info: dict):
     """Base live materialization
 
     Workflow paths:
