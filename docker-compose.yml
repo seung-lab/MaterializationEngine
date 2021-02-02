@@ -50,6 +50,16 @@ services:
         - ~/.cloudvolume/secrets/google-secret.json:/home/nginx/.cloudvolume/secrets/google-secret.json:z
       depends_on:
         - redis
+    celery-beat:
+      image: 'materialize:tag'
+      env_file:
+        - ./dev.env
+      command: ["celery", "beat", "--app=run.celery"]
+      volumes:
+        - ~/.cloudvolume/secrets:/home/nginx/.cloudvolume/secrets:z
+        - ~/.cloudvolume/secrets/google-secret.json:/home/nginx/.cloudvolume/secrets/google-secret.json:z
+      depends_on:
+        - redis        
     materialize:
       image: 'materialize:tag'
       build:
@@ -68,6 +78,7 @@ services:
         - redis
         - celery-process_1
         - celery-process_2
+        - celery-beat
     flower:
       image: mher/flower
       environment:
