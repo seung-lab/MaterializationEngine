@@ -15,10 +15,10 @@ def setup_periodic_tasks(sender, **kwargs):
 
     # Materialize database every Monday and Friday, expires in 7 days from creation"
     sender.add_periodic_task(crontab(hour=0, minute=10, day_of_week=[
-                             1, 5]), run_periodic_materialzation.s(7), name="Materialized Database (7 Days)")
+                             1, 5]), run_periodic_materialzation.s(days_to_expire=7), name="Materialized Database (7 Days)")
 
     # Materialize a "Long Term Support” database every 1st and 3rd Wednesday, expires in 30 days from creation"
     sender.add_periodic_task(crontab(hour=0, minute=10, day_of_week=3, day_of_month='1-7,15-21'),
-                             run_periodic_materialzation.s(30), name='Long Term Support Materialized Database (30 days)')
+                             run_periodic_materialzation.s(days_to_expire=30), name='Long Term Support Materialized Database (30 days)')
     # Remove (drop) expired databases every night at midnight"
-    sender.add_periodic_task(crontab(hour=0, minute=0), remove_expired_databases.s(5), name="Remove Expired Databases (Midnight)")
+    sender.add_periodic_task(crontab(hour=0, minute=0), remove_expired_databases.s(delete_threshold=5), name="Remove Expired Databases (Midnight)")
