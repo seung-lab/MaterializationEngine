@@ -17,6 +17,14 @@ def make_root_id_column_name(column_name: str):
     pos_type = column_name.split("_")[1]
     return f"{pos}_{pos_type}_root_id"
 
+def set_to_flat_string(set_data: set):
+    temp_list = list(set_data)
+    if len(temp_list) == 1:
+        return ','.join(str(e) for e in temp_list)
+    ranges = sum((list(t) for t in zip(temp_list, temp_list[1:]) if t[0]+1 != t[1]), [])
+    iranges = iter(temp_list[0:1] + ranges + temp_list[-1:])
+    return ','.join([str(n) + '-' + str(next(iranges)) for n in iranges])
+    
 
 def build_materailized_table_id(aligned_volume: str, table_name: str) -> str:
     return f"mat__{aligned_volume}__{table_name}"
