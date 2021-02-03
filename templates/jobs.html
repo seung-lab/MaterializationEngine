@@ -6,6 +6,7 @@
 
 {% block content %}
 {% for job in jobs %}
-  <p><a href="{{url_for('views.jobs',jobs=job)}}" >{{job}}</a></p>
+  <p><a href="{{url_for('views.get_job_info',job_name=job)}}" >{{job}}</a></p>
+
 {% endfor %}
 {% endblock %}
