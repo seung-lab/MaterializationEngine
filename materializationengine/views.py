@@ -1,5 +1,6 @@
 import pandas as pd
-
+import datetime
+import croniter
 from emannotationschemas.models import (make_annotation_model,
                                         make_dataset_models)
 from flask import (Blueprint, abort, redirect,
@@ -13,6 +14,7 @@ from materializationengine.info_client import (get_datastack_info,
 from materializationengine.models import AnalysisTable, AnalysisVersion
 from materializationengine.schemas import (AnalysisTableSchema,
                                            AnalysisVersionSchema)
+from materializationengine.utils import set_to_flat_string
 
 __version__ = "0.2.35"
 
@@ -26,14 +28,58 @@ def index():
                            datastacks=get_datastacks(),
                            version=__version__)
 
-@views_bp.route("/jobs")
+@views_bp.route("/cronjobs")
 def jobs():
     return render_template("jobs.html",
                            jobs=get_jobs(),
                            version=__version__)
 
 def get_jobs():
-    return celery.conf.CELERYBEAT_SCHEDULE
+    return celery.conf.beat_schedule
+
+
+@views_bp.route("/cronjobs/<job_name>")
+def get_job_info(job_name: str):
+    job = celery.conf.beat_schedule[job_name]
+    c = job['schedule']        
+    if len(c.minute) == 60:
+        minute = "*"
+    else:
+        minute = set_to_flat_string(c.minute)    
+    if len(c.hour) == 24:
+        hour = "*"
+    else:
+        hour = set_to_flat_string(c.hour)    
+        
+    if len(c.day_of_week) == 7:    
+        day_of_week = "*"
+    else:
+        day_of_week = set_to_flat_string(c.day_of_week)    
+        
+    if len(c.day_of_month) == 31:
+        day_of_month = "*"
+    else:
+        day_of_month = set_to_flat_string(c.day_of_month)    
+        
+    if len(c.month_of_year) == 12:
+        month_of_year = "*"
+    else:
+        month_of_year = set_to_flat_string(c.month_of_year)    
+        
+    cron_string = f'{minute} {hour} {day_of_month} {month_of_year} {day_of_week}'
+    current_time = datetime.datetime.utcnow()
+    cron = croniter.croniter(cron_string, current_time)
+    next_time = cron.get_next(datetime.datetime)
+    formated_next_run = next_time.strftime("%d %B %Y %I:%M:%S %p")
+
+    job_info ={
+        'cron_schema': c,
+        'task': job['task'],
+        'kwargs': job['kwargs'],
+        'next_time_to_run': formated_next_run
+    }
+    return render_template(
+        "job.html", job=job_info, version=__version__)
 
 
 def make_df_with_links_to_id(objects, schema, url, col, **urlkwargs):
