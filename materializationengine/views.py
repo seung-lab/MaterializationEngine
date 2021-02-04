@@ -1,10 +1,10 @@
-import pandas as pd
 import datetime
-import croniter
+
+import pandas as pd
+from dateutil import parser
 from emannotationschemas.models import (make_annotation_model,
                                         make_dataset_models)
-from flask import (Blueprint, abort, redirect,
-                   render_template, request, url_for)
+from flask import Blueprint, abort, redirect, render_template, request, url_for
 from sqlalchemy import and_, func, or_
 
 from materializationengine.celery_init import celery
@@ -14,7 +14,6 @@ from materializationengine.info_client import (get_datastack_info,
 from materializationengine.models import AnalysisTable, AnalysisVersion
 from materializationengine.schemas import (AnalysisTableSchema,
                                            AnalysisVersionSchema)
-from materializationengine.utils import set_to_flat_string
 
 __version__ = "0.2.35"
 
@@ -42,41 +41,19 @@ def get_jobs():
 def get_job_info(job_name: str):
     job = celery.conf.beat_schedule[job_name]
     c = job['schedule']        
-    if len(c.minute) == 60:
-        minute = "*"
-    else:
-        minute = set_to_flat_string(c.minute)    
-    if len(c.hour) == 24:
-        hour = "*"
-    else:
-        hour = set_to_flat_string(c.hour)    
-        
-    if len(c.day_of_week) == 7:    
-        day_of_week = "*"
-    else:
-        day_of_week = set_to_flat_string(c.day_of_week)    
-        
-    if len(c.day_of_month) == 31:
-        day_of_month = "*"
-    else:
-        day_of_month = set_to_flat_string(c.day_of_month)    
-        
-    if len(c.month_of_year) == 12:
-        month_of_year = "*"
-    else:
-        month_of_year = set_to_flat_string(c.month_of_year)    
-        
-    cron_string = f'{minute} {hour} {day_of_month} {month_of_year} {day_of_week}'
-    current_time = datetime.datetime.utcnow()
-    cron = croniter.croniter(cron_string, current_time)
-    next_time = cron.get_next(datetime.datetime)
-    formated_next_run = next_time.strftime("%d %B %Y %I:%M:%S %p")
+    now = datetime.datetime.utcnow()
+    due = c.is_due(now)
+
+    seconds = now.timestamp()
+
+    next_time_to_run = datetime.datetime.fromtimestamp(
+        seconds + due.next).strftime("%A, %B %d, %Y %I:%M:%S")
 
     job_info ={
         'cron_schema': c,
         'task': job['task'],
         'kwargs': job['kwargs'],
-        'next_time_to_run': formated_next_run
+        'next_time_to_run': next_time_to_run
     }
     return render_template(
         "job.html", job=job_info, version=__version__)
