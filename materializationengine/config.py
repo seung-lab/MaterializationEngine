@@ -10,7 +10,6 @@ class BaseConfig:
     ENV="base"
     HOME = os.path.expanduser("~")
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-    DEBUG=True
     TESTING = False
     LOGGING_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
     LOGGING_LOCATION = HOME + "/.materializationengine/bookshelf.log"
