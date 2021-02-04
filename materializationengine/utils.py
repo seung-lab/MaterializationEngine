@@ -17,21 +17,16 @@ def make_root_id_column_name(column_name: str):
     pos_type = column_name.split("_")[1]
     return f"{pos}_{pos_type}_root_id"
 
-def set_to_flat_string(set_data: set):
-    temp_list = list(set_data)
-    if len(temp_list) == 1:
-        return ','.join(str(e) for e in temp_list)
-    ranges = sum((list(t) for t in zip(temp_list, temp_list[1:]) if t[0]+1 != t[1]), [])
-    iranges = iter(temp_list[0:1] + ranges + temp_list[-1:])
-    return ','.join([str(n) + '-' + str(next(iranges)) for n in iranges])
-    
 
 def build_materailized_table_id(aligned_volume: str, table_name: str) -> str:
     return f"mat__{aligned_volume}__{table_name}"
 
+
 def get_query_columns_by_suffix(AnnotationModel, SegmentationModel, suffix):
-    seg_columns = [column.name for column in SegmentationModel.__table__.columns]
-    anno_columns = [column.name for column in AnnotationModel.__table__.columns]
+    seg_columns = [
+        column.name for column in SegmentationModel.__table__.columns]
+    anno_columns = [
+        column.name for column in AnnotationModel.__table__.columns]
 
     matched_columns = set()
     for column in seg_columns:
@@ -41,15 +36,19 @@ def get_query_columns_by_suffix(AnnotationModel, SegmentationModel, suffix):
                 matched_columns.add(anno_col)
     matched_columns.remove('id')
 
-    supervoxel_columns =  [f"{col.rsplit('_', 1)[0]}_{suffix}" for col in matched_columns if col != 'annotation_id']
+    supervoxel_columns = [
+        f"{col.rsplit('_', 1)[0]}_{suffix}" for col in matched_columns if col != 'annotation_id']
     # # create model columns for querying
-    anno_model_cols = [getattr(AnnotationModel, name) for name in matched_columns]
+    anno_model_cols = [getattr(AnnotationModel, name)
+                       for name in matched_columns]
     anno_model_cols.append(AnnotationModel.id)
-    seg_model_cols = [getattr(SegmentationModel, name) for name in supervoxel_columns]
+    seg_model_cols = [getattr(SegmentationModel, name)
+                      for name in supervoxel_columns]
 
     # add id columns to lookup
     seg_model_cols.extend([SegmentationModel.id])
     return anno_model_cols, seg_model_cols, supervoxel_columns
+
 
 def get_geom_from_wkb(wkb):
     wkb_element = to_shape(wkb)
@@ -66,13 +65,15 @@ def create_segmentation_model(mat_metadata):
         annotation_table_name, schema_type, pcg_table_name)
     return SegmentationModel
 
-def create_annotation_model(mat_metadata, with_crud_columns: bool=True):
+
+def create_annotation_model(mat_metadata, with_crud_columns: bool = True):
     annotation_table_name = mat_metadata.get('annotation_table_name')
     schema_type = mat_metadata.get("schema")
 
     AnnotationModel = em_models.make_annotation_model(
         annotation_table_name, schema_type, with_crud_columns)
     return AnnotationModel
+
 
 def get_config_param(config_param: str):
     try:
