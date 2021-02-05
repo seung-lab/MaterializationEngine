@@ -1,5 +1,6 @@
 import datetime
 from collections import OrderedDict
+from re import A
 from typing import List
 import os
 import pandas as pd
@@ -151,14 +152,16 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
 
-    session, engine = create_session(sql_uri)
-    
+    engine = sqlalchemy_cache.get_engine(aligned_volume)
+
     analysis_sql_uri = create_analysis_sql_uri(
         str(sql_uri), datastack, analysis_version)
 
 
     with engine.connect() as connection:
+        connection.execution_options(isolation_level="AUTOCOMMIT")
         connection.execute("commit")
+
         result = connection.execute(
             f"SELECT 1 FROM pg_catalog.pg_database \
                     WHERE datname = '{analysis_sql_uri.database}'"
@@ -167,22 +170,24 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
             # create new database from template_postgis database
             celery_logger.info(
                 f"Creating new materialized database {analysis_sql_uri.database}")
+
             connection.execute(
-                f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
-                        WHERE pid <> pg_backend_pid() \
-                        AND datname = '{aligned_volume}';"
+                f"""SELECT pg_terminate_backend(pid) 
+                    FROM pg_stat_activity 
+                    WHERE datname = '{aligned_volume}'
+                    AND pid <> pg_backend_pid();""")
+
+            connection.execute(
+                f"""CREATE DATABASE {analysis_sql_uri.database} 
+                    WITH TEMPLATE {aligned_volume}"""
             )
-            connection.execute(
-                f"CREATE DATABASE {analysis_sql_uri.database} \
-                                TEMPLATE {aligned_volume}")
 
             result = connection.execute(
                 f"SELECT 1 FROM pg_catalog.pg_database \
                     WHERE datname = '{analysis_sql_uri.database}'"
             )
-    session.close()
     engine.dispose()
-
+    sqlalchemy_cache.invalidate_cache()
     return True
 
 @celery.task(name="process:create_analysis_tables",
@@ -202,13 +207,13 @@ def create_analysis_tables(self, datastack_info: dict,
 
     Returns
     -------
-    [type]
-        [description]
+    True
+        If tables where created
 
     Raises
     ------
-    e
-        [description]
+    database_error
+        sqlalchemy connection error
     """
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info['datastack']
@@ -247,10 +252,10 @@ def create_analysis_tables(self, datastack_info: dict,
                                                     materialized_timestamp=materialization_time_stamp)
                 analysis_session.add(mat_metadata)
                 analysis_session.commit()
-    except Exception as e:
+    except Exception as database_error:
         analysis_session.rollback()
         session.rollback()
-        celery_logger.error(e)            
+        celery_logger.error(database_error)            
     finally:
         session.close()
         engine.dispose()
