@@ -53,9 +53,12 @@ def remove_expired_databases(delete_threshold: int=5) -> str:
         session, engine = create_session(sql_uri)
         session.expire_on_commit = False
         # get number of expired dbs that are ready for deletion
-        expired_versions = session.query(AnalysisVersion).\
-            filter(AnalysisVersion.expires_on <= current_time).\
-            filter(AnalysisVersion.valid == True).all()
+        if engine.dialect.has_table(engine, AnalysisVersion):
+            expired_versions = session.query(AnalysisVersion).\
+                filter(AnalysisVersion.expires_on <= current_time).\
+                filter(AnalysisVersion.valid == True).all()
+        else:
+            continue
         # get databases that exist currently, filter by materializied dbs            
         result = engine.execute('SELECT datname FROM pg_database;').fetchall()
         database_list = list(itertools.chain.from_iterable(result))
