@@ -74,17 +74,18 @@ def create_chunks(data_list: List, chunk_size: int):
 
 
 def get_expired_root_ids(mat_metadata: dict, expired_chunk_size: int = 100, use_creation_time: Bool = False):
-    """[summary]
+    """Find expired root ids from last updated timestamp. Returns chunked lists as
+    generator.
 
     Args:
         mat_metadata (dict): [description]
         expired_chunk_size (int, optional): [description]. Defaults to 10.
 
     Returns:
-        [type]: [description]
+        None: If no expired root ids are found between last updated and current time.
 
     Yields:
-        [type]: [description]
+        list: list of expired root ids
     """
     last_updated_ts = mat_metadata.get('last_updated_time_stamp', None)
     pcg_table_name = mat_metadata.get("pcg_table_name")
@@ -134,7 +135,8 @@ def get_supervoxel_ids(root_id_chunk: list, mat_metadata: dict):
         mat_metadata (dict): [description]
 
     Returns:
-        [type]: [description]
+        dict: supervoxels of a group of expired root ids
+        None: no supervoxel ids exist for the expired root id
     """
     aligned_volume = mat_metadata.get("aligned_volume")
     SegmentationModel = create_segmentation_model(mat_metadata)
@@ -183,7 +185,7 @@ def get_new_roots(self, supervoxel_chunk: list, mat_metadata: dict):
         mat_metadata (dict): [description]
 
     Returns:
-        [dict]: dicts of new root_ids
+        dict: dicts of new root_ids
     """
     pcg_table_name = mat_metadata.get("pcg_table_name")
 
