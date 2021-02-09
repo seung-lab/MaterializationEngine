@@ -151,41 +151,35 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
     SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")
     sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     sql_uri = make_url(f"{sql_base_uri}/{aligned_volume}")
-
-    engine = sqlalchemy_cache.get_engine(aligned_volume)
-
     analysis_sql_uri = create_analysis_sql_uri(
         str(sql_uri), datastack, analysis_version)
 
+    engine = create_engine(sql_uri, isolation_level='AUTOCOMMIT')
 
-    with engine.connect() as connection:
-        connection.execution_options(isolation_level="AUTOCOMMIT")
-        connection.execute("commit")
+    connection = engine.connect()
+    connection.connection.set_session(autocommit=True)
 
-        result = connection.execute(
-            f"SELECT 1 FROM pg_catalog.pg_database \
-                    WHERE datname = '{analysis_sql_uri.database}'"
+    result = connection.execute(
+        f"SELECT 1 FROM pg_catalog.pg_database \
+                WHERE datname = '{analysis_sql_uri.database}'"
+    )
+    if not result.fetchone():
+        # create new database from template_postgis database
+        celery_logger.info(
+            f"Creating new materialized database {analysis_sql_uri.database}")
+
+        connection.execute(
+            f"""SELECT pg_terminate_backend(pid) 
+                FROM pg_stat_activity 
+                WHERE datname = '{aligned_volume}'
+                AND pid <> pg_backend_pid();""")
+
+        connection.execute(
+            f"""CREATE DATABASE {analysis_sql_uri.database} 
+                WITH TEMPLATE {aligned_volume}"""
         )
-        if not result.fetchone():
-            # create new database from template_postgis database
-            celery_logger.info(
-                f"Creating new materialized database {analysis_sql_uri.database}")
-
-            connection.execute(
-                f"""SELECT pg_terminate_backend(pid) 
-                    FROM pg_stat_activity 
-                    WHERE datname = '{aligned_volume}'
-                    AND pid <> pg_backend_pid();""")
-
-            connection.execute(
-                f"""CREATE DATABASE {analysis_sql_uri.database} 
-                    WITH TEMPLATE {aligned_volume}"""
-            )
-
-            result = connection.execute(
-                f"SELECT 1 FROM pg_catalog.pg_database \
-                    WHERE datname = '{analysis_sql_uri.database}'"
-            )
+        if connection is not None:
+            connection.close()
     engine.dispose()
     sqlalchemy_cache.invalidate_cache()
     return True
