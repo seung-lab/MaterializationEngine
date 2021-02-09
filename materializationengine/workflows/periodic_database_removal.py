@@ -42,7 +42,6 @@ def remove_expired_databases(delete_threshold: int=5) -> str:
     Remove expired database from time this method is called.
     """
     aligned_volume_databases = get_aligned_volumes_databases()
-
     current_time = datetime.utcnow()
     remove_db_cron_info = []
 
@@ -53,12 +52,14 @@ def remove_expired_databases(delete_threshold: int=5) -> str:
         session, engine = create_session(sql_uri)
         session.expire_on_commit = False
         # get number of expired dbs that are ready for deletion
-        if engine.dialect.has_table(engine, AnalysisVersion):
+        try:
             expired_versions = session.query(AnalysisVersion).\
                 filter(AnalysisVersion.expires_on <= current_time).\
                 filter(AnalysisVersion.valid == True).all()
-        else:
+        except Exception as sql_error:
+            celery_logger.error(f"Error: {sql_error}")
             continue
+        
         # get databases that exist currently, filter by materializied dbs            
         result = engine.execute('SELECT datname FROM pg_database;').fetchall()
         database_list = list(itertools.chain.from_iterable(result))
