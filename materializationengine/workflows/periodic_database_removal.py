@@ -2,10 +2,7 @@
 Periodically clean up expired materialized databases.
 """
 import itertools
-import logging
-import os
 from datetime import datetime
-import pprint
 
 from celery.utils.log import get_task_logger
 from flask import current_app
@@ -18,9 +15,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine.url import make_url
 
 celery_logger = get_task_logger(__name__)
-
-
-# SQL_URI_CONFIG = get_config_param('SQLALCHEMY_DATABASE_URI')
 
 
 def get_aligned_volumes_databases():
