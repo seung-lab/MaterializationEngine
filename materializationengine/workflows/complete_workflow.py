@@ -6,7 +6,7 @@ from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
                                                 update_metadata,
                                                 get_materialization_info)
 from materializationengine.workflows.create_frozen_database import (
-    create_analysis_database, create_analysis_tables, create_new_version,
+    create_analysis_database, create_materialized_metadata, create_new_version,
     merge_tables, update_table_metadata, drop_tables, drop_indices, add_indices, check_tables)
 from materializationengine.workflows.ingest_new_annotations import (
     create_missing_segmentation_table, get_materialization_info,
@@ -76,7 +76,7 @@ def run_complete_worflow(datastack_info: dict, days_to_expire: int = 5):
 
     # copy live database as a materialized version and drop uneeded tables
     setup_versioned_database = chain(create_analysis_database.si(datastack_info, new_version_number),
-                                     create_analysis_tables.si(datastack_info, new_version_number, materialization_time_stamp),
+                                     create_materialized_metadata.si(datastack_info, new_version_number, materialization_time_stamp),
                                      update_table_metadata.si(mat_info),
                                      drop_tables.si(datastack_info, new_version_number))
     
@@ -84,7 +84,7 @@ def run_complete_worflow(datastack_info: dict, days_to_expire: int = 5):
     create_frozen_database_tasks = []    
     for mat_metadata in mat_info:       
         create_frozen_database_workflow = chain(
-            drop_indices.si(mat_metadata),
+            # drop_indices.si(mat_metadata),
             merge_tables.si(mat_metadata),
             add_indices.si(mat_metadata))
         create_frozen_database_tasks.append(create_frozen_database_workflow)
