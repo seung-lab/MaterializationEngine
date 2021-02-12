@@ -9,10 +9,10 @@ celery_logger = get_task_logger(__name__)
 
 
 @celery.task(name="process:start_test_workflow")
-def start_test_workflow(iterator_length: int=5000):
+def start_test_workflow(iterator_length: int=50):
     """Test workflow for exploring scaling in kubernetes
     Args:
-        iterator_length (int): Number of parallel tasks to run. Default = 5000
+        iterator_length (int): Number of parallel tasks to run. Default = 50
     """
     workflow = []
 
