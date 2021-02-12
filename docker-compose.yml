@@ -1,7 +1,7 @@
 version: '3.2'
 services:
     db:
-      image: mdillon/postgis
+      image: postgis/postgis:9.6-2.5
       shm_size: 1g      
       env_file:
         - ./dev.env
@@ -54,7 +54,7 @@ services:
       image: 'materialize:tag'
       env_file:
         - ./dev.env
-      command: ["celery", "beat", "--app=run.celery"]
+      command: ["celery", "beat", "--app=run.celery", "--pidfile=/home/nginx/celerybeat.pid"]
       volumes:
         - ~/.cloudvolume/secrets:/home/nginx/.cloudvolume/secrets:z
         - ~/.cloudvolume/secrets/google-secret.json:/home/nginx/.cloudvolume/secrets/google-secret.json:z
