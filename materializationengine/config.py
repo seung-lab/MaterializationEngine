@@ -7,18 +7,16 @@ import json
 
 
 class BaseConfig:
-    ENV="base"
+    ENV = "base"
     HOME = os.path.expanduser("~")
     BASE_DIR = os.path.abspath(os.path.dirname(__file__))
     TESTING = False
     LOGGING_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
     LOGGING_LOCATION = HOME + "/.materializationengine/bookshelf.log"
     LOGGING_LEVEL = logging.DEBUG
-    SQLALCHEMY_DATABASE_URI = "postgres://postgres:materialize@db:5432/materialize"
+    SQLALCHEMY_DATABASE_URI = "sqlite://"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    REDIS_HOST = os.environ.get("REDIS_SERVICE_HOST")
-    REDIS_PORT = os.environ.get("REDIS_SERVICE_PORT")
-    REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
+    REDIS_URL = "redis://"
     CELERY_BROKER_URL = REDIS_URL
     CELERY_RESULT_BACKEND = REDIS_URL
     ANNO_ENDPOINT = "https://minniev1.microns-daf.com/annotation/"
@@ -40,21 +38,28 @@ class BaseConfig:
     else:
         AUTH_TOKEN = ""
 
-class DevConfig(BaseConfig):
-    ENV="development"
-    DEBUG = True
 
+class DevConfig(BaseConfig):
+    ENV = "development"
+    DEBUG = True
+    SQLALCHEMY_DATABASE_URI = "postgres://postgres:materialize@db:5432/materialize"
+    REDIS_HOST = os.environ.get("REDIS_SERVICE_HOST")
+    REDIS_PORT = os.environ.get("REDIS_SERVICE_PORT")
+    REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
+    CELERY_BROKER_URL = REDIS_URL
+    CELERY_RESULT_BACKEND = REDIS_URL
 
 class TestConfig(BaseConfig):
-    ENV="testing"
+    ENV = "testing"
     TESTING = True
     SQLALCHEMY_DATABASE_URI = "sqlite://"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     CELERY_BROKER_URL = "memory://"
     CELERY_RESULT_BACKEND = "redis://"
 
+
 class ProductionConfig(BaseConfig):
-    ENV="production"
+    ENV = "production"
     LOGGING_LEVEL = logging.INFO
     CELERY_BROKER = os.environ.get("REDIS_URL")
     CELERY_RESULT_BACKEND = os.environ.get("REDIS_URL")
