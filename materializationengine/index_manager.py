@@ -1,6 +1,7 @@
-from sqlalchemy.engine import reflection
-from sqlalchemy import Index
 from geoalchemy2.types import Geometry
+from sqlalchemy import Index
+from sqlalchemy.engine import reflection
+
 
 class IndexCache:
 
@@ -13,14 +14,14 @@ class IndexCache:
 
     @index_maps.setter
     def index_maps(self, empty_dict={}):
-        self._index_maps = empty_dict  
-    
+        self._index_maps = empty_dict
+
     def get_table_indices(self, table_name: str, engine):
         if table_name not in self._index_maps:
             insp = reflection.Inspector.from_engine(engine)
             try:
                 pk_columns = insp.get_pk_constraint(table_name)
-                indexed_columns = insp.get_indices(table_name)
+                indexed_columns = insp.get_indexes(table_name)
                 foreign_keys = insp.get_foreign_keys(table_name)
             except Exception as e:
                 print(f"No table named '{table_name}', error: {e}")
@@ -45,6 +46,7 @@ class IndexCache:
                     indx_map = {
                         'index_name': index.get("name"),
                         'column_name': index["column_names"][0],
+                        'dialect_options': index.get('dialect_options', None)
                     }
                     indices.append(indx_map.copy())
 
@@ -65,17 +67,16 @@ class IndexCache:
             self._index_maps[table_name] = index_map
         return self._index_maps[table_name]
 
-    
     def get_index_from_model(self, model):
         model = model.__table__
         index_map = {}
         indices = []
-        for column in model.columns:    
+        for column in model.columns:
             if column.primary_key:
                 pk = {
                     'primary_key_name': f"{model.name}_pkey",
                     'column_name': column.name
-                }        
+                }
                 index_map.update({
                     'primary_key': pk
                 })
@@ -85,12 +86,13 @@ class IndexCache:
                     'column_name': column.name
                 }
                 indices.append(indx_map)
-            if isinstance(column.type, Geometry): 
+            if isinstance(column.type, Geometry):
                 spatial_index_map = {
                     'index_name': f"idx_{model.name}_{column.name}",
-                    'column_name': column.name
+                    'column_name': column.name,
+                    'is_spatial': True,
                 }
-                indices.append(spatial_index_map)        
+                indices.append(spatial_index_map)
 
         index_map.update({
             'indices': indices
@@ -98,7 +100,7 @@ class IndexCache:
 
         self._index_maps[model.name] = index_map
         return self._index_maps[model.name]
-    
+
     def drop_table_indices(self, table_name: str, engine):
         indices = self.get_table_indices(table_name, engine)
         if not indices:
@@ -129,11 +131,9 @@ class IndexCache:
             indices = self.get_index_from_model(model)
         else:
             indices = self._index_maps[table_name]
-            
         for index_type, index_columns in indices.items():
             if index_type == 'primary_key':
                 pk_col_name = index_columns['column_name']
-
                 connection = engine.connect()
                 connection.execute(
                     f'ALTER TABLE {table_name} add primary key({pk_col_name})')
@@ -141,9 +141,17 @@ class IndexCache:
                 for col in index_columns:
                     index_name = col['index_name']
                     column_name = col['column_name']
-                    model_index = Index(
-                        index_name, getattr(model, column_name))
-                    model_index.create(bind=engine)
+                    is_spatial = col.get('is_spatial', False)
+                    if is_spatial:
+                        model_index = Index(index_name, getattr(
+                            model, column_name), postgresql_using='gist')
+                    else:
+                        model_index = Index(
+                            index_name, getattr(model, column_name))
+                    try:
+                        model_index.create(bind=engine)
+                    except Exception as e:
+                        raise(e)
             if not is_flat:
                 if index_type == 'foreign_key':
                     raise NotImplementedError
