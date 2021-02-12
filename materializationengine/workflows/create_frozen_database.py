@@ -1,8 +1,6 @@
 import datetime
 from collections import OrderedDict
-from re import A
 from typing import List
-import os
 import pandas as pd
 from celery import chain, chord
 from celery.utils.log import get_task_logger
@@ -10,7 +8,6 @@ from dynamicannotationdb.models import AnnoMetadata
 from emannotationschemas import get_schema
 from emannotationschemas.flatten import create_flattened_schema
 from emannotationschemas.models import create_table_dict, make_flat_model
-from flask import current_app
 from materializationengine.celery_init import celery
 from materializationengine.database import (create_session, get_db,
                                             reflect_tables, sqlalchemy_cache)
@@ -29,6 +26,7 @@ from psycopg2 import sql
 from sqlalchemy import MetaData, create_engine, func
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.engine import reflection
 
 celery_logger = get_task_logger(__name__)
 
@@ -52,14 +50,14 @@ def create_versioned_materialization_workflow(datastack_info: dict):
     
     setup_versioned_database = chain(
         create_analysis_database.si(datastack_info, new_version_number),
-        create_analysis_tables.si(datastack_info, new_version_number, materialization_time_stamp),
+        create_materialized_metadata.si(datastack_info, new_version_number, materialization_time_stamp),
         update_table_metadata.si(mat_info),
         drop_tables.si(datastack_info, new_version_number)) #TODO drop tables should come after update_metadata, break out 
 
     frozen_workflow = []
     for mat_metadata in mat_info:
         process_chunks_workflow = chain(
-            drop_indices.si(mat_metadata),
+            # drop_indices.si(mat_metadata),
             merge_tables.si(mat_metadata),
             add_indices.si(mat_metadata))
         frozen_workflow.append(process_chunks_workflow)
@@ -154,7 +152,7 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
     analysis_sql_uri = create_analysis_sql_uri(
         str(sql_uri), datastack, analysis_version)
 
-    engine = create_engine(sql_uri, isolation_level='AUTOCOMMIT')
+    engine = create_engine(sql_uri, isolation_level='AUTOCOMMIT', pool_pre_ping=True)
 
     connection = engine.connect()
     connection.connection.set_session(autocommit=True)
@@ -173,24 +171,35 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
                 FROM pg_stat_activity 
                 WHERE datname = '{aligned_volume}'
                 AND pid <> pg_backend_pid();""")
-
+        try:
+            connection.execute(
+                f"""CREATE DATABASE {analysis_sql_uri.database} 
+                    WITH TEMPLATE {aligned_volume}"""
+            )
+        except Exception as e:
+            celery_logger.error(f"Connection was lost: {e}")
+        # lets reconnect 
+        connection = engine.connect()
+        # check if database exists
         connection.execute(
-            f"""CREATE DATABASE {analysis_sql_uri.database} 
-                WITH TEMPLATE {aligned_volume}"""
-        )
+                f"SELECT 1 FROM pg_catalog.pg_database \
+                WHERE datname = '{analysis_sql_uri.database}'")
+
         if connection is not None:
             connection.close()
     engine.dispose()
     sqlalchemy_cache.invalidate_cache()
     return True
 
-@celery.task(name="process:create_analysis_tables",
+@celery.task(name="process:create_materialized_metadata",
              bind=True,
              acks_late=True,)
-def create_analysis_tables(self, datastack_info: dict, 
+def create_materialized_metadata(self, datastack_info: dict, 
                                  analysis_version: int,
                                  materialization_time_stamp: datetime.datetime.utcnow):
-    """Create all tables in flat materialized format.
+    """Creates a metadata table in a materialized database.Reads row counts
+    from annotation tables copied to the materialzied database. Inserts row count 
+    and table info into the metadata table.
 
     Parameters
     ----------
@@ -202,7 +211,7 @@ def create_analysis_tables(self, datastack_info: dict,
     Returns
     -------
     True
-        If tables where created
+        If Metadata table was created and table info was inserted.
 
     Raises
     ------
@@ -224,7 +233,7 @@ def create_analysis_tables(self, datastack_info: dict,
         mat_table = MaterializedMetadata()
         mat_table.__table__.create(bind=analysis_engine) # pylint: disable=maybe-no-member
     except Exception as e:
-        celery_logger.error(f"Table creation failed {e}")
+        celery_logger.error(f"Materialized Metadata table creation failed {e}")
 
     mat_client = get_db(f"{datastack}__mat{analysis_version}")
 
@@ -318,40 +327,40 @@ def drop_tables(self, datastack_info: dict, analysis_version: int):
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info['datastack']
     pcg_table_name = datastack_info['segmentation_source'].split("/")[-1]
+
     SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")
-    sql_base_uri = SQL_URI_CONFIG.rpartition("/")[0]
     analysis_sql_uri = create_analysis_sql_uri(
         SQL_URI_CONFIG, datastack, analysis_version)
     
     session = sqlalchemy_cache.get(aligned_volume)
     engine = sqlalchemy_cache.get_engine(aligned_volume)   
     
+    mat_engine = create_engine(analysis_sql_uri)
+
+    mat_inspector = reflection.Inspector.from_engine(mat_engine)
+    mat_table_names = mat_inspector.get_table_names()
+    mat_table_names.remove('materializedmetadata') 
+
     anno_tables = session.query(AnnoMetadata).filter(AnnoMetadata.valid==True).all()
         
     annotation_tables = [table.__dict__['table_name'] for table in anno_tables]
     segmentation_tables = [f"{anno_table}__{pcg_table_name}" for anno_table in annotation_tables]
-    postgis_tables = reflect_tables(sql_base_uri, 'postgres')
 
-    filtered_tables = postgis_tables + annotation_tables + segmentation_tables
-    
-    materialized_tables = reflect_tables(sql_base_uri, f"{datastack}__mat{analysis_version}")
-
-    mat_engine = create_engine(analysis_sql_uri)
-    
-    mat_base = declarative_base()
-    mat_meta = MetaData(mat_engine)
-    mat_meta.reflect(views=True)
-
-    tables_to_drop = set(materialized_tables) - set(filtered_tables)
-    tables_to_drop.remove('materializedmetadata') # preserve metadata table
-    tables = [mat_meta.tables.get(table) for table in tables_to_drop]
+    filtered_tables = annotation_tables + segmentation_tables
+        
+    tables_to_drop = set(mat_table_names) - set(filtered_tables)
+    tables_to_drop.remove('spatial_ref_sys') # keep postgis spatial info table
 
     try:    
-        mat_base.metadata.drop_all(mat_engine, tables, checkfirst=True)
+        connection = mat_engine.connect()
+        for table in tables_to_drop:
+            drop_statement = f"DROP TABLE {table} CASCADE"
+            connection.execute(drop_statement)
     except Exception as e:
         celery_logger.error(e)
         raise e
     finally:
+        connection.close()
         session.close()
         engine.dispose()
         mat_engine.dispose()
@@ -497,13 +506,14 @@ def merge_tables(self, mat_metadata: dict):
     try:
         mat_db_connection = mat_engine.connect()
         with mat_db_connection.begin():
-            insert_query = mat_db_connection.execute(f"CREATE TABLE {temp_table_name} AS ({query});")       
+            insert_query = mat_db_connection.execute(f"CREATE TABLE {temp_table_name} AS ({query});")  
+            row_count = insert_query.rowcount     
             drop_query = mat_db_connection.execute(f"DROP TABLE {annotation_table_name}, {segmentation_table_name};")
             alter_query = mat_db_connection.execute(f"ALTER TABLE {temp_table_name} RENAME TO {annotation_table_name};")
         mat_session.close()
         mat_engine.dispose()
         
-        return f"Number of rows copied: {insert_query.rowcount}"
+        return f"Number of rows copied: {row_count}"
     except Exception as e:
         celery_logger.error(e)
         raise(e)
