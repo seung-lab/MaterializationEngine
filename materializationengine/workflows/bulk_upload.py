@@ -1,6 +1,5 @@
 import datetime
 from typing import List
-import os
 import gcsfs
 import numpy as np
 import pandas as pd
@@ -10,7 +9,6 @@ from dynamicannotationdb.models import AnnoMetadata, SegmentationMetadata
 from emannotationschemas import get_schema
 from emannotationschemas import models as em_models
 from emannotationschemas.flatten import create_flattened_schema
-from flask import current_app
 from materializationengine.celery_init import celery
 from materializationengine.database import sqlalchemy_cache
 from materializationengine.utils import (create_annotation_model,
