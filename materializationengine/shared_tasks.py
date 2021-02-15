@@ -1,6 +1,6 @@
 from typing import List
 import datetime
-from dynamicannotationdb.models import SegmentationMetadata
+from dynamicannotationdb.models import AnnoMetadata, SegmentationMetadata
 import os
 from celery.utils.log import get_task_logger
 from flask import current_app
@@ -8,7 +8,7 @@ from sqlalchemy import and_, func, text
 from materializationengine.celery_init import celery
 from materializationengine.database import sqlalchemy_cache
 from materializationengine.utils import create_annotation_model, get_config_param
-from materializationengine.database import get_db
+from materializationengine.database import dynamic_annotation_cache
 from dynamicannotationdb.key_utils import build_segmentation_table_name
 
 
@@ -71,11 +71,10 @@ def get_materialization_info(datastack_info: dict,
     if not materialization_time_stamp:
         materialization_time_stamp = datetime.datetime.utcnow()
     
-    db = get_db(aligned_volume_name)
+    db = dynamic_annotation_cache.get_db(aligned_volume_name)
     
     try:
         annotation_tables = db.get_valid_table_names()
-
         metadata = []
         for annotation_table in annotation_tables:
             row_count = db._get_table_row_count(annotation_table, filter_valid=True)
