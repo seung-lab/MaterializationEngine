@@ -3,7 +3,7 @@ import logging
 import requests
 from flask import abort, current_app
 from flask_restx import Namespace, Resource, inputs, reqparse
-from materializationengine.database import (create_session, get_db,
+from materializationengine.database import (create_session, dynamic_annotation_cache,
                                             sqlalchemy_cache)
 from materializationengine.info_client import get_aligned_volumes
 from materializationengine.models import AnalysisTable, AnalysisVersion
@@ -246,7 +246,7 @@ class DatasetResource(Resource):
     @auth_required
     @mat_bp.doc("get_aligned_volume_versions", security="apikey")
     def get(self, aligned_volume_name: str):
-        db = get_db(aligned_volume_name)
+        db = dynamic_annotation_cache.get(aligned_volume_name)
         response = db.session.query(AnalysisVersion.datastack).distinct()
         aligned_volumes = [r._asdict() for r in response]
         return aligned_volumes
