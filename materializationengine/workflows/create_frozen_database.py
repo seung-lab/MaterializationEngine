@@ -9,7 +9,7 @@ from emannotationschemas import get_schema
 from emannotationschemas.flatten import create_flattened_schema
 from emannotationschemas.models import create_table_dict, make_flat_model
 from materializationengine.celery_init import celery
-from materializationengine.database import (create_session, get_db,
+from materializationengine.database import (create_session, dynamic_annotation_cache,
                                             reflect_tables, sqlalchemy_cache)
 from materializationengine.index_manager import index_cache
 from materializationengine.models import (AnalysisTable, 
@@ -27,7 +27,7 @@ from sqlalchemy import MetaData, create_engine, func
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.engine import reflection
-
+from sqlalchemy.exc import OperationalError
 celery_logger = get_task_logger(__name__)
 
 # SQL_URI_CONFIG = get_config_param('SQLALCHEMY_DATABASE_URI')
@@ -41,7 +41,7 @@ def create_versioned_materialization_workflow(datastack_info: dict):
     Parameters
     ----------
     aligned_volume : str
-        [description]
+        aligned volumed relating to a datastack
     """
     materialization_time_stamp = datetime.datetime.utcnow()
 
@@ -74,9 +74,9 @@ def create_new_version(datastack_info: dict,
     Sets the expiration date for the database.
 
     Args:
-        datastack_info (dict): [description]
-        materialization_time_stamp (datetime.datetime.utcnow): [description]
-        days_to_expire (int, optional): [description]. Defaults to 5.
+        datastack_info (dict): datastack info from infoservice
+        materialization_time_stamp (datetime.datetime.utcnow): UTC timestamp of root_id lookup
+        days_to_expire (int, optional): Number of days until db is flagged to be expired. Defaults to 5.
 
     Returns:
         [int]: version number of materialzied database
@@ -127,9 +127,12 @@ def create_new_version(datastack_info: dict,
         engine.dispose()
     return new_version_number
 
+
 @celery.task(name="process:create_analysis_database",
              bind=True,
-             acks_late=True,)
+             acks_late=True,
+             autoretry_for=(OperationalError,),
+             max_retries=3)
 def create_analysis_database(self, datastack_info: dict, analysis_version: int) -> str:
     """Copies live database to new versioned database for materializied annotations.
 
@@ -152,7 +155,8 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
     analysis_sql_uri = create_analysis_sql_uri(
         str(sql_uri), datastack, analysis_version)
 
-    engine = create_engine(sql_uri, isolation_level='AUTOCOMMIT', pool_pre_ping=True)
+    engine = create_engine(
+        sql_uri, isolation_level='AUTOCOMMIT', pool_pre_ping=True)
 
     connection = engine.connect()
     connection.connection.set_session(autocommit=True)
@@ -162,33 +166,49 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
                 WHERE datname = '{analysis_sql_uri.database}'"
     )
     if not result.fetchone():
-        # create new database from template_postgis database
-        celery_logger.info(
-            f"Creating new materialized database {analysis_sql_uri.database}")
-
-        connection.execute(
-            f"""SELECT pg_terminate_backend(pid) 
-                FROM pg_stat_activity 
-                WHERE datname = '{aligned_volume}'
-                AND pid <> pg_backend_pid();""")
         try:
+            # create new database from template_postgis database
+            celery_logger.info(
+                f"Creating new materialized database {analysis_sql_uri.database}")
+
+            drop_connections = f"""
+            SELECT 
+                pg_terminate_backend(pid) 
+            FROM 
+                pg_stat_activity
+            WHERE 
+                datname = '{aligned_volume}'
+            AND pid <> pg_backend_pid()
+            """
+
+            connection.execute(drop_connections)
+
             connection.execute(
                 f"""CREATE DATABASE {analysis_sql_uri.database} 
                     WITH TEMPLATE {aligned_volume}"""
             )
-        except Exception as e:
-            celery_logger.error(f"Connection was lost: {e}")
-        # lets reconnect 
-        connection = engine.connect()
-        # check if database exists
-        connection.execute(
-                f"SELECT 1 FROM pg_catalog.pg_database \
-                WHERE datname = '{analysis_sql_uri.database}'")
+            # lets reconnect
+            try:
+                connection = engine.connect()
+                # check if database exists
+                db_result = connection.execute(
+                    f"SELECT 1 FROM pg_catalog.pg_database \
+                        WHERE datname = '{analysis_sql_uri.database}'")
+                db_result.fetchone()
+            except Exception as e:
+                celery_logger.error(f"Connection was lost: {e}")
 
-        if connection is not None:
-            connection.close()
+        except OperationalError as sql_error:
+            celery_logger.error(f"ERROR: {sql_error}")
+            raise self.retry(exc=e, countdown=3)
+        finally:
+            # invalidate caches since we killed connections to the live db
+            dynamic_annotation_cache.invalidate_cache()
+            sqlalchemy_cache.invalidate_cache()
+
+    connection.close()
     engine.dispose()
-    sqlalchemy_cache.invalidate_cache()
+
     return True
 
 @celery.task(name="process:create_materialized_metadata",
@@ -197,7 +217,7 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
 def create_materialized_metadata(self, datastack_info: dict, 
                                  analysis_version: int,
                                  materialization_time_stamp: datetime.datetime.utcnow):
-    """Creates a metadata table in a materialized database.Reads row counts
+    """Creates a metadata table in a materialized database. Reads row counts
     from annotation tables copied to the materialzied database. Inserts row count 
     and table info into the metadata table.
 
@@ -235,7 +255,7 @@ def create_materialized_metadata(self, datastack_info: dict,
     except Exception as e:
         celery_logger.error(f"Materialized Metadata table creation failed {e}")
 
-    mat_client = get_db(f"{datastack}__mat{analysis_version}")
+    mat_client = dynamic_annotation_cache.get_db(f"{datastack}__mat{analysis_version}")
 
     tables = session.query(AnnoMetadata).all()
     try:   
@@ -283,7 +303,7 @@ def update_table_metadata(self, mat_info: List[dict]):
     aligned_volume = mat_info[0]['aligned_volume']
     version = mat_info[0]['analysis_version']
 
-    session = sqlalchemy_cache.get(aligned_volume)()
+    session = sqlalchemy_cache.get(aligned_volume)
 
     tables = []
     for mat_metadata in mat_info:
@@ -520,6 +540,7 @@ def merge_tables(self, mat_metadata: dict):
      
 
 def insert_chunked_data(annotation_table_name: str, sql_statement: str, cur, engine, next_key: int, batch_size: int=100_000):
+    
     pagination_query = f"""AND 
                 {annotation_table_name}.id > {next_key} 
             ORDER BY {annotation_table_name}.id ASC 
@@ -567,7 +588,7 @@ def check_tables(self, mat_info: list, analysis_version: int):
     engine = sqlalchemy_cache.get_engine(aligned_volume)
     mat_session = sqlalchemy_cache.get(analysis_database)
     mat_engine = sqlalchemy_cache.get_engine(analysis_database)
-    mat_client = get_db(analysis_database)
+    mat_client = dynamic_annotation_cache.get_db(analysis_database)
     versioned_database = session.query(AnalysisVersion).filter(AnalysisVersion.version==analysis_version).one()
 
     valid_row_counts = 0
@@ -624,7 +645,7 @@ def create_analysis_sql_uri(sql_uri: str, datastack: str, mat_version: int):
 
 def get_analysis_table(aligned_volume: str, datastack: str, table_name: str, mat_version: int = 1):
 
-    anno_db = get_db(aligned_volume)
+    anno_db = dynamic_annotation_cache.get_db(aligned_volume)
     schema_name = anno_db.get_table_schema(table_name)
     SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")
     analysis_sql_uri = create_analysis_sql_uri(
