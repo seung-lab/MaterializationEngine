@@ -13,7 +13,7 @@ fi
 
 psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<-EOSQL
 
-    CREATE ROLE postgres with SUPERUSER PASSWORD 'materialize';
+    CREATE ROLE postgres with SUPERUSER PASSWORD "$POSTGRES_DB";
 
 EOSQL
 exec "$@"
