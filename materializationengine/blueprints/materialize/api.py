@@ -85,6 +85,20 @@ class TestWorkflowResource(Resource):
         status = start_test_workflow.s(iterator_length).apply_async()
         return 200
 
+
+
+@mat_bp.route("/celery/status")
+class CeleryResource(Resource):
+    @auth_required
+    @mat_bp.doc("Get celery worker status", security="apikey")
+    def get(self):
+        """Get celery worker status
+        """
+        from materializationengine.celery_status import get_celery_worker_status
+        status = get_celery_worker_status()
+        return status
+
+
 @mat_bp.route("/materialize/ingest/datastack/<string:datastack_name>")
 class ProcessNewAnnotationsResource(Resource):
     @auth_required
