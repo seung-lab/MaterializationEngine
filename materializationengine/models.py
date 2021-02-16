@@ -29,17 +29,6 @@ class AnalysisTable(Base):
     analysisversion_id = Column(Integer, ForeignKey("analysisversion.id"))
     analysisversion = relationship("AnalysisVersion")
 
-
-class AnalysisMetadata(Base):
-    __tablename__ = "analysismetadata"
-    id = Column(Integer, primary_key=True)
-    schema = Column(String(100), nullable=False)
-    table_name = Column(String(100), nullable=False)
-    valid = Column(Boolean)
-    created = Column(DateTime, nullable=False)
-    last_updated = Column(DateTime, nullable=True)
-
-
 class MaterializedMetadata(MatBase):
     __tablename__ = "materializedmetadata"
     id = Column(Integer, primary_key=True)
