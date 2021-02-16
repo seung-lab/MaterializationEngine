@@ -1,8 +1,7 @@
 from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
-
-Base = declarative_base()
+from dynamicannotationdb.models import Base
 
 MatBase = declarative_base()
 
