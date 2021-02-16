@@ -1,4 +1,5 @@
-from materializationengine.models import AnalysisVersion, AnalysisTable, AnalysisMetadata
+from materializationengine.models import (AnalysisTable,
+                                          AnalysisVersion)
 
 
 def test_analysis_version(mat_metadata):
@@ -27,15 +28,3 @@ def test_analysis_table(mat_metadata):
     assert analysis_table.created == mat_metadata['timestamp']
     assert analysis_table.analysisversion_id == mat_metadata['version']
 
-
-def test_analysis_metadata(mat_metadata):
-    analysis_metadata = AnalysisMetadata(schema=mat_metadata['schema'],
-                                         table_name=mat_metadata['annotation_table_name'],
-                                         valid=True,
-                                         created=mat_metadata['timestamp'],
-                                         last_updated=None)
-    assert analysis_metadata.schema == mat_metadata['schema']
-    assert analysis_metadata.table_name == mat_metadata['annotation_table_name']
-    assert analysis_metadata.valid == True
-    assert analysis_metadata.created == mat_metadata['timestamp']
-    assert analysis_metadata.last_updated == None
