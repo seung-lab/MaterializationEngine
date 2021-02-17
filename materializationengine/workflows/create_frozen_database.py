@@ -200,7 +200,7 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
 
         except OperationalError as sql_error:
             celery_logger.error(f"ERROR: {sql_error}")
-            raise self.retry(exc=e, countdown=3)
+            raise self.retry(exc=sql_error, countdown=3)
         finally:
             # invalidate caches since we killed connections to the live db
             dynamic_annotation_cache.invalidate_cache()
