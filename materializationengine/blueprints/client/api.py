@@ -410,6 +410,126 @@ class FrozenQuery(Resource):
         serialized = context.serialize(df)
         return Response(serialized.to_buffer().to_pybytes(),
                         mimetype='x-application/pyarrow')
+
+
+
+@client_bp.route("/datastack/<string:datastack_name>/query")
+class FrozenQuery(Resource):
+    @auth_required
+    @client_bp.doc("complex_query", security="apikey")
+    @accepts("ComplexQuerySchema", schema=ComplexQuerySchema, api=client_bp)
+    def post(self, datastack_name:str, version:int):
+        """endpoint for doing a query with filters and joins
+
+        Args:
+            datastack_name (str): datastack name
+            version (int): version number
+
+        Payload:
+        All values are optional.  Limit has an upper bound set by the server.
+        Consult the schema of the table for column names and appropriate values
+        {
+            "tables":[["table1", "table1_join_column"],
+                      ["table2", "table2_join_column"]],
+            "filter_out_dict": {
+                "tablename":{
+                    "column_name":[excluded,values]
+                }
+            },
+            "offset": 0,
+            "limit": 200000,
+            "select_columns": [
+                "column","names"
+            ],
+            "filter_in_dict": {
+                "tablename":{
+                    "column_name":[included,values]
+                }
+            },
+            "filter_equal_dict": {
+                "tablename":{
+                    "column_name":value
+                }
+            }
+        }
+        Returns:
+            pyarrow.buffer: a series of bytes that can be deserialized using pyarrow.deserialize
+        """
+        frozen_version = requests.param.get('frozon_version', None)
+        if frozen_version is not None:
+            # check that frozon version still exists
+            # if it exists
+            # fall back to old query
+
+            # if not proceed to live
+        
+        timestamp = request.param.get('timestamp', timestamp.utc.now())
+        version = # find the most recent version
+        assert timestamp>version.timestamp
+
+        #find materialization to use as cache
+        
+
+
+        aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+        cg = db.get_cg(pcg_table_name)
+
+        # across each filter dictionary, collect rootIDs
+        
+        # get the materialization version and timestamp that is closest in time but before the timestamp
+
+        # assert/validate that all rootIDs can have one consistent timestamp
+
+        # for each root ID in the filters, query history to get a list of potentially involved rootIDs
+        # at the timestamp.
+
+        # alter filters.. query_equal > query_in
+        # filter_out > ? 
+
+        # run query with altered lists of root_ids on the old materialization engine
+
+        # for each supervoxel ID column, run get_roots on supervoxel IDs
+        # alternatively use the get_delta_roots to make this more efficent
+        # or alternatively call a get future history call.
+
+        # apply the original filters to the resulting dataframe
+        # to exclude rows that no longer apply to original query
+
+
+        Session = sqlalchemy_cache.get(aligned_volume_name)
+       
+        data = request.parsed_obj
+        model_dict = {}
+        for table_desc in data['tables']:
+            table_name=table_desc[0]
+            Model = get_flat_model(datastack_name, table_name, version, Session)
+            if Model is None:
+                return "Cannot find table {} in datastack {} at version {}".format(table_name, datastack_name, version), 404
+            model_dict[table_name]=Model
+
+        db_name = "{}__mat{}".format(datastack_name, version) 
+        Session = sqlalchemy_cache.get(db_name)
+        engine = sqlalchemy_cache.get_engine(db_name)
+        max_limit = current_app.config.get('QUERY_LIMIT_SIZE', 200000)
+
+        data = request.parsed_obj
+        limit = data.get('limit', max_limit)
+        if limit>max_limit:
+            limit = max_limit
+        logging.info('query {}'.format(data))
+        df=specific_query(Session, engine, model_dict, data['tables'],
+                      filter_in_dict=data.get('filter_in_dict', {}),
+                      filter_notin_dict=data.get('filter_notin_dict', {}),
+                      filter_equal_dict=data.get('filter_equal_dict', {}),
+                      select_columns=data.get('select_columns', None),
+                      offset=data.get('offset', None),
+                      limit = limit,
+                      suffixes=data.get('suffixes', None))
+        context = pa.default_serialization_context()
+        serialized = context.serialize(df)
+        return Response(serialized.to_buffer().to_pybytes(),
+                        mimetype='x-application/pyarrow')
+
 # @client_bp.route("/aligned_volume/<string:aligned_volume_name>/table")
 # class SegmentationTable(Resource):
 #     @auth_required
