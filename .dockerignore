@@ -1,1 +1,6 @@
 data
+*.db
+*.csv
+*.pkl
+*.ipynb
+src/

@@ -1,6 +1,23 @@
-from materializationengine import create_app
+# Run a test server.
+import os
+
+from werkzeug.serving import WSGIRequestHandler
+
+from materializationengine.app import create_app
+from materializationengine.celery_init import celery
+from materializationengine.celery_worker import create_celery
+
+HOME = os.path.expanduser("~")
 
 application = create_app()
+celery = create_celery(application, celery)
 
 if __name__ == "__main__":
-    application.run(host='0.0.0.0', port=8000, debug=True)
+
+    WSGIRequestHandler.protocol_version = "HTTP/1.1"
+
+    application.run(host='0.0.0.0',
+                    port=8000,
+                    debug=True,
+                    threaded=True,
+                    ssl_context='adhoc')

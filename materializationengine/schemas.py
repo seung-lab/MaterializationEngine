@@ -1,14 +1,16 @@
-import emannotationschemas.models as models
+from materializationengine.models import AnalysisTable, AnalysisVersion
 from flask_marshmallow import Marshmallow
+from marshmallow_sqlalchemy import ModelSchema
 
 ma = Marshmallow()
 
 
-class AnalysisVersionSchema(ma.ModelSchema):
+class AnalysisVersionSchema(ModelSchema):
     class Meta:
-        model = models.AnalysisVersion
+        model = AnalysisVersion
 
 
-class AnalysisTableSchema(ma.ModelSchema):
+class AnalysisTableSchema(ModelSchema):
     class Meta:
-        model = models.AnalysisTable
+        model = AnalysisTable
+

@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+
+{% block header %}
+  <h1>{% block title %}{{datastack}}{% endblock %}</h1>
+{% endblock %}
+
+{% block content %}
+<h3> versions </h3>
+{{table|safe}}
+<a href="{{url_for('views.datastack_view',datastack_name=datastack)}}?all=true">show all</a> 
+
+{% endblock %}
