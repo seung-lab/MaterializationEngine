@@ -111,7 +111,7 @@ def get_gcs_file_info(upload_creation_time: datetime.datetime.utcnow, bulk_uploa
     return bulk_upload_info
 
 
-def create_chunks(self, bulk_upload_info: dict) -> List:   
+def create_chunks(bulk_upload_info: dict) -> List:   
     num_rows = bulk_upload_info['num_rows']
     chunk_size = bulk_upload_info.get('chunk_size', 100_000)
     chunks = []
