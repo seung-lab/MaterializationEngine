@@ -713,7 +713,7 @@ def add_indices(self, mat_metadata: dict):
 
         model = make_flat_model(annotation_table_name, schema)
 
-        index_cache.add_indices(annotation_table_name, model, analysis_engine, is_flat=True)
+        index_cache.add_indices(annotation_table_name, model, analysis_engine)
 
         analysis_session.close()
         analysis_engine.dispose()
