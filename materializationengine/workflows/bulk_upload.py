@@ -156,7 +156,6 @@ def create_tables(self, bulk_upload_params: dict):
             }
         anno_metadata = AnnoMetadata(**anno_metadata_dict)
         session.add(anno_metadata)
-        celery_logger.info(f"Table {AnnotationModel.__table__.name} indices have been dropped {is_dropped}.")
 
 
     if not session.query(SegmentationMetadata).filter(SegmentationMetadata.table_name==table_name).scalar():
@@ -174,7 +173,6 @@ def create_tables(self, bulk_upload_params: dict):
         }
 
         seg_metadata = SegmentationMetadata(**seg_metadata_dict)
-        celery_logger.info(f"Table {SegmentationModel.__table__.name} indices have been dropped {is_dropped}.")
 
 
     try:
@@ -188,9 +186,12 @@ def create_tables(self, bulk_upload_params: dict):
     finally:
         drop_anno_indexes = index_cache.drop_table_indices(AnnotationModel.__table__.name, engine)
         drop_seg_indexes = index_cache.drop_table_indices(SegmentationModel.__table__.name, engine)
+        celery_logger.info(f"Table {AnnotationModel.__table__.name} indices have been dropped {drop_anno_indexes}.")
+        celery_logger.info(f"Table {SegmentationModel.__table__.name} indices have been dropped {drop_seg_indexes}.")
+
         session.close()
 
-    return f"Tables {table_name}, {seg_table_name} created. Indexes dropped {drop_anno_indexes, drop_seg_indexes} "
+    return f"Tables {table_name}, {seg_table_name} created."
 
 
 @celery.task(name="process:bulk_upload_task",
