@@ -1,4 +1,4 @@
-def test_chunk_supervoxel_ids_task():
+def test_chunk_annotation_ids():
     assert False
 
 
