@@ -126,15 +126,15 @@ class IndexCache:
             raise(e)
         return True
 
-    def add_indices(self, table_name, model, engine, is_flat=True):
+    def add_indices(self, table_name, model, engine, is_segmentation_table=False, fk_table=None):
         if table_name not in self._index_maps:
             indices = self.get_index_from_model(model)
         else:
             indices = self._index_maps[table_name]
         for index_type, index_columns in indices.items():
+            connection = engine.connect()
             if index_type == 'primary_key':
                 pk_col_name = index_columns['column_name']
-                connection = engine.connect()
                 connection.execute(
                     f'ALTER TABLE {table_name} add primary key({pk_col_name})')
             if index_type == 'indices':
@@ -152,9 +152,14 @@ class IndexCache:
                         model_index.create(bind=engine)
                     except Exception as e:
                         raise(e)
-            if not is_flat:
-                if index_type == 'foreign_key':
-                    raise NotImplementedError
+                        
+        if is_segmentation_table:
+            fk_command = f"""ALTER TABLE {table_name} 
+                             ADD CONSTRAINT fk_{fk_table}_id
+                             FOREIGN KEY (id) 
+                             REFERENCES {fk_table} (id);"""
+            connection.execute(fk_command)
+                
 
 
 index_cache = IndexCache()
