@@ -128,6 +128,7 @@ def create_chunks(bulk_upload_info: dict) -> List:
 
 
 @celery.task(name="process:create_tables",
+             acks_late=True,
              bind=True)       
 def create_tables(self, bulk_upload_params: dict):
     table_name = bulk_upload_params["annotation_table_name"]
