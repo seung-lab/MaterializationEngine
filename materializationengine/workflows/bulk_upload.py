@@ -5,7 +5,7 @@ import time
 import gcsfs
 import numpy as np
 import pandas as pd
-from celery import chain, group
+from celery import chain, group, chord
 from celery.utils.log import get_task_logger
 from dynamicannotationdb.models import AnnoMetadata, SegmentationMetadata
 from emannotationschemas import get_schema
@@ -14,6 +14,7 @@ from emannotationschemas.flatten import create_flattened_schema
 from materializationengine.celery_init import celery
 from materializationengine.database import sqlalchemy_cache
 from materializationengine.index_manager import index_cache
+from materializationengine.shared_tasks import fin
 from materializationengine.utils import (create_annotation_model,
                                          create_segmentation_model)
 
@@ -37,14 +38,12 @@ def gcs_bulk_upload_workflow(self, bulk_upload_params: dict):
     bulk_upload_info = get_gcs_file_info(upload_creation_time, bulk_upload_params)
     bulk_upload_chunks = create_chunks(bulk_upload_info[0])
     
-    upload_tasks = group(bulk_upload_task.si(
-        bulk_upload_info, chunk) for chunk in bulk_upload_chunks)
-    
     bulk_upload_workflow = chain(
         create_tables.si(bulk_upload_info[0]),
-        upload_tasks,
-        add_table_indices.si(bulk_upload_info[0]))
-    
+        chord([group(bulk_upload_task(bulk_upload_info, chunk))
+            for chunk in bulk_upload_chunks], fin.si()),  # return here is required for chords
+        add_table_indices.si(bulk_upload_info[0])) 
+
     bulk_upload_workflow.apply_async()
 
 
@@ -123,8 +122,6 @@ def create_chunks(bulk_upload_info: dict) -> List:
         if chunk_end > num_rows:
             chunk_end = num_rows
         chunks.append([chunk_start, chunk_end - chunk_start])
-        if len(chunks) == 10:
-            break
     return chunks
 
 
@@ -196,14 +193,7 @@ def create_tables(self, bulk_upload_params: dict):
     return f"Tables {table_name}, {seg_table_name} created."
 
 
-@celery.task(name="process:bulk_upload_task",
-             bind=True,
-             autoretry_for=(Exception,),
-             max_retries=3,
-             acks_late=True,
-             ignore_results=True,
-             store_errors_even_if_ignored=True)  
-def bulk_upload_task(self, bulk_upload_info: dict, chunk: List):
+def bulk_upload_task(bulk_upload_info: dict, chunk: List):
     try:
         file_data = []
         for file_metadata in bulk_upload_info:
@@ -214,10 +204,10 @@ def bulk_upload_task(self, bulk_upload_info: dict, chunk: List):
             file_data.append(parsed_data)
         
         formatted_data = format_data(file_data, file_metadata)
-        upload_data.si(formatted_data, file_metadata).apply_async()
+        return upload_data.si(formatted_data, file_metadata)
     except Exception as e:
         celery_logger.error(e)
-        raise self.retry(exc=e, countdown=3)
+        raise e
  
 
 def gcs_read_npy_chunk(bulk_upload_info: dict, chunk: List):
