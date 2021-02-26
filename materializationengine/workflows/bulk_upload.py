@@ -156,7 +156,6 @@ def create_tables(self, bulk_upload_params: dict):
             }
         anno_metadata = AnnoMetadata(**anno_metadata_dict)
         session.add(anno_metadata)
-        is_dropped = index_cache.drop_table_indices(AnnotationModel.__table__.name, engine)
         celery_logger.info(f"Table {AnnotationModel.__table__.name} indices have been dropped {is_dropped}.")
 
 
@@ -175,21 +174,23 @@ def create_tables(self, bulk_upload_params: dict):
         }
 
         seg_metadata = SegmentationMetadata(**seg_metadata_dict)
-        is_dropped = index_cache.drop_table_indices(SegmentationModel.__table__.name, engine)
         celery_logger.info(f"Table {SegmentationModel.__table__.name} indices have been dropped {is_dropped}.")
 
 
-        try:
-            session.flush()
-            session.add(seg_metadata)
-            session.commit()
-        except Exception as e:
-            celery_logger.error(f"SQL ERROR: {e}")
-            session.rollback()
-            raise self.retry(exc=e, countdown=3)
-    else:
+    try:
+        session.flush()
+        session.add(seg_metadata)
+        session.commit()
+    except Exception as e:
+        celery_logger.error(f"SQL ERROR: {e}")
+        session.rollback()
+        raise self.retry(exc=e, countdown=3)
+    finally:
+        drop_anno_indexes = index_cache.drop_table_indices(AnnotationModel.__table__.name, engine)
+        drop_seg_indexes = index_cache.drop_table_indices(SegmentationModel.__table__.name, engine)
         session.close()
-    return f"Tables {table_name}, {seg_table_name} created"
+
+    return f"Tables {table_name}, {seg_table_name} created. Indexes dropped {drop_anno_indexes, drop_seg_indexes} "
 
 
 @celery.task(name="process:bulk_upload_task",
