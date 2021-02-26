@@ -16,7 +16,7 @@ celery_logger = get_task_logger(__name__)
 
 
 
-def chunk_supervoxel_ids_task(mat_metadata: dict) -> List[List]:
+def chunk_annotation_ids(mat_metadata: dict) -> List[List]:
     """Creates list of chunks with start:end index for chunking queries for materialziation.
 
     Parameters
