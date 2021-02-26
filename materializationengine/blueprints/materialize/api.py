@@ -100,7 +100,7 @@ class QueueResource(Resource):
         from materializationengine.celery_status import get_celery_queue_items
         status = get_celery_queue_items('process')
         return status
-        
+
 @mat_bp.route("/celery/status/info")
 class CeleryResource(Resource):
     @reset_auth
@@ -237,7 +237,7 @@ class BulkUploadResource(Resource):
             'segmentation_source': segmentation_source,
             'materialized_ts': args['materialized_ts']
         })
-        gcs_bulk_upload_workflow(bulk_upload_info).apply_async()
+        gcs_bulk_upload_workflow.s(bulk_upload_info).apply_async()
         return f"Datastack upload info : {bulk_upload_info}", 200
 
 @mat_bp.expect(missing_chunk_parser)
