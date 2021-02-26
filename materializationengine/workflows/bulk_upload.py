@@ -128,9 +128,7 @@ def create_chunks(bulk_upload_info: dict) -> List:
 
 
 @celery.task(name="process:create_tables",
-             bind=True,
-             autoretry_for=(Exception,),
-             max_retries=3)       
+             bind=True)       
 def create_tables(self, bulk_upload_params: dict):
     table_name = bulk_upload_params["annotation_table_name"]
     aligned_volume = bulk_upload_params["aligned_volume"]
@@ -182,7 +180,7 @@ def create_tables(self, bulk_upload_params: dict):
     except Exception as e:
         celery_logger.error(f"SQL ERROR: {e}")
         session.rollback()
-        raise self.retry(exc=e, countdown=3)
+        raise e
     finally:
         drop_anno_indexes = index_cache.drop_table_indices(AnnotationModel.__table__.name, engine)
         drop_seg_indexes = index_cache.drop_table_indices(SegmentationModel.__table__.name, engine)
