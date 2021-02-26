@@ -1,5 +1,6 @@
 import datetime
 from typing import List
+import time 
 
 import gcsfs
 import numpy as np
@@ -184,6 +185,8 @@ def create_tables(self, bulk_upload_params: dict):
         raise e
     finally:
         drop_seg_indexes = index_cache.drop_table_indices(SegmentationModel.__table__.name, engine)
+        # wait for indexes to drop
+        time.sleep(10)
         drop_anno_indexes = index_cache.drop_table_indices(AnnotationModel.__table__.name, engine)
         celery_logger.info(f"Table {AnnotationModel.__table__.name} indices have been dropped {drop_anno_indexes}.")
         celery_logger.info(f"Table {SegmentationModel.__table__.name} indices have been dropped {drop_seg_indexes}.")
