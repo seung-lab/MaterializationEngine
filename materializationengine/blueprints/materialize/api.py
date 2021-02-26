@@ -1,12 +1,13 @@
 import logging
 
 import requests
-from flask import abort, current_app
+from flask import abort, current_app, g, Blueprint
 from flask_restx import Namespace, Resource, inputs, reqparse
 from materializationengine.database import (create_session,
                                             dynamic_annotation_cache,
                                             sqlalchemy_cache)
 from materializationengine.info_client import get_aligned_volumes
+from materializationengine.blueprints.reset_auth import reset_auth
 from materializationengine.models import AnalysisTable, AnalysisVersion, Base
 from materializationengine.schemas import (AnalysisTableSchema,
                                            AnalysisVersionSchema)
@@ -19,10 +20,11 @@ __version__ = "0.2.35"
 
 
 bulk_upload_parser = reqparse.RequestParser()
-bulk_upload_parser.add_argument('column_mapping', type=list, location='json')
-bulk_upload_parser.add_argument('project', type=str)
-bulk_upload_parser.add_argument('file_path', type=str)
-bulk_upload_parser.add_argument('schema', type=str)
+bulk_upload_parser.add_argument('column_mapping', required=True, type=dict, location='json')
+bulk_upload_parser.add_argument('project', required=True, type=str)
+bulk_upload_parser.add_argument('file_path', required=True, type=str)
+bulk_upload_parser.add_argument('schema', required=True, type=str)
+bulk_upload_parser.add_argument('materialized_ts', type=float)
 
 missing_chunk_parser = reqparse.RequestParser()
 missing_chunk_parser.add_argument('chunks', type=list, location='json')
@@ -71,38 +73,50 @@ def get_datastack_info(datastack_name: str) -> dict:
         except requests.exceptions.RequestException as e:
             logging.error(f"ERROR {e}. Cannot connect to {INFOSERVICE_ENDPOINT}")
 
-@mat_bp.route("/test/workflow/<int:iterator_length>")
+@mat_bp.route("/celery/test/<int:iterator_length>")
 class TestWorkflowResource(Resource):
+    @reset_auth
     @auth_requires_admin
     @mat_bp.doc("Test workflow pattern", security="apikey")
     def post(self, iterator_length: int=50):
         """Test workflow
 
         Args:
-            iterator_length (int): Number of parallel tasks to run. Default = 5000
+            iterator_length (int): Number of parallel tasks to run. Default = 50
         """
         from materializationengine.workflows.dummy_workflow import \
-            start_test_workflow
-        status = start_test_workflow.s(iterator_length).apply_async()
+            run_test_workflow
+        status = run_test_workflow.s(iterator_length).apply_async()
         return 200
 
-
-
-@mat_bp.route("/celery/status")
+@mat_bp.route("/celery/status/queue")
+class QueueResource(Resource):
+    @reset_auth
+    @auth_requires_admin
+    @mat_bp.doc("Get task queue size", security="apikey")
+    def get(self):
+        """Get queued tasks for celery workers
+        """
+        from materializationengine.celery_status import get_celery_queue_items
+        status = get_celery_queue_items('process')
+        return status
+        
+@mat_bp.route("/celery/status/info")
 class CeleryResource(Resource):
+    @reset_auth
     @auth_requires_admin
     @mat_bp.doc("Get celery worker status", security="apikey")
     def get(self):
-        """Get celery worker status
+        """Get celery worker info
         """
         from materializationengine.celery_status import \
             get_celery_worker_status
         status = get_celery_worker_status()
         return status
 
-
 @mat_bp.route("/materialize/ingest/datastack/<string:datastack_name>")
 class ProcessNewAnnotationsResource(Resource):
+    @reset_auth
     @auth_requires_admin
     @mat_bp.doc("process new annotations workflow", security="apikey")
     def post(self, datastack_name: str):
@@ -120,6 +134,7 @@ class ProcessNewAnnotationsResource(Resource):
 
 @mat_bp.route("/materialize/live/datastack/<string:datastack_name>")
 class CompleteWorkflowResource(Resource):
+    @reset_auth
     @auth_requires_admin
     @mat_bp.expect(expires_on_parser)
     @mat_bp.doc("ingest segmentations > update roots and freeze materialization", security="apikey")
@@ -142,6 +157,7 @@ class CompleteWorkflowResource(Resource):
 
 @mat_bp.route("/materialize/frozen/datastack/<string:datastack_name>")
 class CreateFrozenMaterializationResource(Resource):
+    @reset_auth
     @auth_requires_admin
     @mat_bp.expect(expires_on_parser)
     @mat_bp.doc("create frozen materialization", security="apikey")
@@ -162,6 +178,7 @@ class CreateFrozenMaterializationResource(Resource):
 
 @mat_bp.route("/materialize/roots/datastack/<string:datastack_name>")
 class UpdateExpiredRootIdsResource(Resource):
+    @reset_auth
     @auth_requires_admin
     @mat_bp.expect(get_roots_parser)
     @mat_bp.doc("update expired root ids", security="apikey")
@@ -187,7 +204,8 @@ class UpdateExpiredRootIdsResource(Resource):
 @mat_bp.expect(bulk_upload_parser)
 @mat_bp.route("/bulk_upload/<string:datastack_name>/<string:table_name>/<string:segmentation_source>/<string:description>")
 class BulkUploadResource(Resource):
-    @auth_requires_admin
+    @reset_auth
+    @auth_required
     @mat_bp.doc("bulk upload", security="apikey")
     def post(self, datastack_name: str, table_name: str, segmentation_source: str, description: str):
         """Run bulk upload from npy files
@@ -202,12 +220,12 @@ class BulkUploadResource(Resource):
             segmentation_source (str): source of segmentation data
             description (str): text field added to annotation metadata table for reference
         """
-        from materializationengine.workflows.bulk_upload import bulk_upload
+        from materializationengine.workflows.bulk_upload import gcs_bulk_upload_workflow
 
         args = bulk_upload_parser.parse_args()
 
         bulk_upload_info = get_datastack_info(datastack_name)
-            
+
         bulk_upload_info.update({
             'column_mapping': args['column_mapping'],
             'project': args['project'],
@@ -217,13 +235,15 @@ class BulkUploadResource(Resource):
             'description': description,
             'annotation_table_name': table_name,
             'segmentation_source': segmentation_source,
+            'materialized_ts': args['materialized_ts']
         })
-        bulk_upload(bulk_upload_info)
-        return f"Uploading : {datastack_name}", 200
+        gcs_bulk_upload_workflow(bulk_upload_info).apply_async()
+        return f"Datastack upload info : {bulk_upload_info}", 200
 
 @mat_bp.expect(missing_chunk_parser)
 @mat_bp.route("/missing_chunks/<string:datastack_name>/<string:table_name>/<string:segmentation_source>/<string:description>")
 class InsertMissingChunks(Resource):
+    @reset_auth
     @auth_requires_admin
     @mat_bp.doc("insert missing chunks", security="apikey")
     def post(self, datastack_name: str, table_name: str, segmentation_source: str, description: str):
@@ -259,7 +279,8 @@ class InsertMissingChunks(Resource):
 
 @mat_bp.route("/aligned_volume/<aligned_volume_name>")
 class DatasetResource(Resource):
-    @auth_required
+    @reset_auth
+    @auth_requires_admin
     @mat_bp.doc("get_aligned_volume_versions", security="apikey")
     def get(self, aligned_volume_name: str):
         db = dynamic_annotation_cache.get(aligned_volume_name)
@@ -269,7 +290,8 @@ class DatasetResource(Resource):
 
 @mat_bp.route("/aligned_volumes/<aligned_volume_name>")
 class VersionResource(Resource):
-    @auth_required
+    @reset_auth
+    @auth_requires_admin
     @mat_bp.doc("get_analysis_versions", security="apikey")
     def get(self, aligned_volume_name):
         check_aligned_volume(aligned_volume_name)
@@ -287,10 +309,11 @@ class VersionResource(Resource):
             logging.error(error)
             return abort(404)
     
+    @reset_auth
     @auth_requires_admin
     @mat_bp.doc("setup new aligned volume database", security="apikey")
     def post(self, aligned_volume_name: str):
-        """Setup tables in an aligned volume database
+        """Create an aligned volume database
         Args:
             datastack_name (str): name of datastack from infoservice
         """
@@ -306,7 +329,8 @@ class VersionResource(Resource):
 
 @mat_bp.route("/aligned_volumes/<aligned_volume_name>/version/<version>")
 class TableResource(Resource):
-    @auth_required
+    @reset_auth
+    @auth_requires_admin
     @mat_bp.doc("get_all_tables", security="apikey")
     def get(self, aligned_volume_name, version):
         check_aligned_volume(aligned_volume_name)
@@ -329,7 +353,8 @@ class TableResource(Resource):
 
 @mat_bp.route("/aligned_volumes/<aligned_volume_name>/version/<version>/tablename/<tablename>")
 class AnnotationResource(Resource):
-    @auth_required
+    @reset_auth
+    @auth_requires_admin
     @mat_bp.doc("get_top_materialized_annotations", security="apikey")
     def get(self, aligned_volume_name, version, tablename):
         check_aligned_volume(aligned_volume_name)
