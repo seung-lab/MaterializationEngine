@@ -183,8 +183,8 @@ def create_tables(self, bulk_upload_params: dict):
         session.rollback()
         raise e
     finally:
-        drop_anno_indexes = index_cache.drop_table_indices(AnnotationModel.__table__.name, engine)
         drop_seg_indexes = index_cache.drop_table_indices(SegmentationModel.__table__.name, engine)
+        drop_anno_indexes = index_cache.drop_table_indices(AnnotationModel.__table__.name, engine)
         celery_logger.info(f"Table {AnnotationModel.__table__.name} indices have been dropped {drop_anno_indexes}.")
         celery_logger.info(f"Table {SegmentationModel.__table__.name} indices have been dropped {drop_seg_indexes}.")
 
