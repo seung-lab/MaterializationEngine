@@ -110,7 +110,7 @@ class IndexCache:
             if index_type == 'foreign_key':
                 fk_list = [index_columns['foreign_key']
                            for i in index_columns]
-                drop_fk = f"DROP CONSTRAINT {', '.join(fk_list)}"
+                drop_fk = f"DROP CONSTRAINT {', '.join(fk_list)} CASCADE"
                 command = f"{command} {drop_fk}"
             if index_type == 'primary_key':
                 drop_pk = f"DROP CONSTRAINT {index_columns['primary_key_name']}"
