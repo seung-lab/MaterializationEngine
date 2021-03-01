@@ -40,7 +40,7 @@ def gcs_bulk_upload_workflow(self, bulk_upload_params: dict):
     
     bulk_upload_workflow = chain(
         create_tables.si(bulk_upload_info[0]),
-        chord([group(bulk_upload_task(bulk_upload_info, chunk))
+        chord([group(bulk_upload_task.si(bulk_upload_info, chunk))
             for chunk in bulk_upload_chunks], fin.si()),  # return here is required for chords
         add_table_indices.si(bulk_upload_info[0])) 
 
@@ -53,11 +53,12 @@ def gcs_bulk_upload_workflow(self, bulk_upload_params: dict):
 def gcs_insert_missing_data(self, bulk_upload_params: dict):
 
     bulk_upload_chunks = bulk_upload_params["chunks"]
+    upload_creation_time = datetime.datetime.utcnow()
 
-    bulk_file_info = get_gcs_file_info(bulk_upload_params)
+    bulk_upload_info = get_gcs_file_info(upload_creation_time, bulk_upload_params)
         
-    bulk_upload_workflow = group(bulk_upload_task.s(
-        bulk_file_info, chunk) for chunk in bulk_upload_chunks)
+    bulk_upload_workflow = group(bulk_upload_task.si(
+        bulk_upload_info, chunk) for chunk in bulk_upload_chunks)
     bulk_upload_workflow.apply_async()
 
 
@@ -192,8 +193,11 @@ def create_tables(self, bulk_upload_params: dict):
 
     return f"Tables {table_name}, {seg_table_name} created."
 
-
-def bulk_upload_task(bulk_upload_info: dict, chunk: List):
+@celery.task(name="process:bulk_upload_task", 
+             bind=True,
+             acks_late=True,
+             max_retries=3)
+def bulk_upload_task(self, bulk_upload_info: dict, chunk: List):
     try:
         file_data = []
         for file_metadata in bulk_upload_info:
@@ -204,7 +208,9 @@ def bulk_upload_task(bulk_upload_info: dict, chunk: List):
             file_data.append(parsed_data)
         
         formatted_data = format_data(file_data, file_metadata)
-        return upload_data.si(formatted_data, file_metadata)
+        uploaded = upload_data(formatted_data, file_metadata)
+        if not uploaded:
+            raise self.retry(exc=Exception, countdown=3)      
     except Exception as e:
         celery_logger.error(e)
         raise e
@@ -310,12 +316,7 @@ def split_annotation_data(serialized_data, schema, upload_creation_time):
     return split_data
 
 
-@celery.task(name="process:upload_data",
-             bind=True,
-             autoretry_for=(Exception,),
-             max_retries=3,
-             acks_late=True)  
-def upload_data(self, data: List, bulk_upload_info: dict):
+def upload_data(data: List, bulk_upload_info: dict):
 
     aligned_volume = bulk_upload_info["aligned_volume"]
     
@@ -337,11 +338,11 @@ def upload_data(self, data: List, bulk_upload_info: dict):
             connection.execute(SegmentationModel.__table__.insert(), data[1])
     except Exception as e:
         celery_logger.error(f"ERROR: {e}")
-        raise self.retry(exc=e, countdown=3)        
+        return False
     finally:
         session.close()
         engine.dispose()
-
+    return True
 
 @celery.task(name="process:add_table_indices",
              bind=True)
