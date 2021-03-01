@@ -244,7 +244,7 @@ class BulkUploadResource(Resource):
 @mat_bp.route("/missing_chunks/<string:datastack_name>/<string:table_name>/<string:segmentation_source>/<string:description>")
 class InsertMissingChunks(Resource):
     @reset_auth
-    @auth_requires_admin
+    @auth_required
     @mat_bp.doc("insert missing chunks", security="apikey")
     def post(self, datastack_name: str, table_name: str, segmentation_source: str, description: str):
         """Insert missing chunks of data into database
@@ -258,7 +258,7 @@ class InsertMissingChunks(Resource):
 
         """
         from materializationengine.workflows.bulk_upload import \
-            insert_missing_data
+            gcs_insert_missing_data
 
         args = missing_chunk_parser.parse_args()
 
@@ -274,7 +274,7 @@ class InsertMissingChunks(Resource):
             'annotation_table_name': table_name,
             'segmentation_source': segmentation_source,
         })
-        insert_missing_data(bulk_upload_info)
+        gcs_insert_missing_data.s(bulk_upload_info).apply_async()
         return f"Uploading : {datastack_name}", 200
 
 @mat_bp.route("/aligned_volume/<aligned_volume_name>")
