@@ -7,7 +7,7 @@ class IndexCache:
 
 
     def get_table_indices(self, table_name: str, engine: engine):
-        """Reflect current indicies, primary key(s) and foreign keys
+        """Reflect current indices, primary key(s) and foreign keys
          on given target table using SQLAlchemy inspector method.
 
         Args:
@@ -15,7 +15,7 @@ class IndexCache:
             engine (SQLAlchemy Engine instance): supplied SQLAlchemy engine
 
         Returns:
-            dict: Map of reflected indicies on given table.
+            dict: Map of reflected indices on given table.
         """
         insp = engine.reflection.Inspector.from_engine(engine)
         try:
@@ -76,7 +76,7 @@ class IndexCache:
         from supplied SQLAlchemy model. Returns a index map.
 
         Args:
-            model (SqlAlchemy Model): database model to reflect indicies
+            model (SqlAlchemy Model): database model to reflect indices
 
         Returns:
             dict: Index map
@@ -134,7 +134,7 @@ class IndexCache:
             engine (SQLAlchemy Engine instance): supplied SQLAlchemy engine
 
         Returns:
-            bool: True if all constraints and indicies are dropped
+            bool: True if all constraints and indices are dropped
         """
         indices = self.get_table_indices(table_name, engine)
         if not indices:
@@ -173,7 +173,7 @@ class IndexCache:
             engine (SQLAlchemy Engine instance): supplied SQLAlchemy engine
 
         Returns:
-            str: list of indicies added to table
+            str: list of indices added to table
         """
         current_indices = self.get_table_indices(table_name, engine)
         model_indices = self.get_index_from_model(model)
