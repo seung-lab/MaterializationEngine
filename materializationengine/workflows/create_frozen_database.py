@@ -714,9 +714,9 @@ def add_indices(self, mat_metadata: dict):
 
         model = make_flat_model(annotation_table_name, schema)
 
-        index_cache.add_indices(annotation_table_name, model, analysis_engine)
+        indices = index_cache.add_indices(annotation_table_name, model, analysis_engine)
 
         analysis_session.close()
         analysis_engine.dispose()
-        return "Indices Added"  
+        return f"Indices Added: {indices}"  
     return "Indices already exist"
