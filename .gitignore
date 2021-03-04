@@ -115,3 +115,5 @@ credentials.tar.gz
 *.ipynb_checkpoints
 *.ipynb
 *.pkl
+# ignore sentinel conf outputs
+*running.conf
