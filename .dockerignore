@@ -4,3 +4,6 @@ data
 *.pkl
 *.ipynb
 src/
+# ignore sentinel conf outputs
+*running.conf
+*.git
