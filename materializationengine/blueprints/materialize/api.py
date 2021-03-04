@@ -27,11 +27,11 @@ bulk_upload_parser.add_argument('schema', required=True, type=str)
 bulk_upload_parser.add_argument('materialized_ts', type=float)
 
 missing_chunk_parser = reqparse.RequestParser()
-missing_chunk_parser.add_argument('chunks', type=list, location='json')
-missing_chunk_parser.add_argument('column_mapping', type=list, location='json')
-missing_chunk_parser.add_argument('project', type=str)
-missing_chunk_parser.add_argument('file_path', type=str)
-missing_chunk_parser.add_argument('schema', type=str)
+missing_chunk_parser.add_argument('chunks', required=True, type=list, location='json')
+missing_chunk_parser.add_argument('column_mapping', required=True, type=dict, location='json')
+missing_chunk_parser.add_argument('project', required=True, type=str)
+missing_chunk_parser.add_argument('file_path', required=True, type=str)
+missing_chunk_parser.add_argument('schema', required=True, type=str)
 
 get_roots_parser = reqparse.RequestParser()
 get_roots_parser.add_argument('use_creation_time', default=False, type=inputs.boolean)
@@ -85,8 +85,8 @@ class TestWorkflowResource(Resource):
             iterator_length (int): Number of parallel tasks to run. Default = 50
         """
         from materializationengine.workflows.dummy_workflow import \
-            run_test_workflow
-        status = run_test_workflow.s(iterator_length).apply_async()
+            start_test_workflow
+        status = start_test_workflow.s(iterator_length).apply_async()
         return 200
 
 @mat_bp.route("/celery/status/queue")
