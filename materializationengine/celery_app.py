@@ -1,19 +1,24 @@
 from celery.signals import after_setup_logger
 import logging
 import sys
-from celery.schedules import crontab
 
 
 def create_celery(app=None, celery=None):
 
-    celery.conf.result_backend = app.config['CELERY_RESULT_BACKEND']
     celery.conf.broker_url = app.config['CELERY_BROKER_URL']
+    celery.conf.result_backend = app.config['CELERY_RESULT_BACKEND']
+    if app.config.get('USE_SENTINEL', False):
+        celery.conf.broker_transport_options = {'master_name': app.config['MASTER_NAME']}
+        celery.conf.result_backend_transport_options = {'master_name': app.config['MASTER_NAME']}
+
     celery.conf.update({'task_routes': ('materializationengine.task_router.TaskRouter'),
                         'task_serializer': 'pickle',
                         'result_serializer': 'pickle',
                         'accept_content': ['pickle'],
                         'optimization':'fair',
-                        'worker_prefetch_multiplier': 1})
+                        'worker_prefetch_multiplier': 1,
+                        'result_expires': 86400}) # results expire in broker after 1 day
+             
     celery.conf.update(app.config)
     TaskBase = celery.Task
 

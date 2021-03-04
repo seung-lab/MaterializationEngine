@@ -26,6 +26,7 @@ class BaseConfig:
     GLOBAL_SERVER = "https://global.daf-apis.com"
     SCHEMA_SERVICE_ENDPOINT = "https://global.daf-apis.com/schema/"
     SEGMENTATION_ENDPOINT = "https://global.daf-apis.com/"
+    MASTER_NAME = os.environ.get("MASTER_NAME", None)
     MATERIALIZATION_ROW_CHUNK_SIZE = 500
     QUERY_LIMIT_SIZE = 200000
     CELERY_WORKER_IP = os.environ.get("CELERY_WORKER_IP", "127.0.0.1")
@@ -48,8 +49,9 @@ class DevConfig(BaseConfig):
     REDIS_HOST = os.environ.get("REDIS_HOST")
     REDIS_PORT = os.environ.get("REDIS_PORT")
     REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
-    CELERY_BROKER_URL = REDIS_URL
-    CELERY_RESULT_BACKEND = REDIS_URL
+    CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL")
+    CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND")
+    USE_SENTINEL = os.environ.get("USE_SENTINEL", False)
 
 class TestConfig(BaseConfig):
     ENV = "testing"
