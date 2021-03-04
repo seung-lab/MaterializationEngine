@@ -165,8 +165,8 @@ class IndexCache:
         return True
 
     def add_indices(self, table_name: str, model, engine):
-        """Add missing indicies by comparing reflected table and
-        model indices. Will add missing indicies from model to table.
+        """Add missing indices by comparing reflected table and
+        model indices. Will add missing indices from model to table.
 
         Args:
             table_name (str): target table to drop constraints and indices
