@@ -209,11 +209,9 @@ def bulk_upload_task(self, bulk_upload_info: dict, chunk: List):
         
         formatted_data = format_data(file_data, file_metadata)
         uploaded = upload_data(formatted_data, file_metadata)
-        if not uploaded:
-            raise self.retry(exc=Exception, countdown=3)      
     except Exception as e:
         celery_logger.error(e)
-        raise e
+        raise self.retry(exc=Exception, countdown=3)
  
 
 def gcs_read_npy_chunk(bulk_upload_info: dict, chunk: List):
@@ -266,7 +264,7 @@ def gcs_read_npy_chunk(bulk_upload_info: dict, chunk: List):
 def parse_data(data: List, bulk_upload_info: dict):
     data_type = bulk_upload_info['data_type']
     column_mapping = bulk_upload_info['column_mapping']
-
+    celery_logger.info(f"data_type: {data_type} |  column_mapping:{column_mapping} ")
     data_columns = column_mapping[data_type]
        
     if not isinstance(data_columns, list):
@@ -368,9 +366,7 @@ def add_table_indices(self, bulk_upload_info: dict):
     # add segmentation table indexes
     index_cache.add_indices(table_name=seg_table_name,
                             model=seg_model,
-                            engine=engine,
-                            is_segmentation_table=True,
-                            fk_table=annotation_table_name)
+                            engine=engine)
 
     session.close()
     engine.dispose()

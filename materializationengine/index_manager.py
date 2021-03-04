@@ -1,165 +1,208 @@
 from geoalchemy2.types import Geometry
 from sqlalchemy import Index
-from sqlalchemy.engine import reflection
+from sqlalchemy import engine
 
 
 class IndexCache:
 
-    def __init__(self):
-        self._index_maps = {}
 
-    @property
-    def index_maps(self):
-        return self._index_maps
+    def get_table_indices(self, table_name: str, engine: engine):
+        """Reflect current indicies, primary key(s) and foreign keys
+         on given target table using SQLAlchemy inspector method.
 
-    @index_maps.setter
-    def index_maps(self, empty_dict={}):
-        self._index_maps = empty_dict
+        Args:
+            table_name (str): target table to reflect
+            engine (SQLAlchemy Engine instance): supplied SQLAlchemy engine
 
-    def get_table_indices(self, table_name: str, engine):
-        if table_name not in self._index_maps:
-            insp = reflection.Inspector.from_engine(engine)
-            try:
-                pk_columns = insp.get_pk_constraint(table_name)
-                indexed_columns = insp.get_indexes(table_name)
-                foreign_keys = insp.get_foreign_keys(table_name)
-            except Exception as e:
-                print(f"No table named '{table_name}', error: {e}")
-                return None
-            index_map = {}
-            if pk_columns:
+        Returns:
+            dict: Map of reflected indicies on given table.
+        """
+        insp = engine.reflection.Inspector.from_engine(engine)
+        try:
+            pk_columns = insp.get_pk_constraint(table_name)
+            indexed_columns = insp.get_indexes(table_name)
+            foreign_keys = insp.get_foreign_keys(table_name)
+        except Exception as e:
+            print(f"No table named '{table_name}', error: {e}")
+            return None
+        index_map = {}
+        if pk_columns:
+            pk_name = {'primary_key_name': pk_columns.get('name')}
+            if pk_name['primary_key_name']:
                 pk = {
-                    'primary_key_name': pk_columns.get('name'),
+                    'index_name': f"{pk_columns['name']}",
+                    'type': 'primary_key'
                 }
-                if pk['primary_key_name']:
-                    pk.update({
-                        'column_name': pk_columns['constrained_columns'][0]
-                    })
-                    index_map.update({
-                        'primary_key': pk
-                    })
+                index_map.update({
+                    pk_columns['constrained_columns'][0]: pk
+                })
+
+        if indexed_columns:
+            for index in indexed_columns:
+                dialect_options = index.get('dialect_options', None)
+
+                indx_map = {
+                    'index_name': index["name"]
+                }
+                if dialect_options:
+                    if 'gist' in dialect_options.values():
+                        indx_map.update({
+                            'type': 'spatial_index',
+                            'dialect_options': index.get('dialect_options')}
+                        )
                 else:
-                    return None
-            if indexed_columns:
-                indices = []
-                for index in indexed_columns:
-                    indx_map = {
-                        'index_name': index.get("name"),
-                        'column_name': index["column_names"][0],
-                        'dialect_options': index.get('dialect_options', None)
-                    }
-                    indices.append(indx_map.copy())
+                    indx_map.update({
+                        'type': 'index',
+                        'dialect_options': None})
 
                 index_map.update({
-                    'indices': indices
+                    index["column_names"][0]: indx_map
                 })
-            if foreign_keys:
-                for fk in foreign_keys:
-                    fKeys = []
-                    foreign_keys = {
-                        'foreign_key': fk.get("name"),
-                        'column_name': fk["constrained_columns"][0],
-                    }
-                    fKeys.append(foreign_keys.copy())
+        if foreign_keys:
+            for foreign_key in foreign_keys:
+                foreign_key_name = foreign_key['name']
+                fk_data = {
+                    'type': 'foreign_key',
+                    'foreign_key_name': foreign_key_name,
+                    'foreign_key_table': foreign_key['referred_table'],
+                    'foreign_key_column': foreign_key["referred_columns"][0]
+                }
                 index_map.update({
-                    'foreign_keys': foreign_keys
-                })
-            self._index_maps[table_name] = index_map
-        return self._index_maps[table_name]
+                    foreign_key_name: fk_data})
+        return index_map
 
     def get_index_from_model(self, model):
+        """Generate index mapping, primary key and foreign keys(s)
+        from supplied SQLAlchemy model. Returns a index map.
+
+        Args:
+            model (SqlAlchemy Model): database model to reflect indicies
+
+        Returns:
+            dict: Index map
+        """
         model = model.__table__
         index_map = {}
-        indices = []
         for column in model.columns:
             if column.primary_key:
                 pk = {
-                    'primary_key_name': f"{model.name}_pkey",
-                    'column_name': column.name
+                    'index_name': f"{model.name}_pkey",
+                    'type': 'primary_key'
                 }
                 index_map.update({
-                    'primary_key': pk
+                    column.name: pk
                 })
             if column.index:
                 indx_map = {
                     'index_name': f"ix_{model.name}_{column.name}",
-                    'column_name': column.name
+                    'type': 'index',
+                    'dialect_options': None
+
                 }
-                indices.append(indx_map)
+                index_map.update({
+                    column.name: indx_map
+                })
             if isinstance(column.type, Geometry):
                 spatial_index_map = {
                     'index_name': f"idx_{model.name}_{column.name}",
-                    'column_name': column.name,
-                    'is_spatial': True,
+                    'type': 'spatial_index',
+                    'dialect_options': {'postgresql_using': 'gist'}
                 }
-                indices.append(spatial_index_map)
-
-        index_map.update({
-            'indices': indices
-        })
-
-        self._index_maps[model.name] = index_map
-        return self._index_maps[model.name]
+                index_map.update({
+                    column.name: spatial_index_map
+                })
+            if column.foreign_keys:
+                foreign_keys = list(column.foreign_keys)
+                for foreign_key in foreign_keys:
+                    foreign_key_name = f"{foreign_key.column.table.name}_{foreign_key.column.name}_fkey"
+                    forigen_key_map = {
+                        'type': 'foreign_key',
+                        'foreign_key_name': foreign_key_name,
+                        'foreign_key_table': f'{foreign_key.column.table.name}',
+                        'foreign_key_column': f'{foreign_key.column.name}'
+                    }
+                    index_map.update({
+                        foreign_key_name: forigen_key_map})
+        return index_map
 
     def drop_table_indices(self, table_name: str, engine):
+        """Generate SQL command to drop all indices and
+        constraints on target table.
+
+        Args:
+            table_name (str): target table to drop constraints and indices
+            engine (SQLAlchemy Engine instance): supplied SQLAlchemy engine
+
+        Returns:
+            bool: True if all constraints and indicies are dropped
+        """
         indices = self.get_table_indices(table_name, engine)
         if not indices:
             return f"No indices on '{table_name}' found."
         command = f"ALTER TABLE {table_name}"
-        for index_type, index_columns in indices.items():
-            if index_type == 'foreign_key':
-                fk_list = [index_columns['foreign_key']
-                           for i in index_columns]
-                drop_fk = f"DROP CONSTRAINT {', '.join(fk_list)} CASCADE"
-                command = f"{command} {drop_fk}"
-            if index_type == 'primary_key':
-                drop_pk = f"DROP CONSTRAINT {index_columns['primary_key_name']} CASCADE"
-                command = f"{command} {drop_pk};"
-            if index_type == 'indices':
-                index_list = [col['index_name'] for col in index_columns]
-                drop_index = f"DROP INDEX {', '.join(index_list)}"
-                command = f"{command} {drop_index}"
+
+        connection = engine.connect()
+        contraints_list = []
+        for column_info in indices.values():
+            if 'foreign_key' in column_info['type']:
+                contraints_list.append(
+                    f"{command} DROP CONSTRAINT IF EXISTS {column_info['foreign_key_name']}")
+            if 'primary_key' in column_info['type']:
+                contraints_list.append(
+                    f"{command} DROP CONSTRAINT IF EXISTS {column_info['index_name']}")
+
+        drop_contstraint = f"{'; '.join(contraints_list)} CASCADE"
+        command = f"{drop_contstraint};"
+        index_list = [col['index_name']
+                      for col in indices.values() if 'index' in col['type']]
+        if index_list:
+            drop_index = f"DROP INDEX {', '.join(index_list)}"
+            command = f"{command} {drop_index};"
         try:
-            connection = engine.connect()
-            connection.execute(f"{command}")
+            connection.execute(command)
         except Exception as e:
             raise(e)
         return True
 
-    def add_indices(self, table_name, model, engine, is_segmentation_table=False, fk_table=None):
-        if table_name not in self._index_maps:
-            indices = self.get_index_from_model(model)
-        else:
-            indices = self._index_maps[table_name]
-        for index_type, index_columns in indices.items():
-            connection = engine.connect()
+    def add_indices(self, table_name: str, model, engine):
+        """Add missing indicies by comparing reflected table and
+        model indices. Will add missing indicies from model to table.
+
+        Args:
+            table_name (str): target table to drop constraints and indices
+            engine (SQLAlchemy Engine instance): supplied SQLAlchemy engine
+
+        Returns:
+            str: list of indicies added to table
+        """
+        current_indices = self.get_table_indices(table_name, engine)
+        model_indices = self.get_index_from_model(model)
+
+        missing_indices = set(model_indices) - set(current_indices)
+        connection = engine.connect()
+        for column_name in missing_indices:
+            index_type = model_indices[column_name]['type']
             if index_type == 'primary_key':
-                pk_col_name = index_columns['column_name']
-                connection.execute(
-                    f'ALTER TABLE {table_name} add primary key({pk_col_name})')
-            if index_type == 'indices':
-                for col in index_columns:
-                    index_name = col['index_name']
-                    column_name = col['column_name']
-                    is_spatial = col.get('is_spatial', False)
-                    if is_spatial:
-                        model_index = Index(index_name, getattr(
-                            model, column_name), postgresql_using='gist')
-                    else:
-                        model_index = Index(
-                            index_name, getattr(model, column_name))
-                    try:
-                        model_index.create(bind=engine)
-                    except Exception as e:
-                        raise(e)
-                        
-        if is_segmentation_table:
-            fk_command = f"""ALTER TABLE {table_name} 
-                             ADD CONSTRAINT fk_{fk_table}_id
-                             FOREIGN KEY (id) 
-                             REFERENCES {fk_table} (id);"""
-            connection.execute(fk_command)
-                
+                command = f'ALTER TABLE {table_name} add primary key({column_name});'
+            if index_type == 'index':
+                command = f"CREATE INDEX ix_{table_name}_{column_name} ON {table_name} ({column_name});"
+            if index_type == 'spatial_index':
+                command = f"CREATE INDEX idx_{table_name}_{column_name} ON {table_name} USING GIST ({column_name} gist_geometry_ops_nd);"
+            if index_type == 'foreign_key':
+                foreign_key_name = model_indices[column_name]['foreign_key_name']
+                foreign_key_table = model_indices[column_name]['foreign_key_table']
+                foreign_key_column = model_indices[column_name]['foreign_key_column']
+                command = f"""ALTER TABLE {table_name} 
+                              ADD CONSTRAINT {foreign_key_name}
+                              FOREIGN KEY ({foreign_key_column}) 
+                              REFERENCES {foreign_key_table} ({foreign_key_column});"""
+                missing_indices.add(foreign_key_name)
+            try:
+                connection.execute(command)
+            except Exception as e:
+                raise(e)
+
+        return f"Indices added: {missing_indices}"
 
 
 index_cache = IndexCache()
