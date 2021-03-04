@@ -15,6 +15,7 @@ services:
         interval: 3s
         timeout: 10s
         retries: 5
+
     adminer:
       image: adminer
       ports:
@@ -23,23 +24,26 @@ services:
       - db
       volumes:
        - ./uploads.ini:/usr/local/etc/php/conf.d/uploads.ini      
-    redis:
+
+    redis-master:
       image: redis:6.0
-      container_name: redis
-      hostname: redis
+      container_name: redis-master
+      hostname: redis-master
       command: ["redis-server"]
       ports:
         - 6379:6379
+
     celery-process_1:
       image: 'materialize:tag'
       env_file:
         - ./dev.env
-      command: ["celery", "worker", "--app=run.celery","--pool=prefork", "--hostname=worker.process@%h", "--queues=process","--concurrency=4", "--loglevel=INFO", "-Ofair"]
+      command: ["celery", "worker", "--app=run.celery","--pool=prefork", "--hostname=worker.process@%h", "--queues=process,celery","--concurrency=4", "--loglevel=INFO", "-Ofair"]
       volumes:
         - ~/.cloudvolume/secrets:/home/nginx/.cloudvolume/secrets:z
         - ~/.cloudvolume/secrets/google-secret.json:/home/nginx/.cloudvolume/secrets/google-secret.json:z
       depends_on:
-        - redis
+        - redis-master  
+        
     celery-process_2:
       image: 'materialize:tag'
       env_file:
@@ -49,7 +53,8 @@ services:
         - ~/.cloudvolume/secrets:/home/nginx/.cloudvolume/secrets:z
         - ~/.cloudvolume/secrets/google-secret.json:/home/nginx/.cloudvolume/secrets/google-secret.json:z
       depends_on:
-        - redis
+        - redis-master  
+
     celery-beat:
       image: 'materialize:tag'
       env_file:
@@ -59,7 +64,8 @@ services:
         - ~/.cloudvolume/secrets:/home/nginx/.cloudvolume/secrets:z
         - ~/.cloudvolume/secrets/google-secret.json:/home/nginx/.cloudvolume/secrets/google-secret.json:z
       depends_on:
-        - redis        
+        - redis-master          
+
     materialize:
       image: 'materialize:tag'
       build:
@@ -75,15 +81,16 @@ services:
         - ./dev.env
       depends_on:
         - db
-        - redis
+        - redis-master  
         - celery-process_1
         - celery-process_2
         - celery-beat
+
     flower:
       image: mher/flower
       environment:
         - FLOWER_PORT=5555
-      command: ["flower", "--broker=redis://redis:6379/0", "--port=5555"]  
+      command: ["flower", "--broker=redis://redis-master:6379/0", "--port=5555"]  
       ports:
         - 5555:5555
       depends_on: 
