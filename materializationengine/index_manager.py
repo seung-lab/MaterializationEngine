@@ -1,6 +1,6 @@
 from geoalchemy2.types import Geometry
-from sqlalchemy import Index
 from sqlalchemy import engine
+from sqlalchemy.engine import reflection
 
 
 class IndexCache:
@@ -17,7 +17,7 @@ class IndexCache:
         Returns:
             dict: Map of reflected indices on given table.
         """
-        insp = engine.reflection.Inspector.from_engine(engine)
+        insp = reflection.Inspector.from_engine(engine)
         try:
             pk_columns = insp.get_pk_constraint(table_name)
             indexed_columns = insp.get_indexes(table_name)
