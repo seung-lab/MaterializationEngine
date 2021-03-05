@@ -1,7 +1,7 @@
 import logging
 
 import requests
-from flask import abort, current_app, g, Blueprint
+from flask import abort, current_app
 from flask_restx import Namespace, Resource, inputs, reqparse
 from materializationengine.database import (create_session,
                                             dynamic_annotation_cache,
@@ -34,10 +34,10 @@ missing_chunk_parser.add_argument('file_path', required=True, type=str)
 missing_chunk_parser.add_argument('schema', required=True, type=str)
 
 get_roots_parser = reqparse.RequestParser()
-get_roots_parser.add_argument('use_creation_time', default=False, type=inputs.boolean)
+get_roots_parser.add_argument('find_all_expired_roots', default=False, type=inputs.boolean)
 
-expires_on_parser = reqparse.RequestParser()
-expires_on_parser.add_argument('database_expires', default=True, type=inputs.boolean)
+materialize_parser = reqparse.RequestParser()
+materialize_parser.add_argument('days_to_expire', required=True, default=None, type=int)
 
 
 authorizations = {
@@ -114,7 +114,7 @@ class CeleryResource(Resource):
         status = get_celery_worker_status()
         return status
 
-@mat_bp.route("/materialize/ingest/datastack/<string:datastack_name>")
+@mat_bp.route("/materialize/run/ingest_annotations/datastack/<string:datastack_name>")
 class ProcessNewAnnotationsResource(Resource):
     @reset_auth
     @auth_requires_admin
@@ -132,11 +132,11 @@ class ProcessNewAnnotationsResource(Resource):
         return 200
         
 
-@mat_bp.route("/materialize/live/datastack/<string:datastack_name>")
+@mat_bp.route("/materialize/run/complete_workflow/datastack/<string:datastack_name>")
 class CompleteWorkflowResource(Resource):
     @reset_auth
-    @auth_requires_admin
-    @mat_bp.expect(expires_on_parser)
+    @auth_required
+    @mat_bp.expect(materialize_parser)
     @mat_bp.doc("ingest segmentations > update roots and freeze materialization", security="apikey")
     def post(self, datastack_name: str):
         """Create versioned materialization, finds missing segmentations and updates roots
@@ -146,20 +146,21 @@ class CompleteWorkflowResource(Resource):
         """
         from materializationengine.workflows.complete_workflow import \
             run_complete_worflow
-        
-        args = expires_on_parser.parse_args()
-        database_expires = args["database_expires"]
         datastack_info = get_datastack_info(datastack_name)
-        datastack_info['database_expires'] = database_expires  
-        run_complete_worflow.s(datastack_info).apply_async()
+        args = materialize_parser.parse_args()
+        days_to_expire = args["days_to_expire"]
+        
+        datastack_info['database_expires'] = days_to_expire  
+
+        run_complete_worflow.s(datastack_info, days_to_expire).apply_async()
         return 200
 
 
-@mat_bp.route("/materialize/frozen/datastack/<string:datastack_name>")
+@mat_bp.route("/materialize/run/create_frozen/datastack/<string:datastack_name>")
 class CreateFrozenMaterializationResource(Resource):
     @reset_auth
     @auth_requires_admin
-    @mat_bp.expect(expires_on_parser)
+    @mat_bp.expect(materialize_parser)
     @mat_bp.doc("create frozen materialization", security="apikey")
     def post(self, datastack_name: str):
         """Create a new frozen (versioned) materialization
@@ -169,17 +170,17 @@ class CreateFrozenMaterializationResource(Resource):
         """
         from materializationengine.workflows.create_frozen_database import \
             create_versioned_materialization_workflow
-        args = expires_on_parser.parse_args()
-        database_expires = args["database_expires"]
+        args = materialize_parser.parse_args()
+        days_to_expire = args["days_to_expire"]       
+
         datastack_info = get_datastack_info(datastack_name)
-        datastack_info['database_expires'] = database_expires     
-        create_versioned_materialization_workflow.s(datastack_info).apply_async()
+        create_versioned_materialization_workflow.s(datastack_info, days_to_expire).apply_async()
         return 200
 
-@mat_bp.route("/materialize/roots/datastack/<string:datastack_name>")
+@mat_bp.route("/materialize/run/update_roots/datastack/<string:datastack_name>")
 class UpdateExpiredRootIdsResource(Resource):
     @reset_auth
-    @auth_requires_admin
+    @auth_required
     @mat_bp.expect(get_roots_parser)
     @mat_bp.doc("update expired root ids", security="apikey")
     def post(self, datastack_name: str):
@@ -192,9 +193,8 @@ class UpdateExpiredRootIdsResource(Resource):
             expired_root_id_workflow
         datastack_info = get_datastack_info(datastack_name)   
 
-        args = get_roots_parser.parse_args()
-        use_creation_time = args["use_creation_time"]
-        datastack_info['use_creation_time'] = use_creation_time
+        args = get_roots_parser.parse_args()     
+        datastack_info['find_all_expired_roots'] = args["find_all_expired_roots"]
 
         expired_root_id_workflow.s(datastack_info).apply_async()
         return 200
@@ -202,7 +202,7 @@ class UpdateExpiredRootIdsResource(Resource):
 
 
 @mat_bp.expect(bulk_upload_parser)
-@mat_bp.route("/bulk_upload/<string:datastack_name>/<string:table_name>/<string:segmentation_source>/<string:description>")
+@mat_bp.route("/bulk_upload/upload/<string:datastack_name>/<string:table_name>/<string:segmentation_source>/<string:description>")
 class BulkUploadResource(Resource):
     @reset_auth
     @auth_required
@@ -241,7 +241,7 @@ class BulkUploadResource(Resource):
         return f"Datastack upload info : {bulk_upload_info}", 200
 
 @mat_bp.expect(missing_chunk_parser)
-@mat_bp.route("/missing_chunks/<string:datastack_name>/<string:table_name>/<string:segmentation_source>/<string:description>")
+@mat_bp.route("/bulk_upload/missing_chunks/<string:datastack_name>/<string:table_name>/<string:segmentation_source>/<string:description>")
 class InsertMissingChunks(Resource):
     @reset_auth
     @auth_required
@@ -315,7 +315,7 @@ class VersionResource(Resource):
     def post(self, aligned_volume_name: str):
         """Create an aligned volume database
         Args:
-            datastack_name (str): name of datastack from infoservice
+            aligned_volume_name (str): name of aligned_volume from infoservice
         """
         check_aligned_volume(aligned_volume_name)
         aligned_vol_db = dynamic_annotation_cache.get_db(aligned_volume_name)
