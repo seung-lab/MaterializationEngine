@@ -17,10 +17,8 @@ from sqlalchemy.sql import or_
 celery_logger = get_task_logger(__name__)
 
 
-@celery.task(name="process:update_root_ids_task",
-             bind=True,
-             acks_late=True)
-def expired_root_id_workflow(self, datastack_info: dict):
+@celery.task(name="process:update_root_ids_task")
+def expired_root_id_workflow(datastack_info: dict):
     """Workflow to process expired root ids and lookup and
     update table with current root ids.
 
