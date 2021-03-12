@@ -327,8 +327,10 @@ class FrozenTableQuery(Resource):
 
         data = request.parsed_obj
         limit = data.get('limit', max_limit)
+        
         if limit>max_limit:
             limit = max_limit
+
         logging.info('query {}'.format(data))
         df=specific_query(Session, engine, {table_name: Model}, [table_name],
                       filter_in_dict=data.get('filter_in_dict', {}),
@@ -337,9 +339,14 @@ class FrozenTableQuery(Resource):
                       select_columns=data.get('select_columns', None),
                       offset=data.get('offset', None),
                       limit = limit)
+        headers=None
+        if len(df) == limit:
+            headers={'Warning':f'201 - "Limited query to {max_limit} rows'}
+       
         context = pa.default_serialization_context()
         serialized = context.serialize(df)
         return Response(serialized.to_buffer().to_pybytes(),
+                        headers=headers,
                         mimetype='x-application/pyarrow')
 
 
@@ -417,6 +424,9 @@ class FrozenQuery(Resource):
                       offset=data.get('offset', None),
                       limit = limit,
                       suffixes=data.get('suffixes', None))
+        headers=None
+        if len(df) == limit:
+            headers={'Warning':f'201 - "Limited query to {max_limit} rows'}
         context = pa.default_serialization_context()
         serialized = context.serialize(df)
         return Response(serialized.to_buffer().to_pybytes(),
