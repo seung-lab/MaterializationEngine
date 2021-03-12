@@ -1,6 +1,5 @@
 import datetime
 from typing import List
-from marshmallow.fields import Bool
 
 import numpy as np
 import pandas as pd
@@ -11,7 +10,6 @@ from materializationengine.chunkedgraph_gateway import chunkedgraph_cache
 from materializationengine.database import sqlalchemy_cache
 from materializationengine.shared_tasks import fin, update_metadata, get_materialization_info
 from materializationengine.utils import create_segmentation_model
-from dynamicannotationdb.models import AnnoMetadata
 from sqlalchemy.sql import or_
 
 celery_logger = get_task_logger(__name__)
@@ -34,14 +32,41 @@ def expired_root_id_workflow(datastack_info: dict):
     for mat_metadata in mat_info:
         chunked_roots = get_expired_root_ids(mat_metadata)
         
-        process_root_ids = chain(
-            chord([group(update_root_ids(root_ids, mat_metadata))
-                for root_ids in chunked_roots], fin.si()),  # return here is required for chords
-            update_metadata.si(mat_metadata))  # final task which will process a return status/timing etc...
+        process_root_ids = update_root_ids_workflow(mat_metadata, chunked_roots)  # final task which will process a return status/timing etc...
         workflow.append(process_root_ids)
     workflow = chord(workflow, fin.s())
     status = workflow.apply_async()
     return status
+
+
+def update_root_ids_workflow(mat_metadata: dict, chunked_roots: List[int]):
+    """Celery workflow that updates expired root ids in a
+    segmentation table. 
+
+    Workflow:
+        - Lookup supervoxel id associated with expired root id
+        - Lookup new root id for the supervoxel
+        - Update database row with new root id
+
+    Once all root ids in a given table are updated the associated entry in the
+    metadata data will also be updated.
+
+    Args:
+        mat_metadata (dict): datastack info for the aligned_volume derived from the infoservice
+        chunked_roots (List[int]): chunks of expired root ids to lookup
+
+    Returns:
+        chain: chain of celery tasks 
+    """
+    update_expired_roots_workflow = chain(
+        chord([
+            group(update_root_ids(root_ids, mat_metadata))
+            for root_ids in chunked_roots],
+            fin.si()),
+        update_metadata.si(mat_metadata),
+    )
+    return update_expired_roots_workflow
+
 
 def update_root_ids(root_ids: List[int], mat_metadata: dict) -> True:
     """Chunks supervoxel data and distributes 
