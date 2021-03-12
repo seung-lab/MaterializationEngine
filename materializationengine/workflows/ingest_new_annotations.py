@@ -52,34 +52,35 @@ def process_new_annotations_workflow(datastack_info: dict):
                                         skip_table=True)
 
     for mat_metadata in mat_info:
-        if mat_metadata['row_count'] < 1_000_000 and mat_metadata['create_segmentation_table']:
+        if mat_metadata['row_count'] < 1_000_000:
             annotation_chunks = chunk_annotation_ids(mat_metadata)
             process_chunks_workflow = chain(
-                ingest_annotations_workflow(mat_metadata, annotation_chunks), # return here is required for chords
+                ingest_new_annotations_workflow(mat_metadata, annotation_chunks), # return here is required for chords
                 update_metadata.s(mat_metadata))  # final task which will process a return status/timing etc...
 
             process_chunks_workflow.apply_async()
 
-def ingest_annotations_workflow(mat_metadata: dict, annotation_chunks: List):
-    """Create missing segmentation table if it doesnt exist. Lookup
-    supervoxel ids from annotation spatial positions.
+
+def ingest_new_annotations_workflow(mat_metadata: dict, annotation_chunks: List[int]):
+    """Celery workflow to ingest new annotations. In addtion, it will 
+    create missing segmentation data table if it does not exist. 
+    Returns celery chain primative.
 
     Args:
-        mat_metadata (dict): materialization metadata for each table
-        annotation_chunks (List): list of annotation ids to use for 
-        supervoxel lookups.
+        mat_metadata (dict): datastack info for the aligned_volume derived from the infoservice
+        annotation_chunks (List[int]): list of annotation primary key ids 
 
     Returns:
-        chain: celery chain primative workflow
+        chain: chain of celery tasks 
     """
-    ingest_annotations_workflow = chain(
-    create_missing_segmentation_table.si(mat_metadata),
-    chord([
-        chain(
-            ingest_new_annotations.si(mat_metadata, annotation_chunk),
-        ) for annotation_chunk in annotation_chunks],
-        fin.si()))  # return here is required for chords
-    return ingest_annotations_workflow
+    new_annotation_workflow = chain(
+        create_missing_segmentation_table.si(mat_metadata),
+        chord([
+            chain(
+                ingest_new_annotations.si(mat_metadata, annotation_chunk),
+            ) for annotation_chunk in annotation_chunks],
+            fin.si()))  # return here is required for chords
+    return new_annotation_workflow
 
 
 @celery.task(name="process:ingest_new_annotations",
@@ -207,7 +208,6 @@ def get_annotations_with_missing_supervoxel_ids(mat_metadata: dict,
     session.close()
     
     return materialization_data
-
 
 
 def get_cloudvolume_supervoxel_ids(materialization_data: dict, mat_metadata: dict) -> dict:
