@@ -16,3 +16,9 @@ def get_celery_worker_status():
         'scheduled_tasks': scheduled_tasks
     }
     return result
+
+def get_celery_queue_items(queue_name: str):
+    with celery.connection_or_acquire() as conn:
+        return conn.default_channel.queue_declare(
+            queue=queue_name, passive=True).message_count
+    

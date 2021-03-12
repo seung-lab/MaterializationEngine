@@ -1,29 +1,34 @@
-from flask import abort, current_app, request, Response, stream_with_context
-from flask_restx import Namespace, Resource, reqparse
-from flask_accepts import accepts, responds
+import logging
+import os
+
 import pyarrow as pa
-from materializationengine.models import AnalysisTable, AnalysisVersion
-from materializationengine.schemas import AnalysisVersionSchema, AnalysisTableSchema
-from materializationengine.blueprints.client.query import specific_query, _execute_query
-from materializationengine.info_client import get_aligned_volumes, get_datastacks, get_datastack_info
-from materializationengine.database import dynamic_annotation_cache, sqlalchemy_cache, create_session
-from materializationengine.blueprints.client.schemas import (
-    Metadata,
-    SegmentationTableSchema,
-    SimpleQuerySchema,
-    ComplexQuerySchema,
-    CreateTableSchema,
-    PostPutAnnotationSchema,
-    GetDeleteAnnotationSchema,
-    SegmentationDataSchema
-)
+from cachetools import LRUCache, TTLCache, cached
 from emannotationschemas import get_schema
 from emannotationschemas.flatten import create_flattened_schema
-from emannotationschemas.models import create_table_dict, Base, annotation_models
+from emannotationschemas.models import (Base, annotation_models,
+                                        create_table_dict)
+from flask import Response, abort, current_app, request, stream_with_context
+from flask_accepts import accepts, responds
+from flask_restx import Namespace, Resource, reqparse
+from materializationengine.blueprints.client.query import (_execute_query,
+                                                           specific_query)
+from materializationengine.blueprints.client.schemas import (
+    ComplexQuerySchema, CreateTableSchema, GetDeleteAnnotationSchema, Metadata,
+    PostPutAnnotationSchema, SegmentationDataSchema, SegmentationTableSchema,
+    SimpleQuerySchema)
+from materializationengine.blueprints.reset_auth import reset_auth
+from materializationengine.database import (create_session,
+                                            dynamic_annotation_cache,
+                                            sqlalchemy_cache)
+from materializationengine.info_client import (get_aligned_volumes,
+                                               get_datastack_info,
+                                               get_datastacks)
+from materializationengine.models import AnalysisTable, AnalysisVersion
+from materializationengine.schemas import (AnalysisTableSchema,
+                                           AnalysisVersionSchema)
+from middle_auth_client import (auth_required, auth_requires_admin,
+                                auth_requires_permission)
 from sqlalchemy.engine.url import make_url
-from middle_auth_client import auth_required, auth_requires_permission
-import logging
-from cachetools import cached, LRUCache, TTLCache
 
 __version__ = "0.2.35"
 
@@ -123,6 +128,7 @@ def get_flat_model(datastack_name:str, table_name:str, version:int, Session):
 
 @client_bp.route("/datastack/<string:datastack_name>/versions")
 class DatastackVersions(Resource):
+    @reset_auth
     @auth_required
     @client_bp.doc("datastack_versions", security="apikey")
     def get(self, datastack_name: str):
@@ -149,6 +155,7 @@ class DatastackVersions(Resource):
 
 @client_bp.route("/datastack/<string:datastack_name>/version/<int:version>")
 class DatastackVersion(Resource):
+    @reset_auth    
     @auth_required
     @client_bp.doc("version metadata", security="apikey")
     def get(self, datastack_name: str, version: int):
@@ -177,6 +184,7 @@ class DatastackVersion(Resource):
 
 @client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/tables")
 class FrozenTableVersions(Resource):
+    @reset_auth
     @auth_required
     @client_bp.doc("get_frozen_tables", security="apikey")
     def get(self, datastack_name: str, version:int):
@@ -210,6 +218,7 @@ class FrozenTableVersions(Resource):
 
 @client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/table/<string:table_name>/metadata")
 class FrozenTableMetadata(Resource):
+    @reset_auth
     @auth_required
     @client_bp.doc("get_frozen_table_metadata", security="apikey")
     def get(self, datastack_name: str, version:int, table_name: str):
@@ -239,6 +248,7 @@ class FrozenTableMetadata(Resource):
 
 @client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/table/<string:table_name>/count")
 class FrozenTableCount(Resource):
+    @reset_auth    
     @auth_required
     @client_bp.doc("simple_query", security="apikey")
     def get(self, datastack_name:str, version:int, table_name:str):
@@ -262,7 +272,8 @@ class FrozenTableCount(Resource):
 
 @client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/table/<string:table_name>/query")
 class FrozenTableQuery(Resource):
-    @auth_required
+    @reset_auth
+    @auth_requires_permission('view', dataset=os.environ['AUTH_DATABASE_NAME'])    
     @client_bp.doc("simple_query", security="apikey")
     @accepts("SimpleQuerySchema", schema=SimpleQuerySchema, api=client_bp)
     def post(self, datastack_name:str, version:int, table_name:str):
@@ -334,7 +345,8 @@ class FrozenTableQuery(Resource):
 
 @client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/query")
 class FrozenQuery(Resource):
-    @auth_required
+    @reset_auth
+    @auth_requires_permission('view', dataset=os.environ['AUTH_DATABASE_NAME'])    
     @client_bp.doc("complex_query", security="apikey")
     @accepts("ComplexQuerySchema", schema=ComplexQuerySchema, api=client_bp)
     def post(self, datastack_name:str, version:int):

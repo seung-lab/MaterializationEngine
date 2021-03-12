@@ -34,7 +34,7 @@ celery_logger = get_task_logger(__name__)
 
 
 @celery.task(name="process:create_versioned_materialization_workflow")
-def create_versioned_materialization_workflow(datastack_info: dict):
+def create_versioned_materialization_workflow(datastack_info: dict, days_to_expire: int=5):
     """Create a timelocked database of materialization annotations
     and associated segmentation data.
 
@@ -45,7 +45,7 @@ def create_versioned_materialization_workflow(datastack_info: dict):
     """
     materialization_time_stamp = datetime.datetime.utcnow()
 
-    new_version_number = create_new_version(datastack_info, materialization_time_stamp)
+    new_version_number = create_new_version(datastack_info, materialization_time_stamp, days_to_expire)
     mat_info = get_materialization_info(datastack_info, new_version_number, materialization_time_stamp)
     
     setup_versioned_database = chain(
@@ -695,7 +695,8 @@ def drop_indices(self, mat_metadata: dict):
 
 
 @celery.task(name="process:add_indices",
-             bind=True)
+             bind=True,
+             ask_late=True)
 def add_indices(self, mat_metadata: dict):
     add_indices = mat_metadata.get('add_indices', False)
     if add_indices:
@@ -713,9 +714,9 @@ def add_indices(self, mat_metadata: dict):
 
         model = make_flat_model(annotation_table_name, schema)
 
-        index_cache.add_indices(annotation_table_name, model, analysis_engine, is_flat=True)
+        indices = index_cache.add_indices(annotation_table_name, model, analysis_engine)
 
         analysis_session.close()
         analysis_engine.dispose()
-        return "Indices Added"  
+        return f"Indices Added: {indices}"  
     return "Indices already exist"

@@ -4,7 +4,7 @@ services:
       image: postgis/postgis:9.6-2.5
       shm_size: 1g      
       env_file:
-        - ./dev.env
+        - ./sentinel/dev.sentinel.env
       ports:
         - 5432:5432
       volumes:
@@ -16,38 +16,79 @@ services:
         timeout: 10s
         retries: 5
 
-    adminer:
-      image: adminer
-      ports:
-        - 8080:8080
-      depends_on:
-      - db
-      volumes:
-       - ./uploads.ini:/usr/local/etc/php/conf.d/uploads.ini      
-
     redis-master:
       image: redis:6.0
       container_name: redis-master
       hostname: redis-master
       command: ["redis-server"]
+      volumes:
+        - broker_data:/data
+      networks:
+        - redis_network
       ports:
         - 6379:6379
+
+    redis-slave-0:
+      image: redis:6.0
+      command: redis-server --port 6380 --slaveof redis-master 6379
+      volumes:
+        - broker_data:/data
+      networks:
+        - redis_network
+      depends_on: 
+        - redis-master
+
+    redis-slave-1:
+      image: redis:6.0
+      command: redis-server --port 6381 --slaveof redis-master 6379
+      volumes:
+        - broker_data:/data
+      networks:
+        - redis_network
+      depends_on: 
+        - redis-master
+
+    sentinel1:
+        image: redis:6.0
+        command: sh /sentinel/run_sentinel.sh sentinel1
+        networks: 
+          - redis_network
+        volumes:
+          - broker_data:/data
+          - ./sentinel:/sentinel
+        depends_on: 
+          - redis-master
+          - redis-slave-0
+          - redis-slave-1
+
+    sentinel2:
+      image: redis:6.0
+      command: sh /sentinel/run_sentinel.sh sentinel2
+      networks: 
+        - redis_network
+      volumes:
+        - broker_data:/data
+        - ./sentinel:/sentinel
+      depends_on: 
+        - redis-master
+        - redis-slave-0
+        - redis-slave-1
 
     celery-process_1:
       image: 'materialize:tag'
       env_file:
-        - ./dev.env
+        - ./sentinel/dev.sentinel.env
       command: ["celery", "worker", "--app=run.celery","--pool=prefork", "--hostname=worker.process@%h", "--queues=process,celery","--concurrency=4", "--loglevel=INFO", "-Ofair"]
       volumes:
         - ~/.cloudvolume/secrets:/home/nginx/.cloudvolume/secrets:z
         - ~/.cloudvolume/secrets/google-secret.json:/home/nginx/.cloudvolume/secrets/google-secret.json:z
       depends_on:
-        - redis-master  
-        
+        - redis-master
+
     celery-process_2:
       image: 'materialize:tag'
       env_file:
-        - ./dev.env
+        - ./sentinel/dev.sentinel.env
       command: ["celery", "worker", "--app=run.celery","--pool=prefork", "--hostname=worker.process@%h", "--queues=process", "--concurrency=4", "--loglevel=INFO", "-Ofair"]
       volumes:
         - ~/.cloudvolume/secrets:/home/nginx/.cloudvolume/secrets:z
@@ -58,13 +99,13 @@ services:
     celery-beat:
       image: 'materialize:tag'
       env_file:
-        - ./dev.env
+        - ./sentinel/dev.sentinel.env
       command: ["celery", "beat", "--app=run.celery", "--pidfile=/home/nginx/celerybeat.pid"]
       volumes:
         - ~/.cloudvolume/secrets:/home/nginx/.cloudvolume/secrets:z
         - ~/.cloudvolume/secrets/google-secret.json:/home/nginx/.cloudvolume/secrets/google-secret.json:z
       depends_on:
-        - redis-master          
+        - redis-master
 
     materialize:
       image: 'materialize:tag'
@@ -78,10 +119,10 @@ services:
         - ~/.cloudvolume/secrets/google-secret.json:/home/nginx/.cloudvolume/secrets/google-secret.json:z
         - .:/app
       env_file:
-        - ./dev.env
+        - ./sentinel/dev.sentinel.env
       depends_on:
         - db
-        - redis-master  
+        - redis-master
         - celery-process_1
         - celery-process_2
         - celery-beat
@@ -90,7 +131,7 @@ services:
       image: mher/flower
       environment:
         - FLOWER_PORT=5555
-      command: ["flower", "--broker=redis://redis-master:6379/0", "--port=5555"]  
+      command: ["flower", "--broker=sentinel://sentinel1:26379/0", "--port=5555"]  
       ports:
         - 5555:5555
       depends_on: 
@@ -99,4 +140,7 @@ services:
 
 volumes:
   postgres_data:
-  redis:
+  broker_data:
+
+networks:
+  redis_network:

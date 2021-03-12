@@ -2,7 +2,7 @@ import datetime
 from celery import chain, chord, group
 from celery.utils.log import get_task_logger
 from materializationengine.celery_init import celery
-from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
+from materializationengine.shared_tasks import (chunk_annotation_ids, fin,
                                                 update_metadata,
                                                 get_materialization_info)
 from materializationengine.workflows.create_frozen_database import (
@@ -45,15 +45,15 @@ def run_complete_worflow(datastack_info: dict, days_to_expire: int = 5):
 
     # lookup missing segmentation data for new annotations and update expired root_ids
     for mat_metadata in mat_info:
-        supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
+        annotation_chunks = chunk_annotation_ids(mat_metadata)
         chunked_roots = get_expired_root_ids(mat_metadata)
         if mat_metadata['row_count'] < 1_000_000:
             new_annotation_workflow = chain(
                 create_missing_segmentation_table.si(mat_metadata),
                 chord([
                     chain(
-                        ingest_new_annotations.si(mat_metadata, chunk),
-                    ) for chunk in supervoxel_chunks],
+                        ingest_new_annotations.si(mat_metadata, annotation_chunk),
+                    ) for annotation_chunk in annotation_chunks],
                     fin.si()),  # return here is required for chords
                 fin.si())
         else:

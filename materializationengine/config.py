@@ -19,12 +19,14 @@ class BaseConfig:
     REDIS_URL = "redis://"
     CELERY_BROKER_URL = REDIS_URL
     CELERY_RESULT_BACKEND = REDIS_URL
-    ANNO_ENDPOINT = "https://minniev1.microns-daf.com/annotation/"
+    LOCAL_SERVICE_URL = os.environ.get("LOCAL_SERVICE_URL")
+    ANNO_ENDPOINT = f"https://{LOCAL_SERVICE_URL}/annotation/"
     INFOSERVICE_ENDPOINT = "https://global.daf-apis.com/info"
     AUTH_URI = "https://global.daf-apis.com/auth"
     GLOBAL_SERVER = "https://global.daf-apis.com"
     SCHEMA_SERVICE_ENDPOINT = "https://global.daf-apis.com/schema/"
     SEGMENTATION_ENDPOINT = "https://global.daf-apis.com/"
+    MASTER_NAME = os.environ.get("MASTER_NAME", None)
     MATERIALIZATION_ROW_CHUNK_SIZE = 500
     QUERY_LIMIT_SIZE = 200000
     CELERY_WORKER_IP = os.environ.get("CELERY_WORKER_IP", "127.0.0.1")
@@ -32,6 +34,7 @@ class BaseConfig:
     DAYS_TO_EXPIRE = 7
     LTS_DAYS_TO_EXPIRE = 30
     INFO_API_VERSION = 2
+    AUTH_DATABASE_NAME = "minnie65"
     if os.environ.get("DAF_CREDENTIALS", None) is not None:
         with open(os.environ.get("DAF_CREDENTIALS"), "r") as f:
             AUTH_TOKEN = json.load(f)["token"]
@@ -43,11 +46,12 @@ class DevConfig(BaseConfig):
     ENV = "development"
     DEBUG = True
     SQLALCHEMY_DATABASE_URI = "postgres://postgres:materialize@db:5432/materialize"
-    REDIS_HOST = os.environ.get("REDIS_SERVICE_HOST")
-    REDIS_PORT = os.environ.get("REDIS_SERVICE_PORT")
+    REDIS_HOST = os.environ.get("REDIS_HOST")
+    REDIS_PORT = os.environ.get("REDIS_PORT")
     REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/0"
-    CELERY_BROKER_URL = REDIS_URL
-    CELERY_RESULT_BACKEND = REDIS_URL
+    CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL")
+    CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND")
+    USE_SENTINEL = os.environ.get("USE_SENTINEL", False)
 
 class TestConfig(BaseConfig):
     ENV = "testing"

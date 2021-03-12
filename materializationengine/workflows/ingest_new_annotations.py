@@ -11,7 +11,7 @@ from dynamicannotationdb.models import SegmentationMetadata
 from materializationengine.celery_init import celery
 from materializationengine.chunkedgraph_gateway import chunkedgraph_cache
 from materializationengine.database import sqlalchemy_cache
-from materializationengine.shared_tasks import (chunk_supervoxel_ids_task, fin,
+from materializationengine.shared_tasks import (chunk_annotation_ids, fin,
                                                 query_id_range,
                                                 update_metadata,
                                                 get_materialization_info)
@@ -53,13 +53,13 @@ def process_new_annotations_workflow(datastack_info: dict):
 
     for mat_metadata in mat_info:
         if mat_metadata['row_count'] < 1_000_000:
-            supervoxel_chunks = chunk_supervoxel_ids_task(mat_metadata)
+            annotation_chunks = chunk_annotation_ids(mat_metadata)
             process_chunks_workflow = chain(
                 create_missing_segmentation_table.s(mat_metadata),
                 chord([
                     chain(
-                        ingest_new_annotations.s(chunk),
-                        ) for chunk in supervoxel_chunks],
+                        ingest_new_annotations.s(annotation_chunk),
+                        ) for annotation_chunk in annotation_chunks],
                         fin.si()), # return here is required for chords
                         update_metadata.s(mat_metadata))  # final task which will process a return status/timing etc...
 

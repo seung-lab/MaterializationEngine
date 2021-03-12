@@ -16,7 +16,7 @@ celery_logger = get_task_logger(__name__)
 
 
 
-def chunk_supervoxel_ids_task(mat_metadata: dict) -> List[List]:
+def chunk_annotation_ids(mat_metadata: dict) -> List[List]:
     """Creates list of chunks with start:end index for chunking queries for materialziation.
 
     Parameters
@@ -119,6 +119,7 @@ def get_materialization_info(datastack_info: dict,
                         'last_updated_time_stamp': last_updated_time_stamp,
                         'chunk_size': 100000,
                         'table_count': len(annotation_tables),
+                        'find_all_expired_roots': datastack_info.get('find_all_expired_roots', False)
                     }
                     if analysis_version:
                         table_metadata['analysis_version'] = analysis_version
