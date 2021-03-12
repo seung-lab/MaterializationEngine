@@ -1,14 +1,16 @@
 import datetime
 from typing import List
+
 from celery import chain, chord, group
 from celery.utils.log import get_task_logger
 from materializationengine.celery_init import celery
 from materializationengine.shared_tasks import (chunk_annotation_ids, fin,
-                                                update_metadata,
-                                                get_materialization_info)
+                                                get_materialization_info,
+                                                update_metadata)
 from materializationengine.workflows.create_frozen_database import (
-    create_analysis_database, create_materialized_metadata, create_new_version,
-    merge_tables, update_table_metadata, drop_tables, drop_indices, add_indices, check_tables)
+    add_indices, check_tables, create_analysis_database,
+    create_materialized_metadata, create_new_version,
+    drop_tables, merge_tables, update_table_metadata)
 from materializationengine.workflows.ingest_new_annotations import (
     create_missing_segmentation_table, get_materialization_info,
     ingest_new_annotations)
@@ -104,12 +106,17 @@ def update_root_ids_workflow(mat_metadata: dict, chunked_roots: List[int]):
     return update_expired_roots_workflow
 
 
-def create_materializied_database(datastack_info: dict, new_version_number: int, materialization_time_stamp: datetime.datetime.utcnow, mat_info: dict):
-    setup_versioned_database = chain(create_analysis_database.si(datastack_info, new_version_number),
-                                     create_materialized_metadata.si(
-                                         datastack_info, new_version_number, materialization_time_stamp),
-                                     update_table_metadata.si(mat_info),
-                                     drop_tables.si(datastack_info, new_version_number))
+def create_materializied_database(datastack_info: dict,
+                                  new_version_number: int,
+                                  materialization_time_stamp: datetime.datetime.utcnow,
+                                  mat_info: dict):
+    setup_versioned_database = chain(
+        create_analysis_database.si(datastack_info, new_version_number),
+        create_materialized_metadata.si(datastack_info,
+                                        new_version_number,
+                                        materialization_time_stamp),
+        update_table_metadata.si(mat_info),
+        drop_tables.si(datastack_info, new_version_number))
     return setup_versioned_database
 
 
