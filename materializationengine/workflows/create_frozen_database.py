@@ -3,6 +3,7 @@ from collections import OrderedDict
 from typing import List
 import pandas as pd
 from celery import chain, chord
+from celery.result import allow_join_result
 from celery.utils.log import get_task_logger
 from dynamicannotationdb.models import AnnoMetadata
 from emannotationschemas import get_schema
@@ -57,9 +58,8 @@ def create_versioned_materialization_workflow(datastack_info: dict, days_to_expi
     frozen_workflow = []
     for mat_metadata in mat_info:
         process_chunks_workflow = chain(
-            # drop_indices.si(mat_metadata),
             merge_tables.si(mat_metadata),
-            add_indices.si(mat_metadata))
+            add_indices(mat_metadata))
         frozen_workflow.append(process_chunks_workflow)
             
     workflow = chain(setup_versioned_database, chord(frozen_workflow, fin.s()), check_tables.si(mat_info, new_version_number))
@@ -374,7 +374,7 @@ def drop_tables(self, datastack_info: dict, analysis_version: int):
     try:    
         connection = mat_engine.connect()
         for table in tables_to_drop:
-            drop_statement = f"DROP TABLE {table} CASCADE"
+            drop_statement = f'DROP TABLE "{table}" CASCADE'
             connection.execute(drop_statement)
     except Exception as e:
         celery_logger.error(e)
@@ -714,9 +714,34 @@ def add_indices(self, mat_metadata: dict):
 
         model = make_flat_model(annotation_table_name, schema)
 
-        indices = index_cache.add_indices(annotation_table_name, model, analysis_engine)
-
+        commands = index_cache.add_indices_sql_commands(annotation_table_name, model, analysis_engine)
         analysis_session.close()
         analysis_engine.dispose()
-        return f"Indices Added: {indices}"  
+        
+        add_index_tasks = chain([add_index.si(mat_metadata, command) for command in commands]).delay().get(disable_sync_subtasks=False)
+        return add_index_tasks
     return "Indices already exist"
+
+
+@celery.task(name="process:add_index",
+             bind=True,
+             ask_late=True,
+             autoretry_for=(Exception,),
+             max_retries=3)
+def add_index(self, mat_metadata, command: str):
+    analysis_version = mat_metadata['analysis_version']
+    datastack = mat_metadata['datastack']
+    SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")        
+    analysis_sql_uri = create_analysis_sql_uri(
+        SQL_URI_CONFIG, datastack, analysis_version)
+   
+    engine = create_engine(analysis_sql_uri, pool_pre_ping=True)
+    try:
+        with engine.begin() as conn:
+            celery_logger.info(f"Adding index: {command}")
+            result = conn.execute(command)
+    except Exception as e:
+        celery_logger.error(f"Index creation failed: {e}")
+        raise self.retry(exc=e, countdown=3)        
+    
+    return f"Index {command} added to table"
