@@ -52,20 +52,36 @@ def process_new_annotations_workflow(datastack_info: dict):
                                         skip_table=True)
 
     for mat_metadata in mat_info:
-        if mat_metadata['row_count'] < 1_000_000:
+        if mat_metadata['row_count'] < 1_000_000 and mat_metadata['create_segmentation_table']:
             annotation_chunks = chunk_annotation_ids(mat_metadata)
             process_chunks_workflow = chain(
-                create_missing_segmentation_table.s(mat_metadata),
-                chord([
-                    chain(
-                        ingest_new_annotations.s(annotation_chunk),
-                        ) for annotation_chunk in annotation_chunks],
-                        fin.si()), # return here is required for chords
-                        update_metadata.s(mat_metadata))  # final task which will process a return status/timing etc...
+                ingest_annotations_workflow(mat_metadata, annotation_chunks), # return here is required for chords
+                update_metadata.s(mat_metadata))  # final task which will process a return status/timing etc...
 
             process_chunks_workflow.apply_async()
 
-          
+def ingest_annotations_workflow(mat_metadata: dict, annotation_chunks: List):
+    """Create missing segmentation table if it doesnt exist. Lookup
+    supervoxel ids from annotation spatial positions.
+
+    Args:
+        mat_metadata (dict): materialization metadata for each table
+        annotation_chunks (List): list of annotation ids to use for 
+        supervoxel lookups.
+
+    Returns:
+        chain: celery chain primative workflow
+    """
+    ingest_annotations_workflow = chain(
+    create_missing_segmentation_table.si(mat_metadata),
+    chord([
+        chain(
+            ingest_new_annotations.si(mat_metadata, annotation_chunk),
+        ) for annotation_chunk in annotation_chunks],
+        fin.si()))  # return here is required for chords
+    return ingest_annotations_workflow
+
+
 @celery.task(name="process:ingest_new_annotations",
              acks_late=True,
              bind=True,
