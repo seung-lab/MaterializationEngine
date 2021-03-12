@@ -424,6 +424,9 @@ class FrozenQuery(Resource):
                       offset=data.get('offset', None),
                       limit = limit,
                       suffixes=data.get('suffixes', None))
+        headers=None
+        if len(df) == limit:
+            headers={'Warning':f'201 - "Limited query to {max_limit} rows'}
         context = pa.default_serialization_context()
         serialized = context.serialize(df)
         return Response(serialized.to_buffer().to_pybytes(),
