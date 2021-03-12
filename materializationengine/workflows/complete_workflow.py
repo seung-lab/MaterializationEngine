@@ -1,7 +1,6 @@
 import datetime
-from typing import List
 
-from celery import chain, chord, group
+from celery import chain, chord
 from celery.utils.log import get_task_logger
 from materializationengine.celery_init import celery
 from materializationengine.shared_tasks import (chunk_annotation_ids, fin,
@@ -13,6 +12,7 @@ from materializationengine.workflows.ingest_new_annotations import \
     ingest_new_annotations_workflow
 from materializationengine.workflows.update_root_ids import (
     get_expired_root_ids, update_root_ids_workflow)
+
 
 celery_logger = get_task_logger(__name__)
 
