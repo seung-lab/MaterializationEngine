@@ -33,9 +33,6 @@ def run_complete_worflow(datastack_info: dict, days_to_expire: int = 5):
     Args:
         datastack_info (dict): [description]
         days_to_expire (int, optional): [description]. Defaults to 5.
-
-    Returns:
-        [type]: [description]
     """
     materialization_time_stamp = datetime.datetime.utcnow()
 
@@ -73,7 +70,8 @@ def run_complete_worflow(datastack_info: dict, days_to_expire: int = 5):
         datastack_info, new_version_number, materialization_time_stamp, mat_info)
 
     # drop indices, merge annotation and segmentation tables and re-add indices on merged table
-    format_database_workflow = format_materialization_database_workflow(mat_info)
+    format_database_workflow = format_materialization_database_workflow(
+        mat_info)
 
     final_workflow = chain(
         chord(update_live_database_workflow, fin.si()),
@@ -109,12 +107,12 @@ def ingest_new_annotations_workflow(mat_metadata: dict, annotation_chunks: List[
 def update_root_ids_workflow(mat_metadata: dict, chunked_roots: List[int]):
     """Celery workflow that updates expired root ids in a
     segmentation table. 
-    
+
     Workflow:
         - Lookup supervoxel id associated with expired root id
         - Lookup new root id for the supervoxel
         - Update database row with new root id
-    
+
     Once all root ids in a given table are updated the associated entry in the
     metadata data will also be updated.
 
