@@ -89,10 +89,11 @@ def get_materialization_info(datastack_info: dict,
                     try:
                         segmentation_metadata = db.get_segmentation_table_metadata(annotation_table,
                                                                                    pcg_table_name)
+                        create_segmentation_table = False
                     except AttributeError as e:
-                        celery_logger.error(f"TABLE DOES NOT EXIST: {e}")
+                        celery_logger.warning(f"SEGMENTATION TABLE DOES NOT EXIST: {e}")
                         segmentation_metadata = {'last_updated': None}
-
+                        create_segmentation_table = True
                     last_updated_time_stamp = segmentation_metadata.get('last_updated', None)
 
                     if not last_updated_time_stamp:
@@ -105,6 +106,7 @@ def get_materialization_info(datastack_info: dict,
                         'datastack': datastack_info['datastack'],
                         'aligned_volume': str(aligned_volume_name),
                         'schema': db.get_table_schema(annotation_table),
+                        'create_segmentation_table': create_segmentation_table,
                         'max_id': int(max_id),
                         'min_id': int(min_id),
                         'row_count': row_count,
