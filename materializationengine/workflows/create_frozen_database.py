@@ -1,23 +1,22 @@
 import datetime
 from collections import OrderedDict
 from typing import List
+
 import pandas as pd
 from celery import chain, chord
-from celery.result import allow_join_result
 from celery.utils.log import get_task_logger
 from dynamicannotationdb.models import AnnoMetadata
 from emannotationschemas import get_schema
 from emannotationschemas.flatten import create_flattened_schema
 from emannotationschemas.models import create_table_dict, make_flat_model
 from materializationengine.celery_init import celery
-from materializationengine.database import (create_session, dynamic_annotation_cache,
-                                            reflect_tables, sqlalchemy_cache)
+from materializationengine.database import (create_session,
+                                            dynamic_annotation_cache,
+                                            sqlalchemy_cache)
+from materializationengine.errors import IndexMatchError
 from materializationengine.index_manager import index_cache
-from materializationengine.models import (AnalysisTable, 
-                                          AnalysisVersion,
-                                          MaterializedMetadata,
-                                          Base)
-from materializationengine.errors import IndexMatchError                                          
+from materializationengine.models import (AnalysisTable, AnalysisVersion, Base,
+                                          MaterializedMetadata)
 from materializationengine.shared_tasks import (fin, get_materialization_info,
                                                 query_id_range)
 from materializationengine.utils import (create_annotation_model,
@@ -25,13 +24,12 @@ from materializationengine.utils import (create_annotation_model,
                                          get_config_param)
 from psycopg2 import sql
 from sqlalchemy import MetaData, create_engine, func
-from sqlalchemy.engine.url import make_url
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.engine import reflection
+from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import OperationalError
-celery_logger = get_task_logger(__name__)
 
-# SQL_URI_CONFIG = get_config_param('SQLALCHEMY_DATABASE_URI')
+
+celery_logger = get_task_logger(__name__)
 
 
 @celery.task(name="process:create_versioned_materialization_workflow")
@@ -49,22 +47,67 @@ def create_versioned_materialization_workflow(datastack_info: dict, days_to_expi
     new_version_number = create_new_version(datastack_info, materialization_time_stamp, days_to_expire)
     mat_info = get_materialization_info(datastack_info, new_version_number, materialization_time_stamp)
     
-    setup_versioned_database = chain(
-        create_analysis_database.si(datastack_info, new_version_number),
-        create_materialized_metadata.si(datastack_info, new_version_number, materialization_time_stamp),
-        update_table_metadata.si(mat_info),
-        drop_tables.si(datastack_info, new_version_number)) #TODO drop tables should come after update_metadata, break out 
-
-    frozen_workflow = []
-    for mat_metadata in mat_info:
-        process_chunks_workflow = chain(
-            merge_tables.si(mat_metadata),
-            add_indices(mat_metadata))
-        frozen_workflow.append(process_chunks_workflow)
+    setup_versioned_database = create_materializied_database_workflow(datastack_info,
+                                                                      new_version_number,
+                                                                      materialization_time_stamp,
+                                                                      mat_info)
+    format_workflow = format_materialization_database_workflow(mat_info)
             
-    workflow = chain(setup_versioned_database, chord(frozen_workflow, fin.s()), check_tables.si(mat_info, new_version_number))
+    workflow = chain(setup_versioned_database, chord(format_workflow, fin.s()), check_tables.si(mat_info, new_version_number))
     status = workflow.apply_async()
     return True
+
+
+def create_materializied_database_workflow(datastack_info: dict,
+                                           new_version_number: int,
+                                           materialization_time_stamp: datetime.datetime.utcnow,
+                                           mat_info: dict):
+    """Celery workflow to create a materializied database.
+    Workflow:
+        - Copy live database as a versioned materialized database.
+        - Create materialziation metadata table and populate.
+        - Drop tables that are uneeded in the materialized database.
+
+    Args:
+        datastack_info (dict): database information
+        new_version_number (int): version number of database
+        materialization_time_stamp (datetime.datetime.utcnow): 
+            materialized timestamp
+        mat_info (dict): materialization metadata information
+
+    Returns:
+        chain: chain of celery tasks
+    """
+    setup_versioned_database = chain(
+        create_analysis_database.si(datastack_info, new_version_number),
+        create_materialized_metadata.si(datastack_info,
+                                        new_version_number,
+                                        materialization_time_stamp),
+        update_table_metadata.si(mat_info),
+        drop_tables.si(datastack_info, new_version_number))
+    return setup_versioned_database
+
+
+def format_materialization_database_workflow(mat_info: dict):
+    """Celery workflow to format the materialized database.
+    Workflow:
+        - Merge annotation and segmentation tables into
+        a single table.
+        - Add indexes into merged tables.
+
+    Args:
+        mat_info (dict): materialization metadata information
+
+    Returns:
+        chain: chain of celery tasks
+    """
+    create_frozen_database_tasks = []
+    for mat_metadata in mat_info:
+        create_frozen_database_workflow = chain(
+            merge_tables.si(mat_metadata),
+            add_indices.si(mat_metadata))
+        create_frozen_database_tasks.append(create_frozen_database_workflow)
+    return create_frozen_database_tasks
 
 
 def create_new_version(datastack_info: dict, 
@@ -208,8 +251,8 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
 
     connection.close()
     engine.dispose()
-
     return True
+
 
 @celery.task(name="process:create_materialized_metadata",
              bind=True,
@@ -280,6 +323,7 @@ def create_materialized_metadata(self, datastack_info: dict,
         analysis_engine.dispose()
     return True
 
+
 @celery.task(name="process:update_table_metadata",
              bind=True,
              acks_late=True,)
@@ -318,6 +362,7 @@ def update_table_metadata(self, mat_info: List[dict]):
     finally:
         session.close()
     return tables
+
 
 @celery.task(name="process:drop_tables",
              bind=True,
@@ -445,6 +490,7 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
         session.close()
         engine.dispose()
     return True
+
 
 @celery.task(name="process:merge_tables",
              bind=True,
@@ -636,6 +682,7 @@ def check_tables(self, mat_info: list, analysis_version: int):
         engine.dispose()
         mat_engine.dispose()
 
+
 def create_analysis_sql_uri(sql_uri: str, datastack: str, mat_version: int):
     sql_base_uri = sql_uri.rpartition("/")[0]
     analysis_sql_uri = make_url(
@@ -682,6 +729,7 @@ def get_analysis_table(aligned_volume: str, datastack: str, table_name: str, mat
 
     analysis_engine.dispose()
     return analysis_table
+
 
 @celery.task(name="process:drop_indices",
              bind=True,
