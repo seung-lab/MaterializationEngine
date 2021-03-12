@@ -69,11 +69,11 @@ def run_complete_worflow(datastack_info: dict, days_to_expire: int = 5):
         else:
             update_live_database_workflow.append(update_expired_roots_workflow)
     # copy live database as a materialized version and drop uneeded tables
-    setup_versioned_database_workflow = create_materializied_database(
+    setup_versioned_database_workflow = create_materializied_database_workflow(
         datastack_info, new_version_number, materialization_time_stamp, mat_info)
 
     # drop indices, merge annotation and segmentation tables and re-add indices on merged table
-    format_database_workflow = format_materialization_data(mat_info)
+    format_database_workflow = format_materialization_database_workflow(mat_info)
 
     final_workflow = chain(
         chord(update_live_database_workflow, fin.si()),
@@ -85,6 +85,17 @@ def run_complete_worflow(datastack_info: dict, days_to_expire: int = 5):
 
 
 def ingest_new_annotations_workflow(mat_metadata: dict, annotation_chunks: List[int]):
+    """Celery workflow to ingest new annotations. In addtion, it will 
+    create missing segmentation data table if it does not exist. 
+    Returns celery chain primative.
+
+    Args:
+        mat_metadata (dict): datastack info for the aligned_volume derived from the infoservice
+        annotation_chunks (List[int]): list of annotation primary key ids 
+
+    Returns:
+        chain: chain of celery tasks 
+    """
     new_annotation_workflow = chain(
         create_missing_segmentation_table.si(mat_metadata),
         chord([
@@ -96,6 +107,24 @@ def ingest_new_annotations_workflow(mat_metadata: dict, annotation_chunks: List[
 
 
 def update_root_ids_workflow(mat_metadata: dict, chunked_roots: List[int]):
+    """Celery workflow that updates expired root ids in a
+    segmentation table. 
+    
+    Workflow:
+        - Lookup supervoxel id associated with expired root id
+        - Lookup new root id for the supervoxel
+        - Update database row with new root id
+    
+    Once all root ids in a given table are updated the associated entry in the
+    metadata data will also be updated.
+
+    Args:
+        mat_metadata (dict): datastack info for the aligned_volume derived from the infoservice
+        chunked_roots (List[int]): chunks of expired root ids to lookup
+
+    Returns:
+        chain: chain of celery tasks 
+    """
     update_expired_roots_workflow = chain(
         chord([
             group(update_root_ids(root_ids, mat_metadata))
@@ -106,10 +135,26 @@ def update_root_ids_workflow(mat_metadata: dict, chunked_roots: List[int]):
     return update_expired_roots_workflow
 
 
-def create_materializied_database(datastack_info: dict,
-                                  new_version_number: int,
-                                  materialization_time_stamp: datetime.datetime.utcnow,
-                                  mat_info: dict):
+def create_materializied_database_workflow(datastack_info: dict,
+                                           new_version_number: int,
+                                           materialization_time_stamp: datetime.datetime.utcnow,
+                                           mat_info: dict):
+    """Celery workflow to create a materializied database.
+    Workflow:
+        - Copy live database as a versioned materialized database.
+        - Create materialziation metadata table and populate.
+        - Drop tables that are uneeded in the materialized database.
+
+    Args:
+        datastack_info (dict): database information
+        new_version_number (int): version number of database
+        materialization_time_stamp (datetime.datetime.utcnow): 
+            materialized timestamp
+        mat_info (dict): materialization metadata information
+
+    Returns:
+        chain: chain of celery tasks
+    """
     setup_versioned_database = chain(
         create_analysis_database.si(datastack_info, new_version_number),
         create_materialized_metadata.si(datastack_info,
@@ -120,7 +165,19 @@ def create_materializied_database(datastack_info: dict,
     return setup_versioned_database
 
 
-def format_materialization_data(mat_info: dict):
+def format_materialization_database_workflow(mat_info: dict):
+    """Celery workflow to format the materialized database.
+    Workflow:
+        - Merge annotation and segmentation tables into
+        a single table.
+        - Add indexes into merged tables.
+
+    Args:
+        mat_info (dict): materialization metadata information
+
+    Returns:
+        chain: chain of celery tasks
+    """
     create_frozen_database_tasks = []
     for mat_metadata in mat_info:
         create_frozen_database_workflow = chain(
