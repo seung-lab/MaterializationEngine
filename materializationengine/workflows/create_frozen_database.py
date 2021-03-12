@@ -339,10 +339,10 @@ def drop_tables(self, datastack_info: dict, analysis_version: int):
         analysis_version (int): materialized verison number
 
     Raises:
-        e: [description]
+        e: error if dropping table(s) fails.
 
     Returns:
-        [type]: [description]
+        str: tables that have been dropped
     """
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info['datastack']
@@ -394,7 +394,12 @@ def drop_tables(self, datastack_info: dict, analysis_version: int):
              autoretry_for=(Exception,),
              max_retries=3)
 def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
+    """Insert annotation data into database
 
+    Args:
+        chunk (List[int]): chunk of annotation ids
+        mat_metadata (dict): materialized metadata
+    """
     aligned_volume = mat_metadata['aligned_volume']
     analysis_version = mat_metadata['analysis_version']
     annotation_table_name = mat_metadata['annotation_table_name']
@@ -461,10 +466,10 @@ def merge_tables(self, mat_metadata: dict):
         analysis_version (int): materialized verison number
 
     Raises:
-        e: [description]
+        e: error during table merging operation
 
     Returns:
-        [type]: [description]
+        str: number of rows copied
     """
     analysis_version = mat_metadata['analysis_version']
     annotation_table_name = mat_metadata['annotation_table_name']
@@ -644,7 +649,17 @@ def create_analysis_sql_uri(sql_uri: str, datastack: str, mat_version: int):
 
 
 def get_analysis_table(aligned_volume: str, datastack: str, table_name: str, mat_version: int = 1):
+    """Helper method that returns a table model.
 
+    Args:
+        aligned_volume (str): aligned_volume name
+        datastack (str): datastack name
+        table_name (str): table to reflect a model
+        mat_version (int, optional): target database version
+
+    Returns:
+        SQLAlchemy model: returns a sqlalchemy model of a target table
+    """
     anno_db = dynamic_annotation_cache.get_db(aligned_volume)
     schema_name = anno_db.get_table_schema(table_name)
     SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")
@@ -677,6 +692,14 @@ def get_analysis_table(aligned_volume: str, datastack: str, table_name: str, mat
              bind=True,
              acks_late=True)
 def drop_indices(self, mat_metadata: dict):
+    """Drop all indices of a given table.
+
+    Args:
+        mat_metadata (dict): datastack info for the aligned_volume derived from the infoservice
+
+    Returns:
+        str: string if indices were dropped or not.
+    """
     add_indices = mat_metadata.get('add_indices', False)
     if add_indices:
         analysis_version = mat_metadata.get('analysis_version', None)
@@ -698,6 +721,16 @@ def drop_indices(self, mat_metadata: dict):
              bind=True,
              ask_late=True)
 def add_indices(self, mat_metadata: dict):
+    """Find missing indices for a given table contained
+    in the mat_metadata dict. Spawns a chain of celery
+    tasks that run synchronously that add an index per task. 
+
+    Args:
+        mat_metadata (dict): datastack info for the aligned_volume derived from the infoservice
+
+    Returns:
+        chain: chain of celery tasks
+    """
     add_indices = mat_metadata.get('add_indices', False)
     if add_indices:
         analysis_version = mat_metadata.get('analysis_version', None)
@@ -728,7 +761,19 @@ def add_indices(self, mat_metadata: dict):
              ask_late=True,
              autoretry_for=(Exception,),
              max_retries=3)
-def add_index(self, mat_metadata, command: str):
+def add_index(self, mat_metadata: dict, command: str):
+    """Add an index or a contrainst to a table.
+
+    Args:
+        mat_metadata ([type]): datastack info for the aligned_volume derived from the infoservice
+        command (str): sql command to create an index or constraint
+
+    Raises:
+        self.retry: retrys task when an error creating an index occurs
+
+    Returns:
+        str: String of SQL command
+    """
     analysis_version = mat_metadata['analysis_version']
     datastack = mat_metadata['datastack']
     SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")        
