@@ -164,7 +164,7 @@ class IndexCache:
             raise(e)
         return True
 
-    def add_indices(self, table_name: str, model, engine):
+    def add_indices_sql_commands(self, table_name: str, model, engine):
         """Add missing indices by comparing reflected table and
         model indices. Will add missing indices from model to table.
 
@@ -179,7 +179,7 @@ class IndexCache:
         model_indices = self.get_index_from_model(model)
 
         missing_indices = set(model_indices) - set(current_indices)
-        connection = engine.connect()
+        commands = []
         for column_name in missing_indices:
             index_type = model_indices[column_name]['type']
             if index_type == 'primary_key':
@@ -197,12 +197,8 @@ class IndexCache:
                               FOREIGN KEY ({foreign_key_column}) 
                               REFERENCES {foreign_key_table} ({foreign_key_column});"""
                 missing_indices.add(foreign_key_name)
-            try:
-                connection.execute(command)
-            except Exception as e:
-                raise(e)
-
-        return f"Indices added: {missing_indices}"
+            commands.append(command)
+        return commands
 
 
 index_cache = IndexCache()
