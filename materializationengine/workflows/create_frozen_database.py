@@ -135,16 +135,16 @@ def create_new_version(datastack_info: dict,
              max_retries=3)
 def create_analysis_database(self, datastack_info: dict, analysis_version: int) -> str:
     """Copies live database to new versioned database for materializied annotations.
+    
+    Args:
+        datastack_info (dict): datastack metadata
+        analysis_version (int): analysis database version number
 
-    Parameters
-    ----------
-    sql_uri : str
-        base path to the sql server
-    aligned_volume : str
-        name of aligned volume which the database name will inherent
-    Returns
-    -------
-    return True
+    Raises:
+        e: error if dropping table(s) fails.
+
+    Returns:
+        bool: True if analysis database creation is succesful
     """
 
     aligned_volume = datastack_info['aligned_volume']['name']
@@ -221,22 +221,15 @@ def create_materialized_metadata(self, datastack_info: dict,
     from annotation tables copied to the materialzied database. Inserts row count 
     and table info into the metadata table.
 
-    Parameters
-    ----------
-    aligned_volume : str
-        aligned volume name
-    mat_sql_uri : str
-        target database sql url to use
+    Args:
+        aligned_volume (str):  aligned volume name
+        mat_sql_uri (str): target database sql url to use
+    
+    Raises:
+       database_error:  sqlalchemy connection error
 
-    Returns
-    -------
-    True
-        If Metadata table was created and table info was inserted.
-
-    Raises
-    ------
-    database_error
-        sqlalchemy connection error
+    Returns:
+        bool: True if Metadata table were created and table info was inserted.
     """
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info['datastack']
@@ -399,6 +392,8 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
     Args:
         chunk (List[int]): chunk of annotation ids
         mat_metadata (dict): materialized metadata
+    Returns:
+        bool: True if data was inserted
     """
     aligned_volume = mat_metadata['aligned_volume']
     analysis_version = mat_metadata['analysis_version']
@@ -449,7 +444,7 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
         analysis_engine.dispose()
         session.close()
         engine.dispose()
-
+    return True
 
 @celery.task(name="process:merge_tables",
              bind=True,
@@ -583,7 +578,7 @@ def check_tables(self, mat_info: list, analysis_version: int):
         analysis_version (int): the materialized version number
 
     Returns:
-        [str]: [description]
+        str: returns statement if all tables are valid
     """
     aligned_volume = mat_info[0]['aligned_volume'] # get aligned_volume name from datastack
     table_count = mat_info[0]['table_count']
