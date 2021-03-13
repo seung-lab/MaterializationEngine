@@ -808,7 +808,7 @@ def add_index(self, mat_metadata: dict, command: str):
     """Add an index or a contrainst to a table.
 
     Args:
-        mat_metadata ([type]): datastack info for the aligned_volume derived from the infoservice
+        mat_metadata (dict): datastack info for the aligned_volume derived from the infoservice
         command (str): sql command to create an index or constraint
 
     Raises:
