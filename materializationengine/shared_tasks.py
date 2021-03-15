@@ -174,6 +174,16 @@ def chunk_ids(mat_metadata, model, chunk_size: int):
              autoretry_for=(Exception,),
              max_retries=3)
 def update_metadata(self, mat_metadata: dict):
+    """Update 'last_updated' column in the segmentation 
+    metadata table for a given segmentation table.
+    
+
+    Args:
+        mat_metadata (dict): materialziation metadata
+
+    Returns:
+        str: description of table that was updated
+    """
     aligned_volume = mat_metadata['aligned_volume']
     segmentation_table_name = mat_metadata['segmentation_table_name']
 
