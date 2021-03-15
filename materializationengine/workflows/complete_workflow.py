@@ -43,10 +43,11 @@ def run_complete_worflow(datastack_info: dict, days_to_expire: int = 5):
     update_live_database_workflow = []
 
     # lookup missing segmentation data for new annotations and update expired root_ids
+    # skip tables that are larger than 1,000,000 rows due to performance.
     for mat_metadata in mat_info:
         annotation_chunks = chunk_annotation_ids(mat_metadata)
         chunked_roots = get_expired_root_ids(mat_metadata)
-        if mat_metadata['row_count'] < 1_000_000:
+        if mat_metadata['row_count'] < 1_000_000: 
             new_annotations = True
             new_annotation_workflow = ingest_new_annotations_workflow(
                 mat_metadata, annotation_chunks)
@@ -57,7 +58,7 @@ def run_complete_worflow(datastack_info: dict, days_to_expire: int = 5):
         update_expired_roots_workflow = update_root_ids_workflow(
             mat_metadata, chunked_roots)
 
-        # if there are missing
+        # if there are missing annotations
         if new_annotations:
             ingest_and_freeze_workflow = chain(
                 new_annotation_workflow, update_expired_roots_workflow)
