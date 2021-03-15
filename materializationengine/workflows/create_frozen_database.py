@@ -63,6 +63,7 @@ def create_materializied_database_workflow(datastack_info: dict,
                                            materialization_time_stamp: datetime.datetime.utcnow,
                                            mat_info: dict):
     """Celery workflow to create a materializied database.
+
     Workflow:
         - Copy live database as a versioned materialized database.
         - Create materialziation metadata table and populate.
@@ -90,6 +91,7 @@ def create_materializied_database_workflow(datastack_info: dict,
 
 def format_materialization_database_workflow(mat_info: dict):
     """Celery workflow to format the materialized database.
+
     Workflow:
         - Merge annotation and segmentation tables into
         a single table.
@@ -112,7 +114,7 @@ def format_materialization_database_workflow(mat_info: dict):
 
 def create_new_version(datastack_info: dict, 
                        materialization_time_stamp: datetime.datetime.utcnow,
-                       days_to_expire: int = 5):
+                       days_to_expire: int = None):
     """Create new versioned database row in the anaylsis_version table.
     Sets the expiration date for the database.
 
@@ -126,7 +128,6 @@ def create_new_version(datastack_info: dict,
     """
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info.get('datastack')
-    database_expires = datastack_info['database_expires']
     
     table_objects = [
         AnalysisVersion.__tablename__,
@@ -149,7 +150,7 @@ def create_new_version(datastack_info: dict,
         new_version_number = 1
     else:
         new_version_number = top_version + 1
-    if database_expires:
+    if days_to_expire > 0:
         expiration_date = materialization_time_stamp + datetime.timedelta(days=days_to_expire)
     else:
         expiration_date = None
@@ -794,8 +795,9 @@ def add_indices(self, mat_metadata: dict):
         analysis_session.close()
         analysis_engine.dispose()
         
-        add_index_tasks = chain([add_index.si(mat_metadata, command) for command in commands]).delay().get(disable_sync_subtasks=False)
-        return add_index_tasks
+        add_index_tasks = chain([add_index.si(mat_metadata, command) for command in commands])
+        
+        return self.replace(add_index_tasks)
     return "Indices already exist"
 
 
