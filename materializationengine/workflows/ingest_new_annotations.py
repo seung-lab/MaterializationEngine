@@ -66,6 +66,13 @@ def ingest_new_annotations_workflow(mat_metadata: dict, annotation_chunks: List[
     create missing segmentation data table if it does not exist. 
     Returns celery chain primative.
 
+    Workflow:
+        - Create linked segmentation table if not exists
+        - Find annotation data with missing segmentation data:
+            - Lookup supervoxel id(s)
+            - Get root ids from supervoxels
+            - insert into segmentation table
+
     Args:
         mat_metadata (dict): datastack info for the aligned_volume derived from the infoservice
         annotation_chunks (List[int]): list of annotation primary key ids 
@@ -88,7 +95,23 @@ def ingest_new_annotations_workflow(mat_metadata: dict, annotation_chunks: List[
              bind=True,
              autoretry_for=(Exception,),
              max_retries=6)
-def ingest_new_annotations(self, mat_metadata, chunk):
+def ingest_new_annotations(self, mat_metadata: dict, chunk: List[int]):
+    """Find annotations with missing entries in the segmenation
+    table. Lookup supervoxel ids at the spatial point then
+    find the current root id at the materialized timestamp.
+    Finally insert the supervoxel and root ids into the 
+    segmentation table.
+
+    Args:
+        mat_metadata (dict): metatdata associated with the materiaization
+        chunk (List[int]): list of annotation ids
+
+    Raises:
+        self.retry: re-queue the tasks if failed. Retrys upto 6 times.
+
+    Returns:
+        str: Name of table and runtime of task.
+    """
     try:
         start_time = time.time()
         missing_data = get_annotations_with_missing_supervoxel_ids(mat_metadata, chunk)
@@ -363,7 +386,15 @@ def get_new_root_ids(materialization_data: dict, mat_metadata: dict) -> dict:
 
 
 def insert_segmentation_data(materialization_data: dict, mat_metadata: dict) -> dict:
-    
+    """Insert supervoxel and root id data into segmenation table.
+
+    Args:
+        materialization_data (dict): supervoxel and/or root id data
+        mat_metadata (dict): materialization metadata
+
+    Returns:
+        dict: returns description of number of rows inserted
+    """
     if not materialization_data:
         return {'status': 'empty'}
     
