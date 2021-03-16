@@ -135,7 +135,7 @@ class ProcessNewAnnotationsResource(Resource):
 @mat_bp.route("/materialize/run/complete_workflow/datastack/<string:datastack_name>")
 class CompleteWorkflowResource(Resource):
     @reset_auth
-    @auth_required
+    @auth_requires_admin
     @mat_bp.expect(materialize_parser)
     @mat_bp.doc("ingest segmentations > update roots and freeze materialization", security="apikey")
     def post(self, datastack_name: str):
@@ -180,7 +180,7 @@ class CreateFrozenMaterializationResource(Resource):
 @mat_bp.route("/materialize/run/update_roots/datastack/<string:datastack_name>")
 class UpdateExpiredRootIdsResource(Resource):
     @reset_auth
-    @auth_required
+    @auth_requires_admin
     @mat_bp.expect(get_roots_parser)
     @mat_bp.doc("update expired root ids", security="apikey")
     def post(self, datastack_name: str):
@@ -205,7 +205,7 @@ class UpdateExpiredRootIdsResource(Resource):
 @mat_bp.route("/bulk_upload/upload/<string:datastack_name>/<string:table_name>/<string:segmentation_source>/<string:description>")
 class BulkUploadResource(Resource):
     @reset_auth
-    @auth_required
+    @auth_requires_admin
     @mat_bp.doc("bulk upload", security="apikey")
     def post(self, datastack_name: str, table_name: str, segmentation_source: str, description: str):
         """Run bulk upload from npy files
@@ -244,7 +244,7 @@ class BulkUploadResource(Resource):
 @mat_bp.route("/bulk_upload/missing_chunks/<string:datastack_name>/<string:table_name>/<string:segmentation_source>/<string:description>")
 class InsertMissingChunks(Resource):
     @reset_auth
-    @auth_required
+    @auth_requires_admin
     @mat_bp.doc("insert missing chunks", security="apikey")
     def post(self, datastack_name: str, table_name: str, segmentation_source: str, description: str):
         """Insert missing chunks of data into database
