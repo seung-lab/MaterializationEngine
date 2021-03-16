@@ -826,10 +826,19 @@ def add_index(self, mat_metadata: dict, command: str):
         SQL_URI_CONFIG, datastack, analysis_version)
    
     engine = create_engine(analysis_sql_uri, pool_pre_ping=True)
+
+    # increase maintenance memory to improve index creation speeds,
+    # reset to default after index is created
+    ADD_INDEX_SQL = f"""
+        SET maintenance_work_mem to '1GB';
+        {command}
+        SET maintenance_work_mem to '64MB';
+    """
+
     try:
         with engine.begin() as conn:
             celery_logger.info(f"Adding index: {command}")
-            result = conn.execute(command)
+            result = conn.execute(ADD_INDEX_SQL)
     except Exception as e:
         celery_logger.error(f"Index creation failed: {e}")
         raise self.retry(exc=e, countdown=3)        
