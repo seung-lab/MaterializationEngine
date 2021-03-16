@@ -413,7 +413,7 @@ def drop_tables(self, datastack_info: dict, analysis_version: int):
     try:    
         connection = mat_engine.connect()
         for table in tables_to_drop:
-            drop_statement = f'DROP TABLE "{table}" CASCADE'
+            drop_statement = f'DROP TABLE {table} CASCADE'
             connection.execute(drop_statement)
     except Exception as e:
         celery_logger.error(e)
