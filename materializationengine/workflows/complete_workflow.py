@@ -1,18 +1,18 @@
 import datetime
-from celery import chain, chord, group
+
+from celery import chain, chord
 from celery.utils.log import get_task_logger
 from materializationengine.celery_init import celery
 from materializationengine.shared_tasks import (chunk_annotation_ids, fin,
-                                                update_metadata,
                                                 get_materialization_info)
 from materializationengine.workflows.create_frozen_database import (
-    create_analysis_database, create_materialized_metadata, create_new_version,
-    merge_tables, update_table_metadata, drop_tables, drop_indices, add_indices, check_tables)
-from materializationengine.workflows.ingest_new_annotations import (
-    create_missing_segmentation_table, get_materialization_info,
-    ingest_new_annotations)
+    check_tables, create_materializied_database_workflow, create_new_version,
+    format_materialization_database_workflow)
+from materializationengine.workflows.ingest_new_annotations import \
+    ingest_new_annotations_workflow
 from materializationengine.workflows.update_root_ids import (
-    get_expired_root_ids, update_root_ids)
+    get_expired_root_ids, update_root_ids_workflow)
+
 
 celery_logger = get_task_logger(__name__)
 
@@ -30,70 +30,55 @@ def run_complete_worflow(datastack_info: dict, days_to_expire: int = 5):
     Args:
         datastack_info (dict): [description]
         days_to_expire (int, optional): [description]. Defaults to 5.
-
-    Returns:
-        [type]: [description]
     """
     materialization_time_stamp = datetime.datetime.utcnow()
 
-    new_version_number = create_new_version(datastack_info, materialization_time_stamp, days_to_expire)
+    new_version_number = create_new_version(
+        datastack_info, materialization_time_stamp, days_to_expire)
 
-    mat_info = get_materialization_info(datastack_info, new_version_number, materialization_time_stamp)
+    mat_info = get_materialization_info(
+        datastack_info, new_version_number, materialization_time_stamp)
     celery_logger.info(mat_info)
 
-    update_live_database_tasks = []
+    update_live_database_workflow = []
 
     # lookup missing segmentation data for new annotations and update expired root_ids
+    # skip tables that are larger than 1,000,000 rows due to performance.
     for mat_metadata in mat_info:
         annotation_chunks = chunk_annotation_ids(mat_metadata)
         chunked_roots = get_expired_root_ids(mat_metadata)
-        if mat_metadata['row_count'] < 1_000_000:
-            new_annotation_workflow = chain(
-                create_missing_segmentation_table.si(mat_metadata),
-                chord([
-                    chain(
-                        ingest_new_annotations.si(mat_metadata, annotation_chunk),
-                    ) for annotation_chunk in annotation_chunks],
-                    fin.si()),  # return here is required for chords
-                fin.si())
-        else:
-            new_annotation_workflow = None
-    
-        update_expired_roots_workflow = chain(
-            chord([
-                group(update_root_ids(root_ids, mat_metadata))
-                   for root_ids in chunked_roots],
-                   fin.si()),
-            update_metadata.si(mat_metadata),
-        )
+        if mat_metadata['row_count'] < 1_000_000: 
+            new_annotations = True
+            new_annotation_workflow = ingest_new_annotations_workflow(
+                mat_metadata, annotation_chunks)
 
-        if new_annotation_workflow is not None:
+        else:
+            new_annotations = False
+
+        update_expired_roots_workflow = update_root_ids_workflow(
+            mat_metadata, chunked_roots)
+
+        # if there are missing annotations
+        if new_annotations:
             ingest_and_freeze_workflow = chain(
                 new_annotation_workflow, update_expired_roots_workflow)
-            update_live_database_tasks.append(ingest_and_freeze_workflow)
+            update_live_database_workflow.append(ingest_and_freeze_workflow)
         else:
-            update_live_database_tasks.append(update_expired_roots_workflow)
+            update_live_database_workflow.append(update_expired_roots_workflow)
 
     # copy live database as a materialized version and drop uneeded tables
-    setup_versioned_database = chain(create_analysis_database.si(datastack_info, new_version_number),
-                                     create_materialized_metadata.si(datastack_info, new_version_number, materialization_time_stamp),
-                                     update_table_metadata.si(mat_info),
-                                     drop_tables.si(datastack_info, new_version_number))
-    
+    setup_versioned_database_workflow = create_materializied_database_workflow(
+        datastack_info, new_version_number, materialization_time_stamp, mat_info)
+
     # drop indices, merge annotation and segmentation tables and re-add indices on merged table
-    create_frozen_database_tasks = []    
-    for mat_metadata in mat_info:       
-        create_frozen_database_workflow = chain(
-            # drop_indices.si(mat_metadata),
-            merge_tables.si(mat_metadata),
-            add_indices.si(mat_metadata))
-        create_frozen_database_tasks.append(create_frozen_database_workflow)
+    format_database_workflow = format_materialization_database_workflow(
+        mat_info)
 
-
+    # combine all workflows into final workflow and run
     final_workflow = chain(
-        chord(update_live_database_tasks, fin.si()),
-        setup_versioned_database,
-        chord(create_frozen_database_tasks, fin.si()),
-        check_tables.si(mat_info, new_version_number)        
-        )
+        chord(update_live_database_workflow, fin.si()),
+        setup_versioned_database_workflow,
+        chord(format_database_workflow, fin.si()),
+        check_tables.si(mat_info, new_version_number)
+    )
     final_workflow.apply_async()

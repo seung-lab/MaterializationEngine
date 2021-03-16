@@ -1,6 +1,7 @@
 import datetime
 from collections import OrderedDict
 from typing import List
+
 import pandas as pd
 from celery import chain, chord
 from celery.utils.log import get_task_logger
@@ -9,14 +10,13 @@ from emannotationschemas import get_schema
 from emannotationschemas.flatten import create_flattened_schema
 from emannotationschemas.models import create_table_dict, make_flat_model
 from materializationengine.celery_init import celery
-from materializationengine.database import (create_session, dynamic_annotation_cache,
-                                            reflect_tables, sqlalchemy_cache)
+from materializationengine.database import (create_session,
+                                            dynamic_annotation_cache,
+                                            sqlalchemy_cache)
+from materializationengine.errors import IndexMatchError
 from materializationengine.index_manager import index_cache
-from materializationengine.models import (AnalysisTable, 
-                                          AnalysisVersion,
-                                          MaterializedMetadata,
-                                          Base)
-from materializationengine.errors import IndexMatchError                                          
+from materializationengine.models import (AnalysisTable, AnalysisVersion, Base,
+                                          MaterializedMetadata)
 from materializationengine.shared_tasks import (fin, get_materialization_info,
                                                 query_id_range)
 from materializationengine.utils import (create_annotation_model,
@@ -24,13 +24,12 @@ from materializationengine.utils import (create_annotation_model,
                                          get_config_param)
 from psycopg2 import sql
 from sqlalchemy import MetaData, create_engine, func
-from sqlalchemy.engine.url import make_url
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.engine import reflection
+from sqlalchemy.engine.url import make_url
 from sqlalchemy.exc import OperationalError
-celery_logger = get_task_logger(__name__)
 
-# SQL_URI_CONFIG = get_config_param('SQLALCHEMY_DATABASE_URI')
+
+celery_logger = get_task_logger(__name__)
 
 
 @celery.task(name="process:create_versioned_materialization_workflow")
@@ -48,28 +47,74 @@ def create_versioned_materialization_workflow(datastack_info: dict, days_to_expi
     new_version_number = create_new_version(datastack_info, materialization_time_stamp, days_to_expire)
     mat_info = get_materialization_info(datastack_info, new_version_number, materialization_time_stamp)
     
-    setup_versioned_database = chain(
-        create_analysis_database.si(datastack_info, new_version_number),
-        create_materialized_metadata.si(datastack_info, new_version_number, materialization_time_stamp),
-        update_table_metadata.si(mat_info),
-        drop_tables.si(datastack_info, new_version_number)) #TODO drop tables should come after update_metadata, break out 
-
-    frozen_workflow = []
-    for mat_metadata in mat_info:
-        process_chunks_workflow = chain(
-            # drop_indices.si(mat_metadata),
-            merge_tables.si(mat_metadata),
-            add_indices.si(mat_metadata))
-        frozen_workflow.append(process_chunks_workflow)
+    setup_versioned_database = create_materializied_database_workflow(datastack_info,
+                                                                      new_version_number,
+                                                                      materialization_time_stamp,
+                                                                      mat_info)
+    format_workflow = format_materialization_database_workflow(mat_info)
             
-    workflow = chain(setup_versioned_database, chord(frozen_workflow, fin.s()), check_tables.si(mat_info, new_version_number))
+    workflow = chain(setup_versioned_database, chord(format_workflow, fin.s()), check_tables.si(mat_info, new_version_number))
     status = workflow.apply_async()
     return True
 
 
+def create_materializied_database_workflow(datastack_info: dict,
+                                           new_version_number: int,
+                                           materialization_time_stamp: datetime.datetime.utcnow,
+                                           mat_info: dict):
+    """Celery workflow to create a materializied database.
+
+    Workflow:
+        - Copy live database as a versioned materialized database.
+        - Create materialziation metadata table and populate.
+        - Drop tables that are uneeded in the materialized database.
+
+    Args:
+        datastack_info (dict): database information
+        new_version_number (int): version number of database
+        materialization_time_stamp (datetime.datetime.utcnow): 
+            materialized timestamp
+        mat_info (dict): materialization metadata information
+
+    Returns:
+        chain: chain of celery tasks
+    """
+    setup_versioned_database = chain(
+        create_analysis_database.si(datastack_info, new_version_number),
+        create_materialized_metadata.si(datastack_info,
+                                        new_version_number,
+                                        materialization_time_stamp),
+        update_table_metadata.si(mat_info),
+        drop_tables.si(datastack_info, new_version_number))
+    return setup_versioned_database
+
+
+def format_materialization_database_workflow(mat_info: dict):
+    """Celery workflow to format the materialized database.
+
+    Workflow:
+        - Merge annotation and segmentation tables into
+        a single table.
+        - Add indexes into merged tables.
+
+    Args:
+        mat_info (dict): materialization metadata information
+
+    Returns:
+        chain: chain of celery tasks
+    """
+    create_frozen_database_tasks = []
+    for mat_metadata in mat_info:
+        create_frozen_database_workflow = chain(
+            merge_tables.si(mat_metadata),
+            add_indices.si(mat_metadata))
+        create_frozen_database_tasks.append(create_frozen_database_workflow)
+    return create_frozen_database_tasks
+
+
 def create_new_version(datastack_info: dict, 
                        materialization_time_stamp: datetime.datetime.utcnow,
-                       days_to_expire: int = 5):
+                       days_to_expire: int = None):
     """Create new versioned database row in the anaylsis_version table.
     Sets the expiration date for the database.
 
@@ -83,7 +128,6 @@ def create_new_version(datastack_info: dict,
     """
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info.get('datastack')
-    database_expires = datastack_info['database_expires']
     
     table_objects = [
         AnalysisVersion.__tablename__,
@@ -106,7 +150,7 @@ def create_new_version(datastack_info: dict,
         new_version_number = 1
     else:
         new_version_number = top_version + 1
-    if database_expires:
+    if days_to_expire > 0:
         expiration_date = materialization_time_stamp + datetime.timedelta(days=days_to_expire)
     else:
         expiration_date = None
@@ -135,16 +179,16 @@ def create_new_version(datastack_info: dict,
              max_retries=3)
 def create_analysis_database(self, datastack_info: dict, analysis_version: int) -> str:
     """Copies live database to new versioned database for materializied annotations.
+    
+    Args:
+        datastack_info (dict): datastack metadata
+        analysis_version (int): analysis database version number
 
-    Parameters
-    ----------
-    sql_uri : str
-        base path to the sql server
-    aligned_volume : str
-        name of aligned volume which the database name will inherent
-    Returns
-    -------
-    return True
+    Raises:
+        e: error if dropping table(s) fails.
+
+    Returns:
+        bool: True if analysis database creation is succesful
     """
 
     aligned_volume = datastack_info['aligned_volume']['name']
@@ -208,8 +252,8 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
 
     connection.close()
     engine.dispose()
-
     return True
+
 
 @celery.task(name="process:create_materialized_metadata",
              bind=True,
@@ -221,22 +265,15 @@ def create_materialized_metadata(self, datastack_info: dict,
     from annotation tables copied to the materialzied database. Inserts row count 
     and table info into the metadata table.
 
-    Parameters
-    ----------
-    aligned_volume : str
-        aligned volume name
-    mat_sql_uri : str
-        target database sql url to use
+    Args:
+        aligned_volume (str):  aligned volume name
+        mat_sql_uri (str): target database sql url to use
+    
+    Raises:
+       database_error:  sqlalchemy connection error
 
-    Returns
-    -------
-    True
-        If Metadata table was created and table info was inserted.
-
-    Raises
-    ------
-    database_error
-        sqlalchemy connection error
+    Returns:
+        bool: True if Metadata table were created and table info was inserted.
     """
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info['datastack']
@@ -287,6 +324,7 @@ def create_materialized_metadata(self, datastack_info: dict,
         analysis_engine.dispose()
     return True
 
+
 @celery.task(name="process:update_table_metadata",
              bind=True,
              acks_late=True,)
@@ -326,6 +364,7 @@ def update_table_metadata(self, mat_info: List[dict]):
         session.close()
     return tables
 
+
 @celery.task(name="process:drop_tables",
              bind=True,
              acks_late=True,)
@@ -339,10 +378,10 @@ def drop_tables(self, datastack_info: dict, analysis_version: int):
         analysis_version (int): materialized verison number
 
     Raises:
-        e: [description]
+        e: error if dropping table(s) fails.
 
     Returns:
-        [type]: [description]
+        str: tables that have been dropped
     """
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info['datastack']
@@ -374,7 +413,7 @@ def drop_tables(self, datastack_info: dict, analysis_version: int):
     try:    
         connection = mat_engine.connect()
         for table in tables_to_drop:
-            drop_statement = f"DROP TABLE {table} CASCADE"
+            drop_statement = f'DROP TABLE {table} CASCADE'
             connection.execute(drop_statement)
     except Exception as e:
         celery_logger.error(e)
@@ -394,7 +433,14 @@ def drop_tables(self, datastack_info: dict, analysis_version: int):
              autoretry_for=(Exception,),
              max_retries=3)
 def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
+    """Insert annotation data into database
 
+    Args:
+        chunk (List[int]): chunk of annotation ids
+        mat_metadata (dict): materialized metadata
+    Returns:
+        bool: True if data was inserted
+    """
     aligned_volume = mat_metadata['aligned_volume']
     analysis_version = mat_metadata['analysis_version']
     annotation_table_name = mat_metadata['annotation_table_name']
@@ -444,6 +490,7 @@ def insert_annotation_data(self, chunk: List[int], mat_metadata: dict):
         analysis_engine.dispose()
         session.close()
         engine.dispose()
+    return True
 
 
 @celery.task(name="process:merge_tables",
@@ -461,10 +508,10 @@ def merge_tables(self, mat_metadata: dict):
         analysis_version (int): materialized verison number
 
     Raises:
-        e: [description]
+        e: error during table merging operation
 
     Returns:
-        [type]: [description]
+        str: number of rows copied
     """
     analysis_version = mat_metadata['analysis_version']
     annotation_table_name = mat_metadata['annotation_table_name']
@@ -578,7 +625,7 @@ def check_tables(self, mat_info: list, analysis_version: int):
         analysis_version (int): the materialized version number
 
     Returns:
-        [str]: [description]
+        str: returns statement if all tables are valid
     """
     aligned_volume = mat_info[0]['aligned_volume'] # get aligned_volume name from datastack
     table_count = mat_info[0]['table_count']
@@ -636,6 +683,7 @@ def check_tables(self, mat_info: list, analysis_version: int):
         engine.dispose()
         mat_engine.dispose()
 
+
 def create_analysis_sql_uri(sql_uri: str, datastack: str, mat_version: int):
     sql_base_uri = sql_uri.rpartition("/")[0]
     analysis_sql_uri = make_url(
@@ -644,7 +692,17 @@ def create_analysis_sql_uri(sql_uri: str, datastack: str, mat_version: int):
 
 
 def get_analysis_table(aligned_volume: str, datastack: str, table_name: str, mat_version: int = 1):
+    """Helper method that returns a table model.
 
+    Args:
+        aligned_volume (str): aligned_volume name
+        datastack (str): datastack name
+        table_name (str): table to reflect a model
+        mat_version (int, optional): target database version
+
+    Returns:
+        SQLAlchemy model: returns a sqlalchemy model of a target table
+    """
     anno_db = dynamic_annotation_cache.get_db(aligned_volume)
     schema_name = anno_db.get_table_schema(table_name)
     SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")
@@ -673,10 +731,19 @@ def get_analysis_table(aligned_volume: str, datastack: str, table_name: str, mat
     analysis_engine.dispose()
     return analysis_table
 
+
 @celery.task(name="process:drop_indices",
              bind=True,
              acks_late=True)
 def drop_indices(self, mat_metadata: dict):
+    """Drop all indices of a given table.
+
+    Args:
+        mat_metadata (dict): datastack info for the aligned_volume derived from the infoservice
+
+    Returns:
+        str: string if indices were dropped or not.
+    """
     add_indices = mat_metadata.get('add_indices', False)
     if add_indices:
         analysis_version = mat_metadata.get('analysis_version', None)
@@ -698,6 +765,16 @@ def drop_indices(self, mat_metadata: dict):
              bind=True,
              ask_late=True)
 def add_indices(self, mat_metadata: dict):
+    """Find missing indices for a given table contained
+    in the mat_metadata dict. Spawns a chain of celery
+    tasks that run synchronously that add an index per task. 
+
+    Args:
+        mat_metadata (dict): datastack info for the aligned_volume derived from the infoservice
+
+    Returns:
+        chain: chain of celery tasks
+    """
     add_indices = mat_metadata.get('add_indices', False)
     if add_indices:
         analysis_version = mat_metadata.get('analysis_version', None)
@@ -714,9 +791,56 @@ def add_indices(self, mat_metadata: dict):
 
         model = make_flat_model(annotation_table_name, schema)
 
-        indices = index_cache.add_indices(annotation_table_name, model, analysis_engine)
-
+        commands = index_cache.add_indices_sql_commands(annotation_table_name, model, analysis_engine)
         analysis_session.close()
         analysis_engine.dispose()
-        return f"Indices Added: {indices}"  
+        
+        add_index_tasks = chain([add_index.si(mat_metadata, command) for command in commands])
+        
+        return self.replace(add_index_tasks)
     return "Indices already exist"
+
+
+@celery.task(name="process:add_index",
+             bind=True,
+             ask_late=True,
+             autoretry_for=(Exception,),
+             max_retries=3)
+def add_index(self, mat_metadata: dict, command: str):
+    """Add an index or a contrainst to a table.
+
+    Args:
+        mat_metadata (dict): datastack info for the aligned_volume derived from the infoservice
+        command (str): sql command to create an index or constraint
+
+    Raises:
+        self.retry: retrys task when an error creating an index occurs
+
+    Returns:
+        str: String of SQL command
+    """
+    analysis_version = mat_metadata['analysis_version']
+    datastack = mat_metadata['datastack']
+    SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")        
+    analysis_sql_uri = create_analysis_sql_uri(
+        SQL_URI_CONFIG, datastack, analysis_version)
+   
+    engine = create_engine(analysis_sql_uri, pool_pre_ping=True)
+
+    # increase maintenance memory to improve index creation speeds,
+    # reset to default after index is created
+    ADD_INDEX_SQL = f"""
+        SET maintenance_work_mem to '1GB';
+        {command}
+        SET maintenance_work_mem to '64MB';
+    """
+
+    try:
+        with engine.begin() as conn:
+            celery_logger.info(f"Adding index: {command}")
+            result = conn.execute(ADD_INDEX_SQL)
+    except Exception as e:
+        celery_logger.error(f"Index creation failed: {e}")
+        raise self.retry(exc=e, countdown=3)        
+    
+    return f"Index {command} added to table"

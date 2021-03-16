@@ -89,10 +89,11 @@ def get_materialization_info(datastack_info: dict,
                     try:
                         segmentation_metadata = db.get_segmentation_table_metadata(annotation_table,
                                                                                    pcg_table_name)
+                        create_segmentation_table = False
                     except AttributeError as e:
-                        celery_logger.error(f"TABLE DOES NOT EXIST: {e}")
+                        celery_logger.warning(f"SEGMENTATION TABLE DOES NOT EXIST: {e}")
                         segmentation_metadata = {'last_updated': None}
-
+                        create_segmentation_table = True
                     last_updated_time_stamp = segmentation_metadata.get('last_updated', None)
 
                     if not last_updated_time_stamp:
@@ -105,6 +106,7 @@ def get_materialization_info(datastack_info: dict,
                         'datastack': datastack_info['datastack'],
                         'aligned_volume': str(aligned_volume_name),
                         'schema': db.get_table_schema(annotation_table),
+                        'create_segmentation_table': create_segmentation_table,
                         'max_id': int(max_id),
                         'min_id': int(min_id),
                         'row_count': row_count,
@@ -172,6 +174,16 @@ def chunk_ids(mat_metadata, model, chunk_size: int):
              autoretry_for=(Exception,),
              max_retries=3)
 def update_metadata(self, mat_metadata: dict):
+    """Update 'last_updated' column in the segmentation 
+    metadata table for a given segmentation table.
+    
+
+    Args:
+        mat_metadata (dict): materialziation metadata
+
+    Returns:
+        str: description of table that was updated
+    """
     aligned_volume = mat_metadata['aligned_volume']
     segmentation_table_name = mat_metadata['segmentation_table_name']
 

@@ -5,7 +5,6 @@ import itertools
 from datetime import datetime
 
 from celery.utils.log import get_task_logger
-from flask import current_app
 from materializationengine.celery_init import celery
 from materializationengine.database import create_session
 from materializationengine.info_client import get_aligned_volumes
