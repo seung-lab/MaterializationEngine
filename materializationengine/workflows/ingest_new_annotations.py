@@ -80,8 +80,9 @@ def ingest_new_annotations_workflow(mat_metadata: dict, annotation_chunks: List[
     Returns:
         chain: chain of celery tasks 
     """
+    
+    result = create_missing_segmentation_table(mat_metadata)
     new_annotation_workflow = chain(
-        create_missing_segmentation_table.si(mat_metadata),
         chord([
             chain(
                 ingest_new_annotations.si(mat_metadata, annotation_chunk),
