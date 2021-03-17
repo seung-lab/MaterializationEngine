@@ -3,7 +3,8 @@ import pandas as pd
 from sqlalchemy.orm import Query
 from geoalchemy2.elements import WKBElement
 from geoalchemy2.types import Geometry
-from sqlalchemy.sql.sqltypes import Boolean
+from geoalchemy2.functions import ST_X, ST_Y, ST_Z
+from sqlalchemy.sql.sqltypes import Boolean, Integer
 from decimal import Decimal
 from multiwrapper import multiprocessing_utils as mu
 from geoalchemy2.shape import to_shape
@@ -178,6 +179,7 @@ def specific_query(sqlalchemy_session, engine, model_dict, tables,
                    filter_notin_dict={},
                    filter_equal_dict = {},
                    select_columns=None,
+                   expand_positions=False,
                    offset = None,
                    limit = None,
                    suffixes = None):
@@ -206,26 +208,42 @@ def specific_query(sqlalchemy_session, engine, model_dict, tables,
         tables = [[table] if not isinstance(table, list) else table
                   for table in tables]
         models = [model_dict[table[0]] for table in tables]
-        if len(models)>1:
+        if len(models)>1 or expand_positions:
+            # model_lists =[]
+            # for model in models:
+            #     column_list = []
+            #     for col in model.__table__.columns:
+            #         if type(col)==Geometry and expand_positions:
+            #             column_list += [col.ST_X(), col.ST_Y(), col.ST_Z()]
+            #         else:
+            #             column_list.append(col.key)
+            #     model_lists.append(column_list)
             column_lists = [[m.key for m in model.__table__.columns] for model in models]
+
             col_names, col_counts = np.unique(np.concatenate(column_lists), return_counts=True)
             dup_cols = col_names[col_counts>1]
             # if there are duplicate columns we need to redname
-            if len(dup_cols)>1:
-                if suffixes is None:
-                    suffixes = [DEFAULT_SUFFIX_LIST[i] for i in range(len(models))]
-                else:
-                    assert(len(suffixes)==len(models))
-                query_args = []
-                for model, suffix in zip(models, suffixes):
-                    for column in model.__table__.columns:
+            if suffixes is None:
+                suffixes = [DEFAULT_SUFFIX_LIST[i] for i in range(len(models))]
+            else:
+                assert(len(suffixes)==len(models))
+            query_args = []
+            for model, suffix in zip(models, suffixes):
+                for column in model.__table__.columns:
+                    if expand_positions and isinstance(column.type,Geometry):
+                        if column.key in dup_cols:
+                            query_args.append(column.ST_X().cast(Integer).label(column.key + '_{}_x'.format(suffix)))
+                            query_args.append(column.ST_Y().cast(Integer).label(column.key + '_{}_y'.format(suffix)))
+                            query_args.append(column.ST_Z().cast(Integer).label(column.key + '_{}_z'.format(suffix)))
+                        else:
+                            query_args.append(column.ST_X().cast(Integer).label(column.key + '_x'))
+                            query_args.append(column.ST_Y().cast(Integer).label(column.key + '_y'))
+                            query_args.append(column.ST_Z().cast(Integer).label(column.key + '_z'))
+                    else:
                         if column.key in dup_cols:
                             query_args.append(column.label(column.key + '_{}'.format(suffix)))
                         else:
                             query_args.append(column)
-            # otherwise we can just use all of them
-            else:
-                query_args = models
         else:
             query_args = models
 
@@ -262,7 +280,10 @@ def specific_query(sqlalchemy_session, engine, model_dict, tables,
 
         return _query(sqlalchemy_session, engine, query_args=query_args, filter_args=filter_args,
                            join_args=join_args, select_columns=select_columns,
+                           fix_wkb=~expand_positions,
                            offset=offset, limit=limit)
+
+
 
 def _make_query(this_sqlalchemy_session, query_args, join_args=None, filter_args=None,
                     select_columns=None, offset=None, limit=None):
