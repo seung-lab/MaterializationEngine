@@ -397,6 +397,7 @@ class FrozenTableQuery(Resource):
                         mimetype='application/json')
             return after_request(response)
 
+@client_bp.expect(query_parser)
 @client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/query")
 class FrozenQuery(Resource):
     @reset_auth
@@ -443,7 +444,7 @@ class FrozenQuery(Resource):
         aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
         
         Session = sqlalchemy_cache.get(aligned_volume_name)
-       
+        args = query_parser.parse_args()
         data = request.parsed_obj
         model_dict = {}
         for table_desc in data['tables']:
@@ -468,16 +469,27 @@ class FrozenQuery(Resource):
                       filter_notin_dict=data.get('filter_notin_dict', {}),
                       filter_equal_dict=data.get('filter_equal_dict', {}),
                       select_columns=data.get('select_columns', None),
+                      expand_positions=args['expand_positions'],
                       offset=data.get('offset', None),
                       limit = limit,
                       suffixes=data.get('suffixes', None))
         headers=None
         if len(df) == limit:
             headers={'Warning':f'201 - "Limited query to {max_limit} rows'}
-        context = pa.default_serialization_context()
-        serialized = context.serialize(df)
-        return Response(serialized.to_buffer().to_pybytes(),
+               
+        if args['return_pyarrow']:
+            context = pa.default_serialization_context()
+            serialized = context.serialize(df)
+            return Response(serialized.to_buffer().to_pybytes(),
+                        headers=headers,
                         mimetype='x-application/pyarrow')
+        else:
+            dfjson =df.to_json(orient='records')
+            response = Response(dfjson,
+                        headers=headers,
+                        mimetype='application/json')
+            return after_request(response)
+            
 # @client_bp.route("/aligned_volume/<string:aligned_volume_name>/table")
 # class SegmentationTable(Resource):
 #     @auth_required
