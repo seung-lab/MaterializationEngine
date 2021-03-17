@@ -377,7 +377,7 @@ class FrozenTableQuery(Resource):
                       filter_notin_dict=data.get('filter_notin_dict', {}),
                       filter_equal_dict=data.get('filter_equal_dict', {}),
                       select_columns=data.get('select_columns', None),
-                      consolidate_positions=~args['split_positions'],
+                      consolidate_positions=not args['split_positions'],
                       offset=data.get('offset', None),
                       limit = limit)
         headers=None
@@ -469,7 +469,7 @@ class FrozenQuery(Resource):
                       filter_notin_dict=data.get('filter_notin_dict', {}),
                       filter_equal_dict=data.get('filter_equal_dict', {}),
                       select_columns=data.get('select_columns', None),
-                      consolidate_positions=~args['split_positions'],
+                      consolidate_positions=not args['split_positions'],
                       offset=data.get('offset', None),
                       limit = limit,
                       suffixes=data.get('suffixes', None))
