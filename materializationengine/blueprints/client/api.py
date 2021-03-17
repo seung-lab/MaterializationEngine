@@ -55,12 +55,12 @@ query_parser.add_argument('return_pyarrow', type=inputs.boolean,
                           default=True,
                           required=False,
                           location='args',
-                          help='whether to return query in pyarrow compatible binary format')    
-query_parser.add_argument('expand_positions', type=inputs.boolean,
+                          help='whether to return query in pyarrow compatible binary format (faster), false returns json')    
+query_parser.add_argument('split_positions', type=inputs.boolean,
                           default=False,
                           required=False,
                           location='args',
-                          help='whether to concatenate position columns into arrays')    
+                          help='whether to return position columns as seperate x,y,z columns (faster)')    
 
 
 def after_request(response):
@@ -377,7 +377,7 @@ class FrozenTableQuery(Resource):
                       filter_notin_dict=data.get('filter_notin_dict', {}),
                       filter_equal_dict=data.get('filter_equal_dict', {}),
                       select_columns=data.get('select_columns', None),
-                      expand_positions=args['expand_positions'],
+                      consolidate_positions=~args['split_positions'],
                       offset=data.get('offset', None),
                       limit = limit)
         headers=None
@@ -469,7 +469,7 @@ class FrozenQuery(Resource):
                       filter_notin_dict=data.get('filter_notin_dict', {}),
                       filter_equal_dict=data.get('filter_equal_dict', {}),
                       select_columns=data.get('select_columns', None),
-                      expand_positions=args['expand_positions'],
+                      consolidate_positions=~args['split_positions'],
                       offset=data.get('offset', None),
                       limit = limit,
                       suffixes=data.get('suffixes', None))
