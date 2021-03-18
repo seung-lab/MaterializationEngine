@@ -283,7 +283,7 @@ def specific_query(sqlalchemy_session, engine, model_dict, tables,
                 filter_value = filter_table_dict[column_name]
                 filter_args.append((model_dict[filter_table].__dict__[column_name]==filter_value, ))
 
-        df= _query(sqlalchemy_session, engine, query_args=query_args, filter_args=filter_args,
+        df = _query(sqlalchemy_session, engine, query_args=query_args, filter_args=filter_args,
                            join_args=join_args, select_columns=select_columns,
                            fix_wkb=~return_wkb,
                            offset=offset, limit=limit)

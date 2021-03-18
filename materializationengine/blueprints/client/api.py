@@ -372,7 +372,7 @@ class FrozenTableQuery(Resource):
 
         logging.info('query {}'.format(data))
         logging.info('args - {}'.format(args))
-        df=specific_query(Session, engine, {table_name: Model}, [table_name],
+        df = specific_query(Session, engine, {table_name: Model}, [table_name],
                       filter_in_dict=data.get('filter_in_dict', {}),
                       filter_notin_dict=data.get('filter_notin_dict', {}),
                       filter_equal_dict=data.get('filter_equal_dict', {}),
@@ -464,7 +464,7 @@ class FrozenQuery(Resource):
         if limit>max_limit:
             limit = max_limit
         logging.info('query {}'.format(data))
-        df=specific_query(Session, engine, model_dict, data['tables'],
+        df = specific_query(Session, engine, model_dict, data['tables'],
                       filter_in_dict=data.get('filter_in_dict', {}),
                       filter_notin_dict=data.get('filter_notin_dict', {}),
                       filter_equal_dict=data.get('filter_equal_dict', {}),
