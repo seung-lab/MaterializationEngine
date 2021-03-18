@@ -1,6 +1,6 @@
 import logging
 import os
-
+from cloudfiles import compression
 import pyarrow as pa
 from cachetools import LRUCache, TTLCache, cached
 from emannotationschemas import get_schema
@@ -29,7 +29,8 @@ from materializationengine.schemas import (AnalysisTableSchema,
 from middle_auth_client import (auth_required, auth_requires_admin,
                                 auth_requires_permission)
 from sqlalchemy.engine.url import make_url
-
+from flask_restx import inputs
+import time
 __version__ = "0.2.35"
 
 authorizations = {
@@ -47,6 +48,43 @@ client_bp = Namespace("Materialization Client",
 annotation_parser = reqparse.RequestParser()
 annotation_parser.add_argument('annotation_ids', type=int, action='split', help='list of annotation ids')    
 annotation_parser.add_argument('pcg_table_name', type=str, help='name of pcg segmentation table')    
+
+
+query_parser = reqparse.RequestParser()
+query_parser.add_argument('return_pyarrow', type=inputs.boolean,
+                          default=True,
+                          required=False,
+                          location='args',
+                          help='whether to return query in pyarrow compatible binary format (faster), false returns json')    
+query_parser.add_argument('split_positions', type=inputs.boolean,
+                          default=False,
+                          required=False,
+                          location='args',
+                          help='whether to return position columns as seperate x,y,z columns (faster)')    
+
+
+def after_request(response):
+
+    accept_encoding = request.headers.get('Accept-Encoding', '')
+
+    if 'gzip' not in accept_encoding.lower():
+        return response
+
+    response.direct_passthrough = False
+
+    if (response.status_code < 200 or
+            response.status_code >= 300 or
+            'Content-Encoding' in response.headers):
+        return response
+
+    response.data = compression.gzip_compress(response.data)
+
+    response.headers['Content-Encoding'] = 'gzip'
+    response.headers['Vary'] = 'Accept-Encoding'
+    response.headers['Content-Length'] = len(response.data)
+
+    return response
+
 
 
 def check_aligned_volume(aligned_volume):
@@ -270,6 +308,7 @@ class FrozenTableCount(Resource):
         Session = sqlalchemy_cache.get("{}__mat{}".format(datastack_name, version))
         return Session().query(Model).count(), 200
 
+@client_bp.expect(query_parser)
 @client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/table/<string:table_name>/query")
 class FrozenTableQuery(Resource):
     @reset_auth
@@ -313,7 +352,7 @@ class FrozenTableQuery(Resource):
             pyarrow.buffer: a series of bytes that can be deserialized using pyarrow.deserialize
         """
         aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
-        
+        args = query_parser.parse_args()
         Session = sqlalchemy_cache.get(aligned_volume_name)
        
         data = request.parsed_obj
@@ -332,24 +371,33 @@ class FrozenTableQuery(Resource):
             limit = max_limit
 
         logging.info('query {}'.format(data))
-        df=specific_query(Session, engine, {table_name: Model}, [table_name],
+        logging.info('args - {}'.format(args))
+        df = specific_query(Session, engine, {table_name: Model}, [table_name],
                       filter_in_dict=data.get('filter_in_dict', {}),
                       filter_notin_dict=data.get('filter_notin_dict', {}),
                       filter_equal_dict=data.get('filter_equal_dict', {}),
                       select_columns=data.get('select_columns', None),
+                      consolidate_positions=not args['split_positions'],
                       offset=data.get('offset', None),
                       limit = limit)
         headers=None
         if len(df) == limit:
             headers={'Warning':f'201 - "Limited query to {max_limit} rows'}
        
-        context = pa.default_serialization_context()
-        serialized = context.serialize(df)
-        return Response(serialized.to_buffer().to_pybytes(),
+        if args['return_pyarrow']:
+            context = pa.default_serialization_context()
+            serialized = context.serialize(df)
+            return Response(serialized.to_buffer().to_pybytes(),
                         headers=headers,
                         mimetype='x-application/pyarrow')
+        else:
+            dfjson = df.to_json(orient='records')
+            response = Response(dfjson,
+                        headers=headers,
+                        mimetype='application/json')
+            return after_request(response)
 
-
+@client_bp.expect(query_parser)
 @client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/query")
 class FrozenQuery(Resource):
     @reset_auth
@@ -396,7 +444,7 @@ class FrozenQuery(Resource):
         aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
         
         Session = sqlalchemy_cache.get(aligned_volume_name)
-       
+        args = query_parser.parse_args()
         data = request.parsed_obj
         model_dict = {}
         for table_desc in data['tables']:
@@ -416,21 +464,32 @@ class FrozenQuery(Resource):
         if limit>max_limit:
             limit = max_limit
         logging.info('query {}'.format(data))
-        df=specific_query(Session, engine, model_dict, data['tables'],
+        df = specific_query(Session, engine, model_dict, data['tables'],
                       filter_in_dict=data.get('filter_in_dict', {}),
                       filter_notin_dict=data.get('filter_notin_dict', {}),
                       filter_equal_dict=data.get('filter_equal_dict', {}),
                       select_columns=data.get('select_columns', None),
+                      consolidate_positions=not args['split_positions'],
                       offset=data.get('offset', None),
                       limit = limit,
                       suffixes=data.get('suffixes', None))
         headers=None
         if len(df) == limit:
             headers={'Warning':f'201 - "Limited query to {max_limit} rows'}
-        context = pa.default_serialization_context()
-        serialized = context.serialize(df)
-        return Response(serialized.to_buffer().to_pybytes(),
+               
+        if args['return_pyarrow']:
+            context = pa.default_serialization_context()
+            serialized = context.serialize(df)
+            return Response(serialized.to_buffer().to_pybytes(),
+                        headers=headers,
                         mimetype='x-application/pyarrow')
+        else:
+            dfjson = df.to_json(orient='records')
+            response = Response(dfjson,
+                        headers=headers,
+                        mimetype='application/json')
+            return after_request(response)
+            
 # @client_bp.route("/aligned_volume/<string:aligned_volume_name>/table")
 # class SegmentationTable(Resource):
 #     @auth_required
