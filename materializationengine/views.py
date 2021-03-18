@@ -15,7 +15,7 @@ from materializationengine.models import AnalysisTable, AnalysisVersion
 from materializationengine.schemas import (AnalysisTableSchema,
                                            AnalysisVersionSchema)
 
-__version__ = "0.2.35"
+__version__ = "1.0.0"
 
 views_bp = Blueprint("views", __name__, url_prefix="/materialize/views")
 
