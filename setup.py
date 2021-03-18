@@ -43,7 +43,7 @@ for i_l in del_ls[::-1]:
     del required[i_l]
 
 setup(
-    version=find_version("materializationengine", "__init__.py"),
+    version="1.0.1",
     name='materializationengine',
     description="Combines DynamicAnnotationDB and PyChunkedGraph",
     long_description=long_description,
