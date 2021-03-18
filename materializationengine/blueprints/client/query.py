@@ -3,7 +3,8 @@ import pandas as pd
 from sqlalchemy.orm import Query
 from geoalchemy2.elements import WKBElement
 from geoalchemy2.types import Geometry
-from sqlalchemy.sql.sqltypes import Boolean
+from geoalchemy2.functions import ST_X, ST_Y, ST_Z
+from sqlalchemy.sql.sqltypes import Boolean, Integer
 from decimal import Decimal
 from multiwrapper import multiprocessing_utils as mu
 from geoalchemy2.shape import to_shape
@@ -25,8 +26,22 @@ from datetime import date, timedelta
 from datetime import datetime
 from functools import partial
 import shapely
+import itertools
 
 DEFAULT_SUFFIX_LIST = ['x','y','z','xx','yy','zz','xxx','yyy','zzz']
+
+
+def concatenate_position_columns(df):
+    grps=itertools.groupby(df.columns, key=lambda x: x[:-2])
+    for base,g in grps:
+        gl = list(g)
+        t=''.join([k[-1:] for k in gl])
+        if t=='xyz':  
+            A=df[gl].values
+            df[base]=np.split( A, len(A) )
+            df.drop(gl,axis=1,inplace=True)
+
+    return df
 
 def fix_wkb_column(df_col, wkb_data_start_ind=2, n_threads=None):
     """Convert a column with 3-d point data stored as in WKB format
@@ -178,6 +193,8 @@ def specific_query(sqlalchemy_session, engine, model_dict, tables,
                    filter_notin_dict={},
                    filter_equal_dict = {},
                    select_columns=None,
+                   consolidate_positions=True,
+                   return_wkb=False,
                    offset = None,
                    limit = None,
                    suffixes = None):
@@ -197,6 +214,7 @@ def specific_query(sqlalchemy_session, engine, model_dict, tables,
         filter_notin_dict: dict of dicts
             inverse to filter_in_dict
         select_columns: list of str
+        consolidate_positions: whether to make the position columns arrays of x,y,z
         offset: int 
 
         Returns
@@ -206,29 +224,34 @@ def specific_query(sqlalchemy_session, engine, model_dict, tables,
         tables = [[table] if not isinstance(table, list) else table
                   for table in tables]
         models = [model_dict[table[0]] for table in tables]
-        if len(models)>1:
-            column_lists = [[m.key for m in model.__table__.columns] for model in models]
-            col_names, col_counts = np.unique(np.concatenate(column_lists), return_counts=True)
-            dup_cols = col_names[col_counts>1]
-            # if there are duplicate columns we need to redname
-            if len(dup_cols)>1:
-                if suffixes is None:
-                    suffixes = [DEFAULT_SUFFIX_LIST[i] for i in range(len(models))]
-                else:
-                    assert(len(suffixes)==len(models))
-                query_args = []
-                for model, suffix in zip(models, suffixes):
-                    for column in model.__table__.columns:
-                        if column.key in dup_cols:
-                            query_args.append(column.label(column.key + '_{}'.format(suffix)))
-                        else:
-                            query_args.append(column)
-            # otherwise we can just use all of them
-            else:
-                query_args = models
-        else:
-            query_args = models
+        
+        column_lists = [[m.key for m in model.__table__.columns] for model in models]
 
+        col_names, col_counts = np.unique(np.concatenate(column_lists), return_counts=True)
+        dup_cols = col_names[col_counts>1]
+        # if there are duplicate columns we need to redname
+        if suffixes is None:
+            suffixes = [DEFAULT_SUFFIX_LIST[i] for i in range(len(models))]
+        else:
+            assert(len(suffixes)==len(models))
+        query_args = []
+        for model, suffix in zip(models, suffixes):
+            for column in model.__table__.columns:
+                if isinstance(column.type,Geometry) and ~return_wkb:
+                    if column.key in dup_cols:
+                        query_args.append(column.ST_X().cast(Integer).label(column.key + '_{}_x'.format(suffix)))
+                        query_args.append(column.ST_Y().cast(Integer).label(column.key + '_{}_y'.format(suffix)))
+                        query_args.append(column.ST_Z().cast(Integer).label(column.key + '_{}_z'.format(suffix)))
+                    else:
+                        query_args.append(column.ST_X().cast(Integer).label(column.key + '_x'))
+                        query_args.append(column.ST_Y().cast(Integer).label(column.key + '_y'))
+                        query_args.append(column.ST_Z().cast(Integer).label(column.key + '_z'))
+                else:
+                    if column.key in dup_cols:
+                        query_args.append(column.label(column.key + '_{}'.format(suffix)))
+                    else:
+                        query_args.append(column)
+ 
         if len(tables) == 2:
             join_args = (model_dict[tables[1][0]],
                          model_dict[tables[1][0]].__dict__[tables[1][1]] ==
@@ -260,9 +283,16 @@ def specific_query(sqlalchemy_session, engine, model_dict, tables,
                 filter_value = filter_table_dict[column_name]
                 filter_args.append((model_dict[filter_table].__dict__[column_name]==filter_value, ))
 
-        return _query(sqlalchemy_session, engine, query_args=query_args, filter_args=filter_args,
+        df = _query(sqlalchemy_session, engine, query_args=query_args, filter_args=filter_args,
                            join_args=join_args, select_columns=select_columns,
+                           fix_wkb=~return_wkb,
                            offset=offset, limit=limit)
+        if consolidate_positions:
+            return concatenate_position_columns(df)
+        else:
+            return df
+
+
 
 def _make_query(this_sqlalchemy_session, query_args, join_args=None, filter_args=None,
                     select_columns=None, offset=None, limit=None):
