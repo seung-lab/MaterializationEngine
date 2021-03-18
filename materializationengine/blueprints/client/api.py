@@ -391,7 +391,7 @@ class FrozenTableQuery(Resource):
                         headers=headers,
                         mimetype='x-application/pyarrow')
         else:
-            dfjson =df.to_json(orient='records')
+            dfjson = df.to_json(orient='records')
             response = Response(dfjson,
                         headers=headers,
                         mimetype='application/json')
@@ -484,7 +484,7 @@ class FrozenQuery(Resource):
                         headers=headers,
                         mimetype='x-application/pyarrow')
         else:
-            dfjson =df.to_json(orient='records')
+            dfjson = df.to_json(orient='records')
             response = Response(dfjson,
                         headers=headers,
                         mimetype='application/json')
