@@ -763,7 +763,7 @@ def drop_indices(self, mat_metadata: dict):
 
 @celery.task(name="process:add_indices",
              bind=True,
-             ask_late=True)
+             acks_late=True)
 def add_indices(self, mat_metadata: dict):
     """Find missing indices for a given table contained
     in the mat_metadata dict. Spawns a chain of celery
@@ -803,7 +803,7 @@ def add_indices(self, mat_metadata: dict):
 
 @celery.task(name="process:add_index",
              bind=True,
-             ask_late=True,
+             acks_late=True,
              autoretry_for=(Exception,),
              max_retries=3)
 def add_index(self, mat_metadata: dict, command: str):
