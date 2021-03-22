@@ -7,7 +7,7 @@ import numpy as np
 from flask import Blueprint, Flask, current_app, jsonify, redirect
 from flask_restx import Api
 from flask_sqlalchemy import SQLAlchemy
-
+from flask_cors import CORS
 from materializationengine import __version__
 from materializationengine.admin import setup_admin
 from materializationengine.blueprints.client.api import client_bp
@@ -41,6 +41,7 @@ def create_app(test_config=None):
                 static_url_path='/materialize/static',
                 instance_relative_config=True,
                 template_folder="../templates")
+    CORS(app, expose_headers='WWW-Authenticate')
     logging.basicConfig(level=logging.INFO)
     app.json_encoder = AEEncoder
     app.config["RESTX_JSON"] = {"cls": AEEncoder}
