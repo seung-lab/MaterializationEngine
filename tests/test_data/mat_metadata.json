@@ -1,0 +1,16 @@
+{
+    "postgis_docker_image": "postgis/postgis:9.6-2.5",
+    "aligned_volume": "test_aligned_volume",
+    "db_host": "127.0.0.1",
+    "datastack": "minnie65_phase3",
+    "annotation_table_name": "test_synapse_table",
+    "segmentation_table_name": "test_synapse_table__test_pcg",
+    "schema_type": "synapse",
+    "pcg_table_name": "test_pcg",
+    "version": 1,
+    "timestamp": "2021-03-25 18:46:55.690121",
+    "expires_timestamp": "2021-04-01 18:48:09.540908",
+    "materialization_time_stamp": "2021-03-25 18:46:55.690121",
+    "sql_uri": "postgresql://postgres:postgres@127.0.0.1:5432/test_aligned_volume",
+    "schema": "synapse"
+}
