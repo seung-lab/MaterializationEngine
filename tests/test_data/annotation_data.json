@@ -1,0 +1,111 @@
+{
+    "synapse_data": [
+        {
+            "pre_pt": {
+                "position": [
+                    10000,
+                    20000,
+                    30000
+                ]
+            },
+            "ctr_pt": {
+                "position": [
+                    40000,
+                    50000,
+                    60000
+                ]
+            },
+            "post_pt": {
+                "position": [
+                    70000,
+                    80000,
+                    90000
+                ]
+            },
+            "type": "synapse"
+        },
+        {
+            "pre_pt": {
+                "position": [
+                    11000,
+                    21000,
+                    31000
+                ]
+            },
+            "ctr_pt": {
+                "position": [
+                    41000,
+                    51000,
+                    61000
+                ]
+            },
+            "post_pt": {
+                "position": [
+                    71000,
+                    81000,
+                    91000
+                ]
+            },
+            "type": "synapse"
+        },
+        {
+            "pre_pt": {
+                "position": [
+                    12000,
+                    22000,
+                    32000
+                ]
+            },
+            "ctr_pt": {
+                "position": [
+                    42000,
+                    52000,
+                    62000
+                ]
+            },
+            "post_pt": {
+                "position": [
+                    72000,
+                    82000,
+                    92000
+                ]
+            },
+            "type": "synapse"
+        }
+    ],
+    "segmentation_data": [
+        {
+            "id": 1,
+            "pre_root_id": 10000000000000000,
+            "post_root_id": 20000000000000000,
+            "pre_point_supervoxel_id": 10000000,
+            "post_point_supervoxel_id": 20000000
+        },
+        {
+            "id": 2,
+            "pre_root_id": 30000000000000000,
+            "post_root_id": 40000000000000000,
+            "pre_point_supervoxel_id": 30000000,
+            "post_point_supervoxel_id": 40000000
+        },
+        {
+            "id": 3,
+            "pre_root_id": 50000000000000000,
+            "post_root_id": 60000000000000000,
+            "pre_point_supervoxel_id": 50000000,
+            "post_point_supervoxel_id": 60000000
+        }
+    ],
+    "expired_root_ids": [
+        10000000000000000,
+        40000000000000000,
+        50000000000000000,
+        60000000000000000
+    ],
+    "new_root_ids": [
+        10000000000000001,
+        40000000000000001,
+        50000000000000001,
+        60000000000000001
+    ]
+}
