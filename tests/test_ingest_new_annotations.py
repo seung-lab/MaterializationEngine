@@ -64,7 +64,7 @@ mocked_root_id_data = [{'post_pt_supervoxel_id': 10000000,
 
 
 def test_create_missing_segmentation_table(mat_metadata, db_client):
-    table_metadata= create_missing_segmentation_table(mat_metadata)
+    table_metadata = create_missing_segmentation_table(mat_metadata)
     __, engine= db_client
 
     seg_table_exists= engine.dialect.has_table(
@@ -74,8 +74,8 @@ def test_create_missing_segmentation_table(mat_metadata, db_client):
 
 
 def test_get_annotations_with_missing_supervoxel_ids(mat_metadata):
-    id_chunk_range= [1, 4]
-    annotations= get_annotations_with_missing_supervoxel_ids(
+    id_chunk_range = [1, 4]
+    annotations = get_annotations_with_missing_supervoxel_ids(
         mat_metadata, id_chunk_range)
     assert annotations == missing_segmentations_data
 
@@ -86,7 +86,7 @@ def test_get_cloudvolume_supervoxel_ids(monkeypatch, mat_metadata):
         return np.ndarray((1,), buffer=np.array([10000000]), dtype=int)
     monkeypatch.setattr(
         "materializationengine.workflows.ingest_new_annotations.get_sv_id", mock_cloudvolume)
-    supervoxel_data= get_cloudvolume_supervoxel_ids(
+    supervoxel_data = get_cloudvolume_supervoxel_ids(
         missing_segmentations_data, mat_metadata)
     assert supervoxel_data == mocked_supervoxel_data
 
@@ -95,7 +95,7 @@ def test_get_sql_supervoxel_ids(mat_metadata):
     id_chunk_range = [1, 4]
     supervoxel_ids = get_sql_supervoxel_ids(id_chunk_range, mat_metadata)
     logging.info(supervoxel_ids)
-    
+
 
 def test_get_new_root_ids(monkeypatch, mat_metadata):
     def mock_get_roots(*args, **kwargs):
@@ -106,10 +106,8 @@ def test_get_new_root_ids(monkeypatch, mat_metadata):
     logging.info(root_ids)
     assert root_ids == mocked_root_id_data
 
-def test_insert_segmentation_data(db_client, annotation_data, mat_metadata):
-    table_name= mat_metadata["annotation_table_name"]
-    pcg_table_name= mat_metadata["pcg_table_name"]
-    session, engine= db_client
-    segmentation_data= annotation_data['segmentation_data']
+def test_insert_segmentation_data(annotation_data, mat_metadata):
+    segmentation_data = annotation_data['segmentation_data']
     num_of_rows = insert_segmentation_data(segmentation_data, mat_metadata)
     assert num_of_rows == {'New segmentations inserted': 3} 
+
