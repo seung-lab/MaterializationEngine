@@ -95,8 +95,7 @@ def test_get_sql_supervoxel_ids(mat_metadata):
     id_chunk_range = [1, 4]
     supervoxel_ids = get_sql_supervoxel_ids(id_chunk_range, mat_metadata)
     logging.info(supervoxel_ids)
-#     assert False
-
+    
 
 def test_get_new_root_ids(monkeypatch, mat_metadata):
     def mock_get_roots(*args, **kwargs):
@@ -114,4 +113,3 @@ def test_insert_segmentation_data(db_client, annotation_data, mat_metadata):
     segmentation_data= annotation_data['segmentation_data']
     num_of_rows = insert_segmentation_data(segmentation_data, mat_metadata)
     assert num_of_rows == {'New segmentations inserted': 3} 
-#     assert False
