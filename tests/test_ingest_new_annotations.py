@@ -16,6 +16,7 @@ from materializationengine.workflows.ingest_new_annotations import (
     insert_segmentation_data)
 from numpy import nan
 
+
 missing_segmentations_data = {'post_pt_supervoxel_id': [nan, nan, nan],
                               'pre_pt_supervoxel_id': [nan, nan, nan],
                               'post_pt_position': [
@@ -29,6 +30,8 @@ missing_segmentations_data = {'post_pt_supervoxel_id': [nan, nan, nan],
                                   [12000, 22000, 32000]
                                   ],
                               'id': [1, 2, 3]}
+
+
 mocked_supervoxel_data = {'post_pt_supervoxel_id': [10000000, 10000000, 10000000],
                           'pre_pt_supervoxel_id': [10000000, 10000000, 10000000],
                           'post_pt_position': [
@@ -41,6 +44,8 @@ mocked_supervoxel_data = {'post_pt_supervoxel_id': [10000000, 10000000, 10000000
                               [12000, 22000, 32000]
                               ],
                           'id': [1, 2, 3]}
+
+
 mocked_root_id_data = [{'post_pt_supervoxel_id': 10000000,
                         'pre_pt_supervoxel_id': 10000000,
                         'id': 1,
