@@ -33,6 +33,16 @@ services:
       ports:
         - 6379:6379
 
+    redis-commander:
+      container_name: redis-commander
+      hostname: redis-commander
+      image: rediscommander/redis-commander:latest
+      restart: always
+      environment:
+      - REDIS_HOSTS=local:redis-master:6379
+      ports:
+      - "8083:8083"
+
     celery-process_1:
       image: 'materialize:tag'
       env_file:
