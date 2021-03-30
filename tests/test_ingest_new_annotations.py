@@ -6,7 +6,6 @@ from unittest.mock import MagicMock
 
 sys.modules['materializationengine.chunkedgraph_gateway'] = MagicMock()
 sys.modules['cloudvolume'] = MagicMock()
-import logging
 
 import numpy as np
 from materializationengine.workflows.ingest_new_annotations import (
@@ -91,23 +90,21 @@ def test_get_cloudvolume_supervoxel_ids(monkeypatch, mat_metadata):
     assert supervoxel_data == mocked_supervoxel_data
 
 
-def test_get_sql_supervoxel_ids(mat_metadata):
-    id_chunk_range = [1, 4]
-    supervoxel_ids = get_sql_supervoxel_ids(id_chunk_range, mat_metadata)
-    logging.info(supervoxel_ids)
-
-
 def test_get_new_root_ids(monkeypatch, mat_metadata):
     def mock_get_roots(*args, **kwargs):
         return np.ndarray((1,), buffer=np.array([20000000]), dtype=int)
     monkeypatch.setattr(
         "materializationengine.workflows.ingest_new_annotations.get_root_ids", mock_get_roots)
     root_ids= get_new_root_ids(mocked_supervoxel_data, mat_metadata)
-    logging.info(root_ids)
     assert root_ids == mocked_root_id_data
 
-def test_insert_segmentation_data(annotation_data, mat_metadata):
+def test_insert_segmentation_data(test_app, annotation_data, mat_metadata):
     segmentation_data = annotation_data['segmentation_data']
     num_of_rows = insert_segmentation_data(segmentation_data, mat_metadata)
     assert num_of_rows == {'New segmentations inserted': 3} 
 
+
+def test_get_sql_supervoxel_ids(test_app, mat_metadata):
+    id_chunk_range = [1, 4]
+    supervoxel_ids = get_sql_supervoxel_ids(id_chunk_range, mat_metadata)
+    assert True
