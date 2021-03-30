@@ -33,9 +33,9 @@ def test_get_materialization_info():
          'aligned_volume': 'test_aligned_volume',
          'schema': 'synapse',
          'create_segmentation_table': False,
-         'max_id': 3,
+         'max_id': 4,
          'min_id': 1,
-         'row_count': 3,
+         'row_count': 4,
          'add_indices': True,
          'segmentation_table_name': 'test_synapse_table__test_pcg',
          'annotation_table_name': 'test_synapse_table',
@@ -65,7 +65,7 @@ def test_query_id_range():
 
 def test_chunk_ids(mat_metadata):
     ids = chunk_ids(mat_metadata, AnalysisVersion.id, 2)
-    assert [id for id in ids] == []
+    assert [id for id in ids] == [[1, None]]
 
 
 def test_update_metadata(mat_metadata):
