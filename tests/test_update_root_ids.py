@@ -47,17 +47,20 @@ def test_get_supervoxel_ids(annotation_data, mat_metadata):
 
     supervoxel_ids = get_supervoxel_ids(expired_roots, mat_metadata)
     assert supervoxel_ids == {
+        'post_pt_root_id': [
+            {'id': 2,
+             'post_pt_root_id': 40000000000000000,
+             'post_pt_supervoxel_id': 40000000}],
         'pre_pt_root_id': [
             {'id': 1,
              'pre_pt_root_id': 10000000000000000,
              'pre_pt_supervoxel_id': 10000000},
             {'id': 3,
              'pre_pt_root_id': 50000000000000000,
-             'pre_pt_supervoxel_id': 50000000}],
-        'post_pt_root_id': [
-            {'id': 2,
-             'post_pt_root_id': 40000000000000000,
-             'post_pt_supervoxel_id': 40000000}]}
+             'pre_pt_supervoxel_id': 50000000},
+            {'id': 4,
+             'pre_pt_root_id': 10000000000000000,
+             'pre_pt_supervoxel_id': 10000000}]}
 
 
 def test_get_new_roots(monkeypatch, mat_metadata, annotation_data):
@@ -71,3 +74,5 @@ def test_get_new_roots(monkeypatch, mat_metadata, annotation_data):
     supervoxel_chunk = annotation_data["segmentation_data"]
     new_roots = get_new_roots(supervoxel_chunk, mat_metadata)
     assert new_roots == 'Number of rows updated: 3'
+
+
