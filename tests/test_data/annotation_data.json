@@ -71,6 +71,30 @@
                 ]
             },
             "type": "synapse"
+        },
+        {
+            "pre_pt": {
+                "position": [
+                    13000,
+                    23000,
+                    33000
+                ]
+            },
+            "ctr_pt": {
+                "position": [
+                    43000,
+                    53000,
+                    63000
+                ]
+            },
+            "post_pt": {
+                "position": [
+                    73000,
+                    83000,
+                    93000
+                ]
+            },
+            "type": "synapse"
         }
     ],
     "segmentation_data": [
@@ -96,6 +120,14 @@
             "post_pt_supervoxel_id": 60000000
         }
     ],
+    "new_segmentation_data": [
+        {
+            "id": 4,
+            "pre_pt_root_id": 10000000000000000,
+            "post_pt_root_id": 20000000000000000,
+            "pre_pt_supervoxel_id": 10000000,
+            "post_pt_supervoxel_id": 20000000
+    }],    
     "expired_root_ids": [
         10000000000000000,
         40000000000000000,
