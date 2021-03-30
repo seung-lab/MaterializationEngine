@@ -186,8 +186,18 @@ def insert_test_data(mat_metadata: dict, annotation_data: dict):
     aligned_volume_name = mat_metadata['aligned_volume']
     annotation_table_name = mat_metadata['annotation_table_name']
     synapse_data = annotation_data['synapse_data']
+    segmentation_data = annotation_data['segmentation_data']
+
     database_uri = mat_metadata['sql_uri']
+    pcg_name = mat_metadata["pcg_table_name"]
+
     anno_client = DynamicAnnotationClient(
         aligned_volume_name, database_uri)
-    return anno_client.insert_annotations(annotation_table_name, synapse_data)
+    
+    anno_client.insert_annotations(annotation_table_name, synapse_data)
+
+    mat_client = DynamicMaterializationClient(
+        aligned_volume_name, database_uri)
+    is_created = mat_client.create_and_attach_seg_table(annotation_table_name, pcg_name)
+    return mat_client.insert_linked_segmentation(annotation_table_name, pcg_name, segmentation_data)    
     
