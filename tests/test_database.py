@@ -35,7 +35,8 @@ def test_reflect_tables(database_uri):
                                'geometry_columns',
                                'raster_columns',
                                'raster_overviews',
-                               'test_synapse_table'])
+                               'test_synapse_table',
+                               'test_synapse_table__test_pcg'])
 
 
 class TestCreateSession:
