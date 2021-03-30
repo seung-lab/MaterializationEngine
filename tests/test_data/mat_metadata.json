@@ -12,5 +12,7 @@
     "expires_timestamp": "2021-04-01 18:48:09.540908",
     "materialization_time_stamp": "2021-03-25 18:46:55.690121",
     "sql_uri": "postgresql://postgres:postgres@127.0.0.1:5432/test_aligned_volume",
-    "schema": "synapse"
+    "schema": "synapse",
+    "chunk_size": 2
 }
+
