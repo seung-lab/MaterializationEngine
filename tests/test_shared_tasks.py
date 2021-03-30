@@ -1,30 +1,74 @@
-def test_chunk_annotation_ids():
-    assert False
+import datetime
+
+from materializationengine.models import AnalysisVersion
+from materializationengine.shared_tasks import (chunk_annotation_ids,
+                                                chunk_ids, collect_data, fin,
+                                                get_materialization_info,
+                                                query_id_range,
+                                                update_metadata)
+
+def test_chunk_annotation_ids(mat_metadata):
+    anno_id_chunks = chunk_annotation_ids(mat_metadata)
+    assert anno_id_chunks == [[1, 3], [3, None]]
 
 
 def test_fin():
-    assert False
-
-
-def test_final_task():
-    assert False
+    result = fin.s().apply()
+    assert result.get() == True
 
 
 def test_get_materialization_info():
-    assert False
+    datastack_info = {
+        'datastack': 'test_datastack',
+        'aligned_volume': {
+            'name': 'test_aligned_volume'
+        },
+        'segmentation_source': 'graphene://https://fake-daf.com/segmentation/table/test_pcg'}
+    analysis_version = 1
+    materialization_time_stamp = datetime.datetime.utcnow()
+    mat_info = get_materialization_info(
+        datastack_info, analysis_version, materialization_time_stamp)
+    assert mat_info == [
+        {'datastack': 'test_datastack',
+         'aligned_volume': 'test_aligned_volume',
+         'schema': 'synapse',
+         'create_segmentation_table': False,
+         'max_id': 3,
+         'min_id': 1,
+         'row_count': 3,
+         'add_indices': True,
+         'segmentation_table_name': 'test_synapse_table__test_pcg',
+         'annotation_table_name': 'test_synapse_table',
+         'temp_mat_table_name': 'temp__test_synapse_table',
+         'pcg_table_name': 'test_pcg',
+         'segmentation_source': 'graphene://https://fake-daf.com/segmentation/table/test_pcg',
+         'coord_resolution': [4, 4, 40],
+         'materialization_time_stamp': str(materialization_time_stamp),
+         'last_updated_time_stamp': None,
+         'chunk_size': 100000,
+         'table_count': 1,
+         'find_all_expired_roots': False,
+         'analysis_version': 1,
+         'analysis_database': 'test_datastack__mat1'}]
 
 
 def test_collect_data():
-    assert False
+    task = collect_data.s('test', {'some': 'dict'}).apply()
+    assert task.get() == (('test', {'some': 'dict'}), {})
 
 
 def test_query_id_range():
-    assert False
+    id_range = query_id_range(AnalysisVersion.id, 1, 3)
+    assert str(
+        id_range) == "analysisversion.id >= :id_1 AND analysisversion.id < :id_2"
 
 
-def test_chunk_ids():
-    assert False
+def test_chunk_ids(mat_metadata):
+    ids = chunk_ids(mat_metadata, AnalysisVersion.id, 2)
+    assert [id for id in ids] == []
 
 
-def test_update_metadata():
-    assert False
+def test_update_metadata(mat_metadata):
+    is_updated = update_metadata(mat_metadata)
+    assert is_updated == {
+        "Table: test_synapse_table__test_pcg": "Time stamp 2021-03-25 18:46:55.690121"}
