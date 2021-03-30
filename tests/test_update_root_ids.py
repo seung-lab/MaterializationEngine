@@ -2,7 +2,6 @@ from unittest.mock import MagicMock
 import sys
 sys.modules['materializationengine.chunkedgraph_gateway'] = MagicMock()
 from materializationengine.workflows.update_root_ids import get_expired_root_ids, get_new_roots, get_supervoxel_ids
-import numpy as np
 import logging
 
 
@@ -45,11 +44,20 @@ def test_get_expired_root_ids(monkeypatch, mat_metadata):
 
 def test_get_supervoxel_ids(annotation_data, mat_metadata):
     expired_roots = annotation_data['expired_root_ids']
-    logging.info(expired_roots)
 
     supervoxel_ids = get_supervoxel_ids(expired_roots, mat_metadata)
-    # assert supervoxel_ids == mocked_supervoxel_chunks
-#     assert False
+    assert supervoxel_ids == {
+        'pre_pt_root_id': [
+            {'id': 1,
+             'pre_pt_root_id': 10000000000000000,
+             'pre_pt_supervoxel_id': 10000000},
+            {'id': 3,
+             'pre_pt_root_id': 50000000000000000,
+             'pre_pt_supervoxel_id': 50000000}],
+        'post_pt_root_id': [
+            {'id': 2,
+             'post_pt_root_id': 40000000000000000,
+             'post_pt_supervoxel_id': 40000000}]}
 
 
 def test_get_new_roots(monkeypatch, mat_metadata, annotation_data):
