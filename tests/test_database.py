@@ -44,13 +44,15 @@ class TestCreateSession:
     def setup_method(self, database_uri):
         self.session, self.engine = create_session(database_uri)
 
+    def test_ping_connection(self):
+        is_connected = ping_connection(self.session)
+        assert is_connected == True
+
     def teardown_method(self):
         self.session.close()
         self.engine.dispose()
 
-    def test_ping_connection(self):
-        is_connected = ping_connection(self.session)
-        assert is_connected == True
+
 
 
 class TestSqlAlchemyCache:
