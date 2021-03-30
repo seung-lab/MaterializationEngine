@@ -16,49 +16,43 @@ from materializationengine.workflows.ingest_new_annotations import (
 from numpy import nan
 
 
-missing_segmentations_data = {'post_pt_supervoxel_id': [nan, nan, nan],
-                              'pre_pt_supervoxel_id': [nan, nan, nan],
+missing_segmentations_data = {'post_pt_supervoxel_id': [nan],
+                              'pre_pt_supervoxel_id': [nan],
                               'post_pt_position': [
-                                  [70000, 80000, 90000],
-                                  [71000, 81000, 91000],
-                                  [72000, 82000, 92000]
+                                  [73000, 83000, 93000],
                                   ],
                               'pre_pt_position': [
-                                  [10000, 20000, 30000],
-                                  [11000, 21000, 31000],
-                                  [12000, 22000, 32000]
+                                  [13000, 23000, 33000],
                                   ],
-                              'id': [1, 2, 3]}
+                              'id': [4]}
 
 
-mocked_supervoxel_data = {'post_pt_supervoxel_id': [10000000, 10000000, 10000000],
-                          'pre_pt_supervoxel_id': [10000000, 10000000, 10000000],
+mocked_supervoxel_data = {'post_pt_supervoxel_id': [10000000],
+                          'pre_pt_supervoxel_id': [10000000],
                           'post_pt_position': [
-                              [70000, 80000, 90000],
-                              [71000, 81000, 91000],
-                              [72000, 82000, 92000]],
-                          'pre_pt_position': [
-                              [10000, 20000, 30000],
-                              [11000, 21000, 31000],
-                              [12000, 22000, 32000]
+                              [73000, 83000, 93000],
                               ],
-                          'id': [1, 2, 3]}
+                          'pre_pt_position': [
+                              [13000, 23000, 33000],
+                              ],
+                          'id': [4]}
 
 
 mocked_root_id_data = [{'post_pt_supervoxel_id': 10000000,
                         'pre_pt_supervoxel_id': 10000000,
                         'id': 1,
-                        'post_pt_root_id': 20000000,
-                        'pre_pt_root_id': 20000000},
+                        'post_pt_root_id': 20000000000000000,
+                        'pre_pt_root_id': 10000000000000000},
                        {'post_pt_supervoxel_id': 10000000,
                         'pre_pt_supervoxel_id': 10000000,
-                        'id': 2, 'post_pt_root_id': 20000000,
-                        'pre_pt_root_id': 20000000},
+                        'id': 2, 
+                        'post_pt_root_id': 40000000000000000,
+                        'pre_pt_root_id': 30000000000000000},
                        {'post_pt_supervoxel_id': 10000000,
                         'pre_pt_supervoxel_id': 10000000,
                         'id': 3,
-                        'post_pt_root_id': 20000000,
-                        'pre_pt_root_id': 20000000}
+                        'post_pt_root_id': 60000000000000000,
+                        'pre_pt_root_id': 50000000000000000}
                        ]
 
 
@@ -73,7 +67,7 @@ def test_create_missing_segmentation_table(mat_metadata, db_client):
 
 
 def test_get_annotations_with_missing_supervoxel_ids(mat_metadata):
-    id_chunk_range = [1, 4]
+    id_chunk_range = [1, 5]
     annotations = get_annotations_with_missing_supervoxel_ids(
         mat_metadata, id_chunk_range)
     assert annotations == missing_segmentations_data
@@ -90,18 +84,22 @@ def test_get_cloudvolume_supervoxel_ids(monkeypatch, mat_metadata):
     assert supervoxel_data == mocked_supervoxel_data
 
 
-def test_get_new_root_ids(monkeypatch, mat_metadata):
+def test_get_new_root_ids(monkeypatch, mat_metadata, annotation_data):
     def mock_get_roots(*args, **kwargs):
         return np.ndarray((1,), buffer=np.array([20000000]), dtype=int)
     monkeypatch.setattr(
         "materializationengine.workflows.ingest_new_annotations.get_root_ids", mock_get_roots)
-    root_ids= get_new_root_ids(mocked_supervoxel_data, mat_metadata)
-    assert root_ids == mocked_root_id_data
+    root_ids = get_new_root_ids(mocked_supervoxel_data, mat_metadata)
+    assert root_ids == [{'post_pt_supervoxel_id': 10000000,
+                        'pre_pt_supervoxel_id': 10000000,
+                        'post_pt_root_id': 20000000,
+                        'pre_pt_root_id': 20000000,
+                        'id': 4}]
 
 def test_insert_segmentation_data(test_app, annotation_data, mat_metadata):
-    segmentation_data = annotation_data['segmentation_data']
+    segmentation_data = annotation_data['new_segmentation_data']
     num_of_rows = insert_segmentation_data(segmentation_data, mat_metadata)
-    assert num_of_rows == {'New segmentations inserted': 3} 
+    assert num_of_rows == {'New segmentations inserted': 1} 
 
 
 def test_get_sql_supervoxel_ids(test_app, mat_metadata):
