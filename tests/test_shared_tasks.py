@@ -70,5 +70,6 @@ def test_chunk_ids(mat_metadata):
 
 def test_update_metadata(mat_metadata):
     is_updated = update_metadata(mat_metadata)
+    mat_ts = mat_metadata['materialization_time_stamp']
     assert is_updated == {
-        "Table: test_synapse_table__test_pcg": "Time stamp 2021-03-25 18:46:55.690121"}
+        "Table: test_synapse_table__test_pcg": f"Time stamp {mat_ts}"}

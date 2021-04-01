@@ -4,6 +4,7 @@ import pathlib
 import time
 import uuid
 import sys
+import datetime
 
 import docker
 import psycopg2
@@ -25,7 +26,9 @@ test_logger = logging.getLogger(__name__)
 @pytest.fixture(scope='session')
 def mat_metadata():
     p = pathlib.Path('test_data', 'mat_metadata.json')
-    return json.loads(p.read_text())
+    mat_dict = json.loads(p.read_text())
+    mat_dict['materialization_time_stamp'] = str(datetime.datetime.utcnow())
+    return mat_dict
 
 @pytest.fixture(scope='session')
 def annotation_data():
