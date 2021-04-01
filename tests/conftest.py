@@ -30,6 +30,15 @@ def mat_metadata():
     mat_dict['materialization_time_stamp'] = str(datetime.datetime.utcnow())
     return mat_dict
 
+
+@pytest.fixture(scope='session')
+def bulk_upload_metadata():
+    p = pathlib.Path('test_data', 'bulk_upload_data.json')
+    bulk_upload_dict = json.loads(p.read_text())
+    bulk_upload_dict['materialized_ts'] = time.time() # epoch time
+    return bulk_upload_dict
+
+
 @pytest.fixture(scope='session')
 def annotation_data():
     p = pathlib.Path('test_data', 'annotation_data.json')
