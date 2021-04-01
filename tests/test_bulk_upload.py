@@ -1,42 +1,15 @@
-def test_bulk_upload():
+from materializationengine.workflows.bulk_upload import get_gcs_file_info
+from unittest import mock
+import logging
+import datetime
+
+
+@mock.patch("materializationengine.workflows.bulk_upload.gcsfs", autospec=True)
+def test_get_gcs_file_info(mock_gcsfs, bulk_upload_metadata):
+    mock_gcsfs.return_value.GCSFileSystem.return_value = "/test_data"
+    upload_timestamp = datetime.datetime.utcnow()
+    gcs_info = get_gcs_file_info(upload_timestamp, bulk_upload_metadata)
+    logging.info(gcs_info)
     assert False
 
 
-def test_insert_missing_data():
-    assert False
-
-
-def test_get_file_info():
-    assert False
-
-
-def test_create_chunks():
-    assert False
-
-
-def test_create_tables():
-    assert False
-
-
-def test_bulk_upload_task():
-    assert False
-
-
-def test_gcs_read_npy_chunk():
-    assert False
-
-
-def test_parse_data():
-    assert False
-
-
-def test_format_data():
-    assert False
-
-
-def test_split_annotation_data():
-    assert False
-
-
-def test_upload_data():
-    assert False
