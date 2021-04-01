@@ -33,10 +33,8 @@ def mat_metadata():
 
 @pytest.fixture(scope='session')
 def bulk_upload_metadata():
-    p = pathlib.Path('test_data', 'bulk_upload_data.json')
-    bulk_upload_dict = json.loads(p.read_text())
-    bulk_upload_dict['materialized_ts'] = time.time() # epoch time
-    return bulk_upload_dict
+    p = pathlib.Path('test_data', 'bulk_upload_metadata.json')
+    return json.loads(p.read_text())
 
 
 @pytest.fixture(scope='session')
