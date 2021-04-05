@@ -12,7 +12,7 @@ from materializationengine import __version__
 from materializationengine.admin import setup_admin
 from materializationengine.blueprints.client.api import client_bp
 from materializationengine.blueprints.materialize.api import mat_bp
-from materializationengine.config import configure_app
+from materializationengine.config import configure_app, config
 from materializationengine.database import sqlalchemy_cache
 from materializationengine.models import AnalysisVersion, Base
 from materializationengine.schemas import ma
@@ -33,7 +33,7 @@ class AEEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
-def create_app(test_config=None):
+def create_app(config_name: str=None):
     # Define the Flask Object
     app = Flask(__name__,
                 static_folder="../static",
@@ -47,8 +47,8 @@ def create_app(test_config=None):
     app.config["RESTX_JSON"] = {"cls": AEEncoder}
     
     # load configuration (from test_config if passed)
-    if test_config:
-        app.config.from_object('materializationengine.config.TestConfig')
+    if config:
+        app.config.from_object(config[config_name])
     else:
         app = configure_app(app)
     # register blueprints

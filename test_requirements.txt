@@ -1,1 +1,5 @@
+-r dev_requirements.txt
+docker
 pytest
+pytest-cov
+pytest-env

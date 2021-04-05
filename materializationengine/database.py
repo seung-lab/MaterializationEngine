@@ -9,26 +9,6 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 
 from materializationengine.utils import get_config_param
 
-# def get_db(aligned_volume) -> DynamicMaterializationClient:
-#     if aligned_volume not in cache:
-#         db_client = _get_mat_client(aligned_volume)
-#     else:
-#         db_client = cache[aligned_volume]
-
-#     connection_ok = ping_connection(db_client.cached_session)
-
-#     if not connection_ok:
-#         db_client = _get_mat_client(aligned_volume)
-#     else:
-#         cache[aligned_volume] = db_client
-#     return db_client
-
-# def _get_mat_client(aligned_volume):
-#     sql_uri_config = get_config_param("SQLALCHEMY_DATABASE_URI")
-#     mat_client = DynamicMaterializationClient(
-#         aligned_volume, sql_uri_config)
-#     return mat_client
-
 
 def create_session(sql_uri: str = None):
     engine = create_engine(sql_uri, pool_recycle=3600,

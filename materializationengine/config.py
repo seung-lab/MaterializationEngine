@@ -17,7 +17,7 @@ class BaseConfig:
     SQLALCHEMY_DATABASE_URI = "sqlite://"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     REDIS_URL = "redis://"
-    CELERY_BROKER_URL = REDIS_URL
+    CELERY_BROKER_URL = "memory://"
     CELERY_RESULT_BACKEND = REDIS_URL
     LOCAL_SERVICE_URL = os.environ.get("LOCAL_SERVICE_URL")
     ANNO_ENDPOINT = f"https://{LOCAL_SERVICE_URL}/annotation/"
@@ -56,11 +56,10 @@ class DevConfig(BaseConfig):
 class TestConfig(BaseConfig):
     ENV = "testing"
     TESTING = True
-    SQLALCHEMY_DATABASE_URI = "sqlite://"
+    SQLALCHEMY_DATABASE_URI = "postgresql://postgres:postgres@localhost:5432/test_aligned_volume"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     CELERY_BROKER_URL = "memory://"
     CELERY_RESULT_BACKEND = "redis://"
-
 
 class ProductionConfig(BaseConfig):
     ENV = "production"
