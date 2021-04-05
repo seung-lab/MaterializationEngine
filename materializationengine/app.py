@@ -47,7 +47,7 @@ def create_app(config_name: str=None):
     app.config["RESTX_JSON"] = {"cls": AEEncoder}
     
     # load configuration (from test_config if passed)
-    if config:
+    if config_name:
         app.config.from_object(config[config_name])
     else:
         app = configure_app(app)
