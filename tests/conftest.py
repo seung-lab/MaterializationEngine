@@ -22,10 +22,22 @@ from sqlalchemy.orm import sessionmaker
 test_logger = logging.getLogger(__name__)
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--docker", action="store", default=False, help="Use docker for postgres testing"
+    )
+
+@pytest.fixture(scope='session')
+def docker_mode(request):
+    return request.config.getoption("--docker")
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "docker: use postgres in docker")
+
 # Get testing metadata
 @pytest.fixture(scope='session')
 def mat_metadata():
-    p = pathlib.Path('test_data', 'mat_metadata.json')
+    p = pathlib.Path('tests/test_data', 'mat_metadata.json')
     mat_dict = json.loads(p.read_text())
     mat_dict['materialization_time_stamp'] = str(datetime.datetime.utcnow())
     return mat_dict
@@ -33,13 +45,13 @@ def mat_metadata():
 
 @pytest.fixture(scope='session')
 def bulk_upload_metadata():
-    p = pathlib.Path('test_data', 'bulk_upload_metadata.json')
+    p = pathlib.Path('tests/test_data', 'bulk_upload_metadata.json')
     return json.loads(p.read_text())
 
 
 @pytest.fixture(scope='session')
 def annotation_data():
-    p = pathlib.Path('test_data', 'annotation_data.json')
+    p = pathlib.Path('tests/test_data', 'annotation_data.json')
     return json.loads(p.read_text())
 
 
@@ -56,7 +68,7 @@ def database_uri(mat_metadata):
 # Setup Flask and Celery apps
 @pytest.fixture(scope='session')
 def test_app():
-    flask_app = create_app(config_name='docker_testing')
+    flask_app = create_app(config_name='testing')
     test_logger.info(f"Starting test flask app...")
 
     # Create a test client using the Flask application configured for testing
@@ -72,45 +84,52 @@ def test_celery_app(test_app):
     celery = create_celery(test_app, celery_instance)
     yield celery
 
-
-# Setup PostGis Database in a docker continainer
+# Setup docker image if '--docker=True' in pytest args
 @pytest.fixture(scope="session")
-def docker_client() -> docker.DockerClient:
-    yield docker.from_env()
-
-
-@pytest.fixture(scope="session", autouse=True)
-def postgis_server(docker_client: docker.DockerClient, mat_metadata, annotation_data) -> None:
-    postgis_docker_image = mat_metadata['postgis_docker_image']
-    aligned_volume = mat_metadata['aligned_volume']
-    sql_uri = mat_metadata["sql_uri"]
-    test_logger.info(f"PULLING {postgis_docker_image} IMAGE")
-    try:
-        docker_client.images.pull(repository=postgis_docker_image)
-    except Exception:
-        test_logger.exception("Failed to pull postgres image")
-
-    container_name = f"test_postgis_server_{uuid.uuid4()}"
-
-    db_enviroment = [
+def setup_docker_image(docker_mode, mat_metadata):
+    if docker_mode:
+        postgis_docker_image = mat_metadata['postgis_docker_image']
+        aligned_volume = mat_metadata['aligned_volume']
+        
+        db_enviroment = [
         f"POSTGRES_USER=postgres",
         f"POSTGRES_PASSWORD=postgres",
         f"POSTGRES_DB={aligned_volume}"
-    ]
+        ]
+        
+        try:
+            test_logger.info(f"PULLING {postgis_docker_image} IMAGE")
+            container_name = f"test_postgis_server_{uuid.uuid4()}"
+            docker_client = docker.from_env()
+            docker_client.images.pull(repository=postgis_docker_image)
+            connection = docker_client.containers.run(
+                image=postgis_docker_image,
+                detach=True,
+                hostname='test_postgres',
+                auto_remove=True,
+                name=container_name,
+                environment=db_enviroment,
+                ports={"5432/tcp": 5432},
+            )
+            test_logger.info('STARTING POSTGIS DOCKER IMAGE')
+            time.sleep(10)
+        except Exception as e:
+            test_logger.exception(f"Failed to pull {postgis_docker_image} image. Error: {e}")  
+    yield 
+               
+    if docker_mode:
+        container = docker_client.containers.get(container_name)
+        container.stop()
 
-    test_container = docker_client.containers.run(
-        image=postgis_docker_image,
-        detach=True,
-        hostname='test_postgres',
-        auto_remove=True,
-        name=container_name,
-        environment=db_enviroment,
-        ports={"5432/tcp": 5432},
-    )
 
-    test_logger.info('STARTING POSTGIS DOCKER IMAGE')
+# Setup PostGis Database with test data
+@pytest.fixture(scope="session", autouse=True)
+def setup_postgis_database(setup_docker_image, mat_metadata, annotation_data) -> None:
+
+    aligned_volume = mat_metadata['aligned_volume']
+    sql_uri = mat_metadata["sql_uri"]
+    
     try:
-        time.sleep(10)
         is_connected = check_database(sql_uri)
         
         is_setup = setup_database(aligned_volume, sql_uri)
@@ -127,10 +146,9 @@ def postgis_server(docker_client: docker.DockerClient, mat_metadata, annotation_
         is_inserted = insert_test_data(mat_metadata, annotation_data)
         test_logger.info(
             f"IS TEST DATA INSERTED: {is_inserted}")
-        yield test_container
-    finally:
-        container = docker_client.containers.get(container_name)
-        container.stop()
+        yield True
+    except Exception as e:
+        test_logger.error(f"Cannot connect to database {sql_uri}")
 
 
 @pytest.fixture(scope='session')
