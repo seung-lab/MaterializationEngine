@@ -56,20 +56,7 @@ class DevConfig(BaseConfig):
 class TestConfig(BaseConfig):
     ENV = "testing"
     TESTING = True
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
-
-class TestLocalConfig(TestConfig):
-    ENV = "testing"
-    TESTING = True
-    SQLALCHEMY_DATABASE_URI = "postgresql://postgres:postgres@127.0.0.1:5432/test_aligned_volume"
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
-    CELERY_BROKER_URL = "memory://"
-    CELERY_RESULT_BACKEND = "redis://"
-
-class TestDockerConfig(TestConfig):
-    ENV = "testing"
-    TESTING = True
-    SQLALCHEMY_DATABASE_URI = "postgresql://postgres:postgres@127.0.0.1:5432/test_aligned_volume"
+    SQLALCHEMY_DATABASE_URI = "postgresql://postgres:postgres@localhost:5432/test_aligned_volume"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     CELERY_BROKER_URL = "memory://"
     CELERY_RESULT_BACKEND = "redis://"
@@ -85,9 +72,7 @@ class ProductionConfig(BaseConfig):
 config = {
     "default": "materializationengine.config.BaseConfig",
     "development": "materializationengine.config.DevConfig",
-    "base_testing": "materializationengine.config.TestConfig",
-    "local_testing": "materializationengine.config.TestLocalConfig",
-    "docker_testing": "materializationengine.config.TestDockerConfig",
+    "testing": "materializationengine.config.TestConfig",
     "production": "materializationengine.config.ProductionConfig",
 }
 
