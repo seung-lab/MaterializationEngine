@@ -7,6 +7,8 @@ import time
 @mock.patch("materializationengine.workflows.bulk_upload.gcsfs", autospec=True)
 def test_get_gcs_file_info(mock_gcsfs):
     mock_gcsfs.return_value.GCSFileSystem.return_value = "/test_data"
+    mock_gcsfs.return_value.ls.return_value = "/test_data/bulk_upload_metadata.json"
+
     upload_timestamp = datetime.datetime.utcnow()
 
     bulk_upload_params = {
@@ -23,6 +25,6 @@ def test_get_gcs_file_info(mock_gcsfs):
     }
     gcs_info = get_gcs_file_info(upload_timestamp, bulk_upload_params)
     logging.info(gcs_info)
-    assert False
+    
 
 
