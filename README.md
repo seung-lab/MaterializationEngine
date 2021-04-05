@@ -1,3 +1,4 @@
+[![Actions Status](https://github.com/seung-lab/MaterializationEngine/workflows/Materialization%20Engine/badge.svg)](https://github.com/seung-lab/MaterializationEngine/actions)
 # MaterializationEngine
 
 This is a microservice for managing materializing versions of an analysis database,  merging together annotations in a dynamicannotationdb, and a segmentation stored in a pychunkedgraph.  
