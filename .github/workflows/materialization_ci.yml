@@ -5,7 +5,10 @@ name: Materialization Engine
 
 on:
   push:
-    branches: master
+    branches: 
+     - master
+    paths-ignore:
+      - '**.md'    
   pull_request:
     branches: master
 
