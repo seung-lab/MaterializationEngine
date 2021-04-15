@@ -1,6 +1,7 @@
 import datetime
 from typing import List
 import time 
+import json
 
 import gcsfs
 import numpy as np
@@ -14,7 +15,7 @@ from emannotationschemas.flatten import create_flattened_schema
 from materializationengine.celery_init import celery
 from materializationengine.database import sqlalchemy_cache
 from materializationengine.index_manager import index_cache
-from materializationengine.shared_tasks import fin
+from materializationengine.shared_tasks import fin, add_index
 from materializationengine.utils import (create_annotation_model,
                                          create_segmentation_model)
 
@@ -208,7 +209,7 @@ def bulk_upload_task(self, bulk_upload_info: dict, chunk: List):
             file_data.append(parsed_data)
         
         formatted_data = format_data(file_data, file_metadata)
-        uploaded = upload_data(formatted_data, file_metadata)
+        return self.replace(upload_data.s(formatted_data, file_metadata))
     except Exception as e:
         celery_logger.error(e)
         raise self.retry(exc=Exception, countdown=3)
@@ -314,7 +315,11 @@ def split_annotation_data(serialized_data, schema, upload_creation_time):
     return split_data
 
 
-def upload_data(data: List, bulk_upload_info: dict):
+@celery.task(name="process:add_table_indices",
+             acks_late=True,
+             max_retries=3,
+             bind=True)
+def upload_data(self, data: List, bulk_upload_info: dict):
 
     aligned_volume = bulk_upload_info["aligned_volume"]
     
@@ -336,14 +341,16 @@ def upload_data(data: List, bulk_upload_info: dict):
             connection.execute(SegmentationModel.__table__.insert(), data[1])
     except Exception as e:
         celery_logger.error(f"ERROR: {e}")
-        return False
+        raise self.retry(exc=Exception, countdown=3)
     finally:
         session.close()
         engine.dispose()
     return True
 
+
 @celery.task(name="process:add_table_indices",
-             bind=True)
+             bind=True,
+             acks_late=True)
 def add_table_indices(self, bulk_upload_info: dict):
     aligned_volume = bulk_upload_info['aligned_volume']
     annotation_table_name = bulk_upload_info["annotation_table_name"]
@@ -351,7 +358,6 @@ def add_table_indices(self, bulk_upload_info: dict):
     segmentation_source = bulk_upload_info['pcg_table_name']
     schema = bulk_upload_info['schema']
 
-    session = sqlalchemy_cache.get(aligned_volume)
     engine = sqlalchemy_cache.get_engine(aligned_volume)
 
     anno_model = em_models.make_annotation_model(annotation_table_name, schema)
@@ -359,15 +365,19 @@ def add_table_indices(self, bulk_upload_info: dict):
         annotation_table_name, schema, segmentation_source)
 
     # add annotation indexes
-    index_cache.add_indices(table_name=annotation_table_name,
+    anno_indices = index_cache.add_indices_sql_commands(table_name=annotation_table_name,
                             model=anno_model,
                             engine=engine)
     
     # add segmentation table indexes
-    index_cache.add_indices(table_name=seg_table_name,
+    seg_indices = index_cache.add_indices_sql_commands(table_name=seg_table_name,
                             model=seg_model,
                             engine=engine)
+    add_index_tasks = []                   
+    add_anno_table_index_tasks = [add_index.si(aligned_volume, command) for command in anno_indices]
+    add_index_tasks.append(add_anno_table_index_tasks)
 
-    session.close()
-    engine.dispose()
-    return "Indices Added"
+    add_seg_table_index_tasks = [add_index.si(aligned_volume, command) for command in seg_indices]
+    add_index_tasks.append(add_seg_table_index_tasks)
+
+    return self.replace(chain(add_index_tasks))

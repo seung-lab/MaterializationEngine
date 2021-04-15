@@ -207,3 +207,40 @@ def update_metadata(self, mat_metadata: dict):
         session.close()
     return {f"Table: {segmentation_table_name}": f"Time stamp {materialization_time_stamp}"}
 
+@celery.task(name="process:add_index",
+             bind=True,
+             acks_late=True,
+             autoretry_for=(Exception,),
+             max_retries=3)
+def add_index(self, database: dict, command: str):
+    """Add an index or a contrainst to a table.
+
+    Args:
+        mat_metadata (dict): datastack info for the aligned_volume derived from the infoservice
+        command (str): sql command to create an index or constraint
+
+    Raises:
+        self.retry: retrys task when an error creating an index occurs
+
+    Returns:
+        str: String of SQL command
+    """
+    engine = sqlalchemy_cache.get_engine(database)
+
+    # increase maintenance memory to improve index creation speeds,
+    # reset to default after index is created
+    ADD_INDEX_SQL = f"""
+        SET maintenance_work_mem to '1GB';
+        {command}
+        SET maintenance_work_mem to '64MB';
+    """
+
+    try:
+        with engine.begin() as conn:
+            celery_logger.info(f"Adding index: {command}")
+            result = conn.execute(ADD_INDEX_SQL)
+    except Exception as e:
+        celery_logger.error(f"Index creation failed: {e}")
+        raise self.retry(exc=e, countdown=3)        
+    
+    return f"Index {command} added to table"
