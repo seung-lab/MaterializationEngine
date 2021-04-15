@@ -43,7 +43,8 @@ def gcs_bulk_upload_workflow(self, bulk_upload_params: dict):
         create_tables.si(bulk_upload_info[0]),
         chord([group(bulk_upload_task.si(bulk_upload_info, chunk))
             for chunk in bulk_upload_chunks], fin.si()),  # return here is required for chords
-        add_table_indices.si(bulk_upload_info[0])) 
+        add_table_indices.si(bulk_upload_info[0]),
+        find_missing_chunks_by_ids.s(bulk_upload_info)) 
 
     bulk_upload_workflow.apply_async()
 
@@ -381,3 +382,54 @@ def add_table_indices(self, bulk_upload_info: dict):
     add_index_tasks.append(add_seg_table_index_tasks)
 
     return self.replace(chain(add_index_tasks))
+
+
+@celery.task(name="process:find_missing_chunks_by_ids",
+             bind=True,
+             acks_late=True)
+def find_missing_chunks_by_ids(self, bulk_upload_info: dict, chunk_size: int = 100_000):
+    """Find missing chunks that failed to insert during bulk uploading. 
+    It will compare the .npy files in the bucket to the database. If 
+    missing chunks of data are found this method will return a celery
+    workflow to attempt to re-insert the data. 
+
+    Args:
+        bulk_upload_info (dict): bulk upload metadata
+        chunk_size (int, optional): size of chunk to query. Defaults to 100_000.
+
+    Returns:
+        celery workflow or message 
+    """
+    filename = bulk_upload_info['filename']
+    file_path = bulk_upload_info['file_path']
+    table_name = bulk_upload_info['annotation_table_name']
+
+    project = bulk_upload_info['project']
+    aligned_volume = bulk_upload_info['aligned_volume']
+
+    engine = sqlalchemy_cache.get_engine(aligned_volume)
+
+    fs = gcsfs.GCSFileSystem(project=project)
+    with fs.open(filename, 'rb') as fhandle:
+        ids = np.load(file_path)
+        start_ids = ids[::chunk_size]
+        valstr = ",".join([str(s) for s in start_ids])
+
+        found_ids = pd.read_sql(
+            f"select id from {table_name} where id in ({valstr})", engine)
+        chunk_ids = np.where(~np.isin(start_ids, found_ids.id.values))[0]
+
+        chunks = chunk_ids * chunk_size
+        c_list = chunks.tolist()
+
+        data = [[itm, chunk_size] for itm in c_list]
+        lost_chunks = json.dumps(data)
+
+    if lost_chunks:
+        celery_logger.warning(
+            f"Some chunks of data failed to be inserted {lost_chunks}")
+        bulk_upload_info.update(
+            {"chunks": lost_chunks})
+        celery_logger.info("Will attempt to re-insert missing data...")
+        return self.replace(gcs_insert_missing_data.s(bulk_upload_info))
+    return "No missing chunks found"        
