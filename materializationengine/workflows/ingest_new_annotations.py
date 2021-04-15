@@ -255,7 +255,7 @@ def get_cloudvolume_supervoxel_ids(materialization_data: dict, mat_metadata: dic
     coord_resolution = mat_metadata.get("coord_resolution")
 
     cv = cloudvolume.CloudVolume(segmentation_source, mip=0, use_https=True, bounded=False, fill_missing=True)
-
+    
     position_data = mat_df.loc[:, mat_df.columns.str.endswith("position")]
     for data in mat_df.itertuples():
         for col in list(position_data):
@@ -263,9 +263,13 @@ def get_cloudvolume_supervoxel_ids(materialization_data: dict, mat_metadata: dic
             if np.isnan(getattr(data, supervoxel_column)):
                 pos_data = getattr(data, col)
                 pos_array = np.asarray(pos_data)
-                svid = np.squeeze(cv.download_point(pt=pos_array, size=1, coord_resolution=coord_resolution)) # pylint: disable=maybe-no-member
+                svid = get_sv_id(cv, pos_array, coord_resolution) # pylint: disable=maybe-no-member
                 mat_df.loc[mat_df.id == data.id, supervoxel_column] =  svid
     return mat_df.to_dict(orient='list')
+
+def get_sv_id(cv, pos_array: np.array, coord_resolution: list) -> np.array:
+    svid = np.squeeze(cv.download_point(pt=pos_array, size=1, coord_resolution=coord_resolution)) # pylint: disable=maybe-no-member
+    return svid
 
 
 def get_sql_supervoxel_ids(chunks: List[int], mat_metadata: dict) -> List[int]:
@@ -297,7 +301,7 @@ def get_sql_supervoxel_ids(chunks: List[int], mat_metadata: dict) -> List[int]:
                 for data in session.query(
                     SegmentationModel.id, getattr(SegmentationModel, supervoxel_id_column)
                 ).filter(
-                    or_(SegmentationModel.annotation_id).between(int(chunks[0]), int(chunks[1]))
+                    or_(SegmentationModel.id).between(int(chunks[0]), int(chunks[1]))
                 )
             ]
         session.close()
@@ -379,11 +383,15 @@ def get_new_root_ids(materialization_data: dict, mat_metadata: dict) -> dict:
             if 'supervoxel_id' in col_name:
                 root_id_name = col_name.replace('supervoxel_id', 'root_id')
                 data = missing_root_rows.loc[:, col_name]
-                root_id_array = np.squeeze(cg.get_roots(data.to_list(), time_stamp=materialization_time_stamp))
+                root_id_array = get_root_ids(cg, data, materialization_time_stamp)
                 root_ids_df.loc[data.index, root_id_name] = root_id_array
 
         
     return root_ids_df.to_dict(orient='records')
+
+def get_root_ids(cg, data, materialization_time_stamp):
+    root_id_array = np.squeeze(cg.get_roots(data.to_list(), time_stamp=materialization_time_stamp))
+    return root_id_array
 
 
 def insert_segmentation_data(materialization_data: dict, mat_metadata: dict) -> dict:

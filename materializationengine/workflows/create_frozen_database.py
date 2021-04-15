@@ -18,7 +18,7 @@ from materializationengine.index_manager import index_cache
 from materializationengine.models import (AnalysisTable, AnalysisVersion, Base,
                                           MaterializedMetadata)
 from materializationengine.shared_tasks import (fin, get_materialization_info,
-                                                query_id_range)
+                                                query_id_range, add_index)
 from materializationengine.utils import (create_annotation_model,
                                          create_segmentation_model,
                                          get_config_param)
@@ -777,70 +777,28 @@ def add_indices(self, mat_metadata: dict):
     """
     add_indices = mat_metadata.get('add_indices', False)
     if add_indices:
-        analysis_version = mat_metadata.get('analysis_version', None)
+        analysis_version = mat_metadata.get('analysis_version')
         datastack = mat_metadata['datastack']
-        SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")        
+        analysis_database = mat_metadata['analysis_database']
+        SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")
         analysis_sql_uri = create_analysis_sql_uri(
             SQL_URI_CONFIG, datastack, analysis_version)
 
         analysis_session, analysis_engine = create_session(analysis_sql_uri)
 
 
-        annotation_table_name = mat_metadata.get('annotation_table_name', None)
-        schema = mat_metadata.get('schema', None)
+        annotation_table_name = mat_metadata.get('annotation_table_name')
+        schema = mat_metadata.get('schema')
 
         model = make_flat_model(annotation_table_name, schema)
 
         commands = index_cache.add_indices_sql_commands(annotation_table_name, model, analysis_engine)
         analysis_session.close()
         analysis_engine.dispose()
-        
-        add_index_tasks = chain([add_index.si(mat_metadata, command) for command in commands])
-        
+
+        add_index_tasks = chain([add_index.si(analysis_database, command) for command in commands])
+
         return self.replace(add_index_tasks)
     return "Indices already exist"
 
 
-@celery.task(name="process:add_index",
-             bind=True,
-             acks_late=True,
-             autoretry_for=(Exception,),
-             max_retries=3)
-def add_index(self, mat_metadata: dict, command: str):
-    """Add an index or a contrainst to a table.
-
-    Args:
-        mat_metadata (dict): datastack info for the aligned_volume derived from the infoservice
-        command (str): sql command to create an index or constraint
-
-    Raises:
-        self.retry: retrys task when an error creating an index occurs
-
-    Returns:
-        str: String of SQL command
-    """
-    analysis_version = mat_metadata['analysis_version']
-    datastack = mat_metadata['datastack']
-    SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")        
-    analysis_sql_uri = create_analysis_sql_uri(
-        SQL_URI_CONFIG, datastack, analysis_version)
-   
-    engine = create_engine(analysis_sql_uri, pool_pre_ping=True)
-
-    # increase maintenance memory to improve index creation speeds,
-    # reset to default after index is created
-    ADD_INDEX_SQL = f"""
-        SET maintenance_work_mem to '1GB';
-        {command}
-        SET maintenance_work_mem to '64MB';
-    """
-
-    try:
-        with engine.begin() as conn:
-            celery_logger.info(f"Adding index: {command}")
-            result = conn.execute(ADD_INDEX_SQL)
-    except Exception as e:
-        celery_logger.error(f"Index creation failed: {e}")
-        raise self.retry(exc=e, countdown=3)        
-    
-    return f"Index {command} added to table"

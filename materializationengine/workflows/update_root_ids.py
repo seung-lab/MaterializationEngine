@@ -31,7 +31,6 @@ def expired_root_id_workflow(datastack_info: dict):
     workflow = []
     for mat_metadata in mat_info:
         chunked_roots = get_expired_root_ids(mat_metadata)
-        
         process_root_ids = update_root_ids_workflow(mat_metadata, chunked_roots)  # final task which will process a return status/timing etc...
         workflow.append(process_root_ids)
     workflow = chord(workflow, fin.s())
@@ -127,27 +126,32 @@ def get_expired_root_ids(mat_metadata: dict, expired_chunk_size: int = 100):
                 last_updated_ts, '%Y-%m-%d %H:%M:%S.%f')
         else:
             last_updated_ts = datetime.datetime.utcnow() - datetime.timedelta(days=5)
-    
+
     celery_logger.info(f"Looking up expired root ids since: {last_updated_ts}")
 
+    old_roots = lookup_expired_root_ids(pcg_table_name, last_updated_ts, materialization_time_stamp)
+    is_empty = np.all((old_roots == []))
+
+    if is_empty:
+        return None
+
+    if len(old_roots) < expired_chunk_size:
+        chunks = len(old_roots)
+    else:
+        chunks = len(old_roots) // expired_chunk_size
+
+    chunked_root_ids = np.array_split(old_roots, chunks)
+
+    for x in chunked_root_ids:
+        yield x.tolist()
+
+
+def lookup_expired_root_ids(pcg_table_name, last_updated_ts, materialization_time_stamp):
     cg = chunkedgraph_cache.init_pcg(pcg_table_name)
 
     old_roots, __ = cg.get_proofread_root_ids(
         last_updated_ts, materialization_time_stamp)
-    is_empty = np.all((old_roots == []))
-
-    if not is_empty:
-        if len(old_roots) < expired_chunk_size:
-            chunks = len(old_roots)
-        else:
-            chunks = len(old_roots) // expired_chunk_size
-
-        chunked_root_ids = np.array_split(old_roots, chunks)
-
-        for x in chunked_root_ids:
-            yield x.tolist()
-    else:
-        return None
+    return old_roots
 
 
 def get_supervoxel_ids(root_id_chunk: list, mat_metadata: dict):
@@ -228,9 +232,7 @@ def get_new_roots(self, supervoxel_chunk: list, mat_metadata: dict):
     supervoxel_df = root_ids_df.loc[:, supervoxel_col_name[0]]
     supervoxel_data = supervoxel_df.to_list()
 
-    cg = chunkedgraph_cache.init_pcg(pcg_table_name)
-    root_id_array = np.squeeze(cg.get_roots(
-        supervoxel_data, time_stamp=formatted_mat_ts))
+    root_id_array = lookup_new_root_ids(pcg_table_name, supervoxel_data, formatted_mat_ts)
 
     del supervoxel_data
 
@@ -252,3 +254,8 @@ def get_new_roots(self, supervoxel_chunk: list, mat_metadata: dict):
     finally:
         session.close()
     return f"Number of rows updated: {len(data)}"
+
+def lookup_new_root_ids(pcg_table_name, supervoxel_data, formatted_mat_ts):
+    cg = chunkedgraph_cache.init_pcg(pcg_table_name)
+    return np.squeeze(cg.get_roots(
+        supervoxel_data, time_stamp=formatted_mat_ts))
