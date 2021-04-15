@@ -72,7 +72,7 @@ def test_get_new_roots(monkeypatch, mat_metadata, annotation_data):
         "materializationengine.workflows.update_root_ids.lookup_new_root_ids", mock_lookup_new_root_ids)
     
     supervoxel_chunk = annotation_data["segmentation_data"]
-    new_roots = get_new_roots(supervoxel_chunk, mat_metadata)
-    assert new_roots == 'Number of rows updated: 3'
+    new_roots = get_new_roots.s(supervoxel_chunk, mat_metadata).apply()
+    assert new_roots.get() == 'Number of rows updated: 3'
 
 
