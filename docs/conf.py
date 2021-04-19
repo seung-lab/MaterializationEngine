@@ -26,7 +26,7 @@ author = "Derrick Brittain,  Forrest Collman, Sven Dorkenwald"
 # The full version, including alpha/beta/rc tags
 release = "1.3.0"
 
-master_doc = 'contents'
+master_doc = 'index'
 
 # -- General configuration ---------------------------------------------------
 
@@ -39,7 +39,8 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx_rtd_theme",
     "sphinx.ext.viewcode",
-    "sphinx.ext.intersphinx"
+    "sphinx.ext.intersphinx",
+    "celery.contrib.sphinx"
 ]
 
 # Add any paths that contain templates here, relative to this directory.
