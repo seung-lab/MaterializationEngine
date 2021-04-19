@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.abspath(".."))
 
 project = "Materialization Engine"
 copyright = "2021, Derrick Brittain"
-author = "Derrick Brittain"
+author = "Derrick Brittain,  Forrest Collman, Sven Dorkenwald"
 
 # The full version, including alpha/beta/rc tags
 release = "1.3.0"
