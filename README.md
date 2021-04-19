@@ -1,4 +1,6 @@
 [![Actions Status](https://github.com/seung-lab/MaterializationEngine/workflows/Materialization%20Engine/badge.svg)](https://github.com/seung-lab/MaterializationEngine/actions)
+[![Documentation Status](https://readthedocs.org/projects/materializationengine/badge/?version=latest)](https://materializationengine.readthedocs.io/en/latest/?badge=latest)
+
 # Materialization Engine
 #### A product of the CAVE (Connectome Annotation Versioning Engine) infrastructure
 This is a microservice for creating materialized versions of an analysis database,  merging together spatially bound annotation and a segmentation data stored in a chunkedgraph that is frozen in time. The data is stored in a PostgreSQL database where the spatial annotations are leveraging PostGIS point types. The materialization engine can create new time locked versions periodically on a defined schedule as well as one-off versions for specific use cases.  
