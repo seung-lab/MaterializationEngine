@@ -112,8 +112,7 @@ To run the locally use the following commands:
     $ docker-compose build
     $ docker-compose up -d
 
-Once the docker images are running the following services will
-will be running:
+Once the docker images are running the following services will be available:
 
 DB
     A PostgreSQL database with PostGIS extension installed. The 
