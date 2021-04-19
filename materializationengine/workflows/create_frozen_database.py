@@ -66,8 +66,8 @@ def create_materializied_database_workflow(datastack_info: dict,
 
     Workflow:
         - Copy live database as a versioned materialized database.
-        - Create materialziation metadata table and populate.
-        - Drop tables that are uneeded in the materialized database.
+        - Create materialization metadata table and populate.
+        - Drop tables that are unneeded in the materialized database.
 
     Args:
         datastack_info (dict): database information
@@ -93,8 +93,7 @@ def format_materialization_database_workflow(mat_info: dict):
     """Celery workflow to format the materialized database.
 
     Workflow:
-        - Merge annotation and segmentation tables into
-        a single table.
+        - Merge annotation and segmentation tables into a single table.
         - Add indexes into merged tables.
 
     Args:
@@ -124,7 +123,7 @@ def create_new_version(datastack_info: dict,
         days_to_expire (int, optional): Number of days until db is flagged to be expired. Defaults to 5.
 
     Returns:
-        [int]: version number of materialzied database
+        [int]: version number of materialized database
     """
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info.get('datastack')
@@ -188,7 +187,7 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
         e: error if dropping table(s) fails.
 
     Returns:
-        bool: True if analysis database creation is succesful
+        bool: True if analysis database creation is successful
     """
 
     aligned_volume = datastack_info['aligned_volume']['name']
@@ -262,7 +261,7 @@ def create_materialized_metadata(self, datastack_info: dict,
                                  analysis_version: int,
                                  materialization_time_stamp: datetime.datetime.utcnow):
     """Creates a metadata table in a materialized database. Reads row counts
-    from annotation tables copied to the materialzied database. Inserts row count 
+    from annotation tables copied to the materialized database. Inserts row count 
     and table info into the metadata table.
 
     Args:
@@ -369,13 +368,13 @@ def update_table_metadata(self, mat_info: List[dict]):
              bind=True,
              acks_late=True,)
 def drop_tables(self, datastack_info: dict, analysis_version: int):
-    """Drop all tables that dont match valid in the live 'aligned_volume' database
+    """Drop all tables that don't match valid in the live 'aligned_volume' database
     as well as tables that were copied from the live table that are not needed in
     the frozen version (e.g. metadata tables).
 
     Args:
         datastack_info (dict): datastack info for the aligned_volume from the infoservice
-        analysis_version (int): materialized verison number
+        analysis_version (int): materialized version number
 
     Raises:
         e: error if dropping table(s) fails.
@@ -505,7 +504,7 @@ def merge_tables(self, mat_metadata: dict):
 
     Args:
         mat_metadata (dict): datastack info for the aligned_volume from the infoservice
-        analysis_version (int): materialized verison number
+        analysis_version (int): materialized version number
 
     Raises:
         e: error during table merging operation
@@ -616,12 +615,12 @@ def insert_chunked_data(annotation_table_name: str, sql_statement: str, cur, eng
              acks_late=True,)
 def check_tables(self, mat_info: list, analysis_version: int):
     """Check if each materialized table has the same number of rows as 
-    the aligned volumes tables in the live databse that are set as valid. 
+    the aligned volumes tables in the live database that are set as valid. 
     If row numbers match, set the validity of both the analysis tables as well
-    as the analysis version (materialzied database) as True.
+    as the analysis version (materialized database) as True.
 
     Args:
-        mat_info (list): list of dicts containing metadata for each materialzied table
+        mat_info (list): list of dicts containing metadata for each materialized table
         analysis_version (int): the materialized version number
 
     Returns:
