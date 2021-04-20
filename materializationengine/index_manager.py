@@ -185,9 +185,9 @@ class IndexCache:
             if index_type == 'primary_key':
                 command = f'ALTER TABLE {table_name} add primary key({column_name});'
             if index_type == 'index':
-                command = f"CREATE INDEX ix_{table_name}_{column_name} ON {table_name} ({column_name});"
+                command = f"CREATE INDEX IF NOT EXISTS ix_{table_name}_{column_name} ON {table_name} ({column_name});"
             if index_type == 'spatial_index':
-                command = f"CREATE INDEX idx_{table_name}_{column_name} ON {table_name} USING GIST ({column_name} gist_geometry_ops_nd);"
+                command = f"CREATE INDEX IF NOT EXISTS idx_{table_name}_{column_name} ON {table_name} USING GIST ({column_name} gist_geometry_ops_nd);"
             if index_type == 'foreign_key':
                 foreign_key_name = model_indices[column_name]['foreign_key_name']
                 foreign_key_table = model_indices[column_name]['foreign_key_table']
