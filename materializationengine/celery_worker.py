@@ -3,7 +3,7 @@ from materializationengine.celery_app import create_celery
 from materializationengine.celery_init import celery
 from celery.schedules import crontab
 from materializationengine.workflows.periodic_database_removal import remove_expired_databases
-from materializationengine.workflows.periodic_materialization import run_periodic_materialzation
+from materializationengine.workflows.periodic_materialization import run_periodic_materialization
 from materializationengine.schemas import CeleryBeatSchema
 from materializationengine.errors import TaskNotFound
 from celery.app import builtins
@@ -20,9 +20,9 @@ celery_logger = get_task_logger(__name__)
 def setup_periodic_tasks(sender, **kwargs):
 
     periodic_tasks = {
-        'run_daily_periodic_materialzation': run_periodic_materialzation.s(days_to_expire=2),
-        'run_weekly_periodic_materialzation': run_periodic_materialzation.s(days_to_expire=7),
-        'run_lts_periodic_materialzation': run_periodic_materialzation.s(days_to_expire=30),
+        'run_daily_periodic_materialization': run_periodic_materialization.s(days_to_expire=2),
+        'run_weekly_periodic_materialization': run_periodic_materialization.s(days_to_expire=7),
+        'run_lts_periodic_materialization': run_periodic_materialization.s(days_to_expire=30),
         'remove_expired_databases': remove_expired_databases.s(delete_threshold=5),
     }
 
