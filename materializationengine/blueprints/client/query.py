@@ -27,6 +27,7 @@ from datetime import datetime
 from functools import partial
 import shapely
 import itertools
+import logging
 
 DEFAULT_SUFFIX_LIST = ['x','y','z','xx','yy','zz','xxx','yyy','zzz']
 
@@ -238,18 +239,27 @@ def specific_query(sqlalchemy_session, engine, model_dict, tables,
             for column in model.__table__.columns:
                 if isinstance(column.type,Geometry) and ~return_wkb:
                     if column.key in dup_cols:
-                        query_args.append(column.ST_X().cast(Integer).label(column.key + '_{}_x'.format(suffix)))
-                        query_args.append(column.ST_Y().cast(Integer).label(column.key + '_{}_y'.format(suffix)))
-                        query_args.append(column.ST_Z().cast(Integer).label(column.key + '_{}_z'.format(suffix)))
+                        column_args = [column.ST_X().cast(Integer).label(column.key + '_{}_x'.format(suffix)),
+                                       column.ST_Y().cast(Integer).label(column.key + '_{}_y'.format(suffix)),
+                                       column.ST_Z().cast(Integer).label(column.key + '_{}_z'.format(suffix))]
+                        
                     else:
-                        query_args.append(column.ST_X().cast(Integer).label(column.key + '_x'))
-                        query_args.append(column.ST_Y().cast(Integer).label(column.key + '_y'))
-                        query_args.append(column.ST_Z().cast(Integer).label(column.key + '_z'))
+                        column_args=[column.ST_X().cast(Integer).label(column.key + '_x'),
+                                     column.ST_Y().cast(Integer).label(column.key + '_y'),
+                                     column.ST_Z().cast(Integer).label(column.key + '_z')]
+                    query_args += column_args
+                    if select_columns is not None:
+                        if column.key in select_columns:
+                            column_index = select_columns.index(column.key)
+                            select_columns.pop(column_index)
+                            select_columns+=column_args
+
                 else:
                     if column.key in dup_cols:
                         query_args.append(column.label(column.key + '_{}'.format(suffix)))
                     else:
                         query_args.append(column)
+                
  
         if len(tables) == 2:
             join_args = (model_dict[tables[1][0]],
@@ -339,6 +349,7 @@ def _execute_query(session, engine, query, fix_wkb=True, fix_decimal=True, n_thr
         if import_via_buffer is True:
             df = self._df_via_buffer(query, index_col=index_col)
         else:
+            logging.info(query.statement)
             df = pd.read_sql(query.statement, engine,
                             coerce_float=False, index_col=index_col)
 

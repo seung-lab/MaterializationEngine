@@ -33,6 +33,7 @@ from flask_restx import inputs
 import time
 __version__ = "1.3.0"
 
+
 authorizations = {
     'apikey': {
         'type': 'apiKey',
@@ -379,17 +380,29 @@ class FrozenTableQuery(Resource):
         aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
         args = query_parser.parse_args()
         Session = sqlalchemy_cache.get(aligned_volume_name)
-       
+        time_d={}
+        now = time.time()
+
         data = request.parsed_obj
         Model = get_flat_model(datastack_name, table_name, version, Session)
+        time_d['get Model']=time.time()-now
+        now = time.time()
         if Model is None:
             return "Cannot find table {} in datastack {} at version {}".format(table_name, datastack_name, version), 404
 
+
         Session = sqlalchemy_cache.get("{}__mat{}".format(datastack_name, version))
+        time_d['get Session']=time.time()-now
+        now = time.time()
+
         engine = sqlalchemy_cache.get_engine("{}__mat{}".format(datastack_name, version))
+        time_d['get engine']=time.time()-now
+        now = time.time()
         max_limit = current_app.config.get('QUERY_LIMIT_SIZE', 200000)
 
         data = request.parsed_obj
+        time_d['get data']=time.time()-now
+        now = time.time()
         limit = data.get('limit', max_limit)
         
         if limit>max_limit:
@@ -397,6 +410,10 @@ class FrozenTableQuery(Resource):
 
         logging.info('query {}'.format(data))
         logging.info('args - {}'.format(args))
+        
+        time_d['setup query']=time.time()-now
+        now = time.time()
+
         df = specific_query(Session, engine, {table_name: Model}, [table_name],
                       filter_in_dict=data.get('filter_in_dict', {}),
                       filter_notin_dict=data.get('filter_notin_dict', {}),
@@ -405,18 +422,25 @@ class FrozenTableQuery(Resource):
                       consolidate_positions=not args['split_positions'],
                       offset=data.get('offset', None),
                       limit = limit)
+        time_d['execute query']=time.time()-now
+        now = time.time()
         headers=None
         if len(df) == limit:
             headers={'Warning':f'201 - "Limited query to {max_limit} rows'}
-       
+
+
         if args['return_pyarrow']:
             context = pa.default_serialization_context()
-            serialized = context.serialize(df)
-            return Response(serialized.to_buffer().to_pybytes(),
+            serialized = context.serialize(df).to_buffer().to_pybytes()
+            time_d['serialize']=time.time()-now
+            logging.info(time_d)
+            return Response(serialized,
                         headers=headers,
                         mimetype='x-application/pyarrow')
         else:
             dfjson = df.to_json(orient='records')
+            time_d['serialize']=time.time()-now
+            logging.info(time_d)
             response = Response(dfjson,
                         headers=headers,
                         mimetype='application/json')
@@ -504,8 +528,8 @@ class FrozenQuery(Resource):
                
         if args['return_pyarrow']:
             context = pa.default_serialization_context()
-            serialized = context.serialize(df)
-            return Response(serialized.to_buffer().to_pybytes(),
+            serialized = context.serialize(df).to_buffer().to_pybytes()
+            return Response(serialized,
                         headers=headers,
                         mimetype='x-application/pyarrow')
         else:
