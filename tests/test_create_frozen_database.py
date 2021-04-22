@@ -12,6 +12,7 @@ datastack_info = {
         'name': 'test_aligned_volume'
     },
     'segmentation_source': 'graphene://https://fake-daf.com/segmentation/table/test_pcg'}
+
 materialization_time_stamp = datetime.datetime.utcnow()
 
 
@@ -23,33 +24,33 @@ def test_create_new_version(test_app):
 
 
 def test_create_analysis_database():
-    is_created = create_analysis_database(datastack_info, 1)
-    assert is_created == True
+    is_created = create_analysis_database.s(datastack_info, 1).apply()
+    assert is_created.get() == True
 
 
 def test_create_materialized_metadata():
-    is_table_created = create_materialized_metadata(
+    is_table_created = create_materialized_metadata.s(
         datastack_info=datastack_info,
         analysis_version=1,
-        materialization_time_stamp=materialization_time_stamp)
-    assert is_table_created == True
+        materialization_time_stamp=materialization_time_stamp).apply()
+    assert is_table_created.get() == True
 
 
 def test_update_table_metadata(mat_metadata):
-    tables = update_table_metadata([mat_metadata])
-    assert tables == ['test_synapse_table']
+    tables = update_table_metadata.s([mat_metadata]).apply()
+    assert tables.get() == ['test_synapse_table']
 
 
 def test_drop_tables():
-    dropped_tables = drop_tables(datastack_info, analysis_version=1)
+    dropped_tables = drop_tables.s(datastack_info, analysis_version=1).apply()
     logging.info(dropped_tables)
-    assert dropped_tables != None
+    assert dropped_tables.get() != None
 
 
 def test_merge_tables(mat_metadata):
-    table_info = merge_tables(mat_metadata)
+    table_info = merge_tables.s(mat_metadata).apply()
     logging.info(table_info)
-    assert table_info == "Number of rows copied: 3"
+    assert table_info.get() == "Number of rows copied: 3"
 
 
 def test_add_indices(mat_metadata):

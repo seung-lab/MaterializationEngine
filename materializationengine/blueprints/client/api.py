@@ -31,8 +31,8 @@ from middle_auth_client import (auth_required, auth_requires_admin,
 from sqlalchemy.engine.url import make_url
 from flask_restx import inputs
 import time
+__version__ = "1.3.0"
 
-__version__ = "1.1.0"
 
 authorizations = {
     'apikey': {
@@ -220,6 +220,31 @@ class DatastackVersion(Resource):
             return "No version found", 404
         schema = AnalysisVersionSchema()
         return schema.dump(response), 200
+
+@client_bp.route("/datastack/<string:datastack_name>/metadata")
+class DatastackMetadata(Resource):
+    @reset_auth    
+    @auth_required
+    @client_bp.doc("all valid version metadata", security="apikey")
+    def get(self, datastack_name: str):
+        """get materialized metadata for all valid versions
+        Args:
+            datastack_name (str): datastack name
+        Returns:
+            list: list of metadata dictionaries
+        """
+        aligned_volume_name, pcg_table_name = get_relevant_datastack_info(datastack_name)
+        session = sqlalchemy_cache.get(aligned_volume_name)
+        response = (
+            session.query(AnalysisVersion)
+            .filter(AnalysisVersion.datastack == datastack_name)
+            .filter(AnalysisVersion.valid == True)
+            .all()
+        )
+        if response is None:
+            return "No valid versions found", 404
+        schema = AnalysisVersionSchema()
+        return schema.dump(response, many=True), 200
 
 @client_bp.route("/datastack/<string:datastack_name>/version/<int:version>/tables")
 class FrozenTableVersions(Resource):

@@ -2,6 +2,7 @@
 # Mock pychunkgraph imports and cloudvolume before importing
 # the tasks
 import sys
+import logging
 from unittest.mock import MagicMock
 
 sys.modules['materializationengine.chunkedgraph_gateway'] = MagicMock()
@@ -57,12 +58,13 @@ mocked_root_id_data = [{'post_pt_supervoxel_id': 10000000,
 
 
 def test_create_missing_segmentation_table(mat_metadata, db_client):
-    table_metadata = create_missing_segmentation_table(mat_metadata)
+    table_metadata = create_missing_segmentation_table.s(mat_metadata).apply()
+    
     __, engine= db_client
 
     seg_table_exists= engine.dialect.has_table(
         engine.connect(), "test_synapse_table__test_pcg")
-
+    assert table_metadata.get() == mat_metadata
     assert seg_table_exists == True
 
 
@@ -99,10 +101,11 @@ def test_get_new_root_ids(monkeypatch, mat_metadata, annotation_data):
 def test_insert_segmentation_data(test_app, annotation_data, mat_metadata):
     segmentation_data = annotation_data['new_segmentation_data']
     num_of_rows = insert_segmentation_data(segmentation_data, mat_metadata)
-    assert num_of_rows == {'New segmentations inserted': 1} 
+    assert num_of_rows == {'Segmentation data inserted': 1} 
 
 
 def test_get_sql_supervoxel_ids(test_app, mat_metadata):
     id_chunk_range = [1, 4]
     supervoxel_ids = get_sql_supervoxel_ids(id_chunk_range, mat_metadata)
+    logging.info(supervoxel_ids)
     assert True

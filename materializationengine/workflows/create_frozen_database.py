@@ -18,7 +18,7 @@ from materializationengine.index_manager import index_cache
 from materializationengine.models import (AnalysisTable, AnalysisVersion, Base,
                                           MaterializedMetadata)
 from materializationengine.shared_tasks import (fin, get_materialization_info,
-                                                query_id_range)
+                                                query_id_range, add_index)
 from materializationengine.utils import (create_annotation_model,
                                          create_segmentation_model,
                                          get_config_param)
@@ -66,8 +66,8 @@ def create_materializied_database_workflow(datastack_info: dict,
 
     Workflow:
         - Copy live database as a versioned materialized database.
-        - Create materialziation metadata table and populate.
-        - Drop tables that are uneeded in the materialized database.
+        - Create materialization metadata table and populate.
+        - Drop tables that are unneeded in the materialized database.
 
     Args:
         datastack_info (dict): database information
@@ -93,8 +93,7 @@ def format_materialization_database_workflow(mat_info: dict):
     """Celery workflow to format the materialized database.
 
     Workflow:
-        - Merge annotation and segmentation tables into
-        a single table.
+        - Merge annotation and segmentation tables into a single table.
         - Add indexes into merged tables.
 
     Args:
@@ -124,7 +123,7 @@ def create_new_version(datastack_info: dict,
         days_to_expire (int, optional): Number of days until db is flagged to be expired. Defaults to 5.
 
     Returns:
-        [int]: version number of materialzied database
+        [int]: version number of materialized database
     """
     aligned_volume = datastack_info['aligned_volume']['name']
     datastack = datastack_info.get('datastack')
@@ -188,7 +187,7 @@ def create_analysis_database(self, datastack_info: dict, analysis_version: int) 
         e: error if dropping table(s) fails.
 
     Returns:
-        bool: True if analysis database creation is succesful
+        bool: True if analysis database creation is successful
     """
 
     aligned_volume = datastack_info['aligned_volume']['name']
@@ -262,7 +261,7 @@ def create_materialized_metadata(self, datastack_info: dict,
                                  analysis_version: int,
                                  materialization_time_stamp: datetime.datetime.utcnow):
     """Creates a metadata table in a materialized database. Reads row counts
-    from annotation tables copied to the materialzied database. Inserts row count 
+    from annotation tables copied to the materialized database. Inserts row count 
     and table info into the metadata table.
 
     Args:
@@ -369,13 +368,13 @@ def update_table_metadata(self, mat_info: List[dict]):
              bind=True,
              acks_late=True,)
 def drop_tables(self, datastack_info: dict, analysis_version: int):
-    """Drop all tables that dont match valid in the live 'aligned_volume' database
+    """Drop all tables that don't match valid in the live 'aligned_volume' database
     as well as tables that were copied from the live table that are not needed in
     the frozen version (e.g. metadata tables).
 
     Args:
         datastack_info (dict): datastack info for the aligned_volume from the infoservice
-        analysis_version (int): materialized verison number
+        analysis_version (int): materialized version number
 
     Raises:
         e: error if dropping table(s) fails.
@@ -505,7 +504,7 @@ def merge_tables(self, mat_metadata: dict):
 
     Args:
         mat_metadata (dict): datastack info for the aligned_volume from the infoservice
-        analysis_version (int): materialized verison number
+        analysis_version (int): materialized version number
 
     Raises:
         e: error during table merging operation
@@ -616,12 +615,12 @@ def insert_chunked_data(annotation_table_name: str, sql_statement: str, cur, eng
              acks_late=True,)
 def check_tables(self, mat_info: list, analysis_version: int):
     """Check if each materialized table has the same number of rows as 
-    the aligned volumes tables in the live databse that are set as valid. 
+    the aligned volumes tables in the live database that are set as valid. 
     If row numbers match, set the validity of both the analysis tables as well
-    as the analysis version (materialzied database) as True.
+    as the analysis version (materialized database) as True.
 
     Args:
-        mat_info (list): list of dicts containing metadata for each materialzied table
+        mat_info (list): list of dicts containing metadata for each materialized table
         analysis_version (int): the materialized version number
 
     Returns:
@@ -777,70 +776,28 @@ def add_indices(self, mat_metadata: dict):
     """
     add_indices = mat_metadata.get('add_indices', False)
     if add_indices:
-        analysis_version = mat_metadata.get('analysis_version', None)
+        analysis_version = mat_metadata.get('analysis_version')
         datastack = mat_metadata['datastack']
-        SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")        
+        analysis_database = mat_metadata['analysis_database']
+        SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")
         analysis_sql_uri = create_analysis_sql_uri(
             SQL_URI_CONFIG, datastack, analysis_version)
 
         analysis_session, analysis_engine = create_session(analysis_sql_uri)
 
 
-        annotation_table_name = mat_metadata.get('annotation_table_name', None)
-        schema = mat_metadata.get('schema', None)
+        annotation_table_name = mat_metadata.get('annotation_table_name')
+        schema = mat_metadata.get('schema')
 
         model = make_flat_model(annotation_table_name, schema)
 
         commands = index_cache.add_indices_sql_commands(annotation_table_name, model, analysis_engine)
         analysis_session.close()
         analysis_engine.dispose()
-        
-        add_index_tasks = chain([add_index.si(mat_metadata, command) for command in commands])
-        
+
+        add_index_tasks = chain([add_index.si(analysis_database, command) for command in commands])
+
         return self.replace(add_index_tasks)
     return "Indices already exist"
 
 
-@celery.task(name="process:add_index",
-             bind=True,
-             acks_late=True,
-             autoretry_for=(Exception,),
-             max_retries=3)
-def add_index(self, mat_metadata: dict, command: str):
-    """Add an index or a contrainst to a table.
-
-    Args:
-        mat_metadata (dict): datastack info for the aligned_volume derived from the infoservice
-        command (str): sql command to create an index or constraint
-
-    Raises:
-        self.retry: retrys task when an error creating an index occurs
-
-    Returns:
-        str: String of SQL command
-    """
-    analysis_version = mat_metadata['analysis_version']
-    datastack = mat_metadata['datastack']
-    SQL_URI_CONFIG = get_config_param("SQLALCHEMY_DATABASE_URI")        
-    analysis_sql_uri = create_analysis_sql_uri(
-        SQL_URI_CONFIG, datastack, analysis_version)
-   
-    engine = create_engine(analysis_sql_uri, pool_pre_ping=True)
-
-    # increase maintenance memory to improve index creation speeds,
-    # reset to default after index is created
-    ADD_INDEX_SQL = f"""
-        SET maintenance_work_mem to '1GB';
-        {command}
-        SET maintenance_work_mem to '64MB';
-    """
-
-    try:
-        with engine.begin() as conn:
-            celery_logger.info(f"Adding index: {command}")
-            result = conn.execute(ADD_INDEX_SQL)
-    except Exception as e:
-        celery_logger.error(f"Index creation failed: {e}")
-        raise self.retry(exc=e, countdown=3)        
-    
-    return f"Index {command} added to table"

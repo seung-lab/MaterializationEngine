@@ -42,6 +42,8 @@ services:
       - REDIS_HOSTS=local:redis-master:6379
       ports:
       - "8083:8083"
+      depends_on: 
+        - redis-master
 
     celery-process_1:
       image: 'materialize:tag'
