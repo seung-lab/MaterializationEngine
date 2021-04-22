@@ -502,10 +502,9 @@ class FrozenQuery(Resource):
             headers={'Warning':f'201 - "Limited query to {max_limit} rows'}
                
         if args['return_pyarrow']:
-            table = pa.Schema.from_pandas(df)
-            sink = pa.CompressedOutputStream()
-            writer = pa.ipc.new_stream(sink, table.schema)
-            return Response(sink,
+            context = pa.default_serialization_context()
+            serialized = context.serialize(df).to_buffer().to_pybytes()
+            return Response(serialized,
                         headers=headers,
                         mimetype='x-application/pyarrow')
         else:
