@@ -20,9 +20,9 @@ celery_logger = get_task_logger(__name__)
 def setup_periodic_tasks(sender, **kwargs):
 
     periodic_tasks = {
-        'run_daily_periodic_materialzation': run_periodic_materialization.s(days_to_expire=2),
-        'run_weekly_periodic_materialzation': run_periodic_materialization.s(days_to_expire=7),
-        'run_lts_periodic_materialzation': run_periodic_materialization.s(days_to_expire=30),
+        'run_daily_periodic_materialization': run_periodic_materialization.s(days_to_expire=2),
+        'run_weekly_periodic_materialization': run_periodic_materialization.s(days_to_expire=7),
+        'run_lts_periodic_materialization': run_periodic_materialization.s(days_to_expire=30),
         'remove_expired_databases': remove_expired_databases.s(delete_threshold=5),
     }
 
