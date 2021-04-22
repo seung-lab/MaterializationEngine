@@ -1,23 +1,25 @@
 [![Actions Status](https://github.com/seung-lab/MaterializationEngine/workflows/Materialization%20Engine/badge.svg)](https://github.com/seung-lab/MaterializationEngine/actions)
+[![Documentation Status](https://readthedocs.org/projects/materializationengine/badge/?version=latest)](https://materializationengine.readthedocs.io/en/latest/?badge=latest)
+
 # Materialization Engine
 #### A product of the CAVE (Connectome Annotation Versioning Engine) infrastructure
-This is a microservice for creating materializied versions of an analysis database,  merging together spatially bound annotation and a segmentation data stored in a pychunkedgraph that is frozen in time. The data is stored in a PostgreSQL database where the spatial annotations are leveraging postgis point types. The materialization engine can create new time locked versions periodically on a defined scheudle as well as one-off versions for specific use cases.  
+This is a microservice for creating materialized versions of an analysis database,  merging together spatially bound annotation and a segmentation data stored in a chunkedgraph that is frozen in time. The data is stored in a PostgreSQL database where the spatial annotations are leveraging PostGIS point types. The materialization engine can create new time locked versions periodically on a defined schedule as well as one-off versions for specific use cases.  
 
-Present funcationality:
+Present functionality:
 
-* A flask microservice as REST API endpoints for creating and querying the materializied databases.
+* A flask microservice as REST API endpoints for creating and querying the materialized databases.
 * The backend is powered by workflows running as [Celery][celery] workers, a task queue implementation used to asynchronously execute work.
 ## Installation
 
-This service is intended to be deployed to a kubernentes cluster as a series of pods.
-Local deployment is currently best done by using docker. A docker-compose file is included that will install all the required packages and create a local postgres database and redis broker that is leveraged by the Celery workers for running tasks.
+This service is intended to be deployed to a Kubernetes cluster as a series of pods.
+Local deployment is currently best done by using docker. A docker-compose file is included that will install all the required packages and create a local PostgreSQL database and redis broker that is leveraged by the Celery workers for running tasks.
 
 Docker compose example:
 ```
     $ docker-compose build
-    $ docker-compse up
+    $ docker-compose up
 ```
-Alternatively one can setup a docker container running PostgreSQL database and a seperate Redis container then create a python virtual env and run the following commands:
+Alternatively one can setup a docker container running PostgreSQL database and a separate Redis container then create a python virtual env and run the following commands:
 
 Setup a redis instance:
 ```
@@ -49,8 +51,8 @@ There are a few workflows that make up the materialization engine:
 * [Bulk Upload][bulk] (Load large spatial and segmentation datasets into a PostgreSQL database)
 * [Ingest New Annotations][ingest] (Query and insert underlying segmentation data on spatial points with missing segmentation data)
 * [Update Root Ids][update] (Query and update expired root ids from the chunkedgraph between a time delta)
-* [Create Frozen Database][create] (Creates a timelocked database for all tables)
-* [Complete Workflow][complete] (Combines the Ingest New Annotations, Update Root Id and Create Frozen Worklows in one, run in series)
+* [Create Frozen Database][create] (Creates a time locked database for all tables)
+* [Complete Workflow][complete] (Combines the Ingest New Annotations, Update Root Id and Create Frozen Workflows in one, run in series)
 
 
 ## Meta

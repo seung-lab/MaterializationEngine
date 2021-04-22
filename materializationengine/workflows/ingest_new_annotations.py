@@ -62,9 +62,9 @@ def process_new_annotations_workflow(datastack_info: dict):
 
 
 def ingest_new_annotations_workflow(mat_metadata: dict, annotation_chunks: List[int]):
-    """Celery workflow to ingest new annotations. In addtion, it will 
+    """Celery workflow to ingest new annotations. In addition, it will 
     create missing segmentation data table if it does not exist. 
-    Returns celery chain primative.
+    Returns celery chain primitive.
 
     Workflow:
         - Create linked segmentation table if not exists
@@ -97,18 +97,18 @@ def ingest_new_annotations_workflow(mat_metadata: dict, annotation_chunks: List[
              autoretry_for=(Exception,),
              max_retries=6)
 def ingest_new_annotations(self, mat_metadata: dict, chunk: List[int]):
-    """Find annotations with missing entries in the segmenation
+    """Find annotations with missing entries in the segmentation
     table. Lookup supervoxel ids at the spatial point then
     find the current root id at the materialized timestamp.
     Finally insert the supervoxel and root ids into the 
     segmentation table.
 
     Args:
-        mat_metadata (dict): metatdata associated with the materiaization
+        mat_metadata (dict): metadata associated with the materialization
         chunk (List[int]): list of annotation ids
 
     Raises:
-        self.retry: re-queue the tasks if failed. Retrys upto 6 times.
+        self.retry: re-queue the tasks if failed. Retries 6 times.
 
     Returns:
         str: Name of table and runtime of task.
@@ -395,7 +395,7 @@ def get_root_ids(cg, data, materialization_time_stamp):
 
 
 def insert_segmentation_data(materialization_data: dict, mat_metadata: dict) -> dict:
-    """Insert supervoxel and root id data into segmenation table.
+    """Insert supervoxel and root id data into segmentation table.
 
     Args:
         materialization_data (dict): supervoxel and/or root id data
@@ -421,4 +421,4 @@ def insert_segmentation_data(materialization_data: dict, mat_metadata: dict) -> 
         celery_logger.error(e)
     finally:
         session.close()
-    return {'New segmentations inserted': len(materialization_data)}
+    return {'Segmentation data inserted': len(materialization_data)}

@@ -1,16 +1,20 @@
-from typing import List
 import datetime
-from dynamicannotationdb.models import AnnoMetadata, SegmentationMetadata
 import os
+from typing import List
+
 from celery.utils.log import get_task_logger
+from dynamicannotationdb.key_utils import build_segmentation_table_name
+from dynamicannotationdb.models import AnnoMetadata, SegmentationMetadata
 from flask import current_app
 from sqlalchemy import and_, func, text
-from materializationengine.celery_init import celery
-from materializationengine.database import sqlalchemy_cache
-from materializationengine.utils import create_annotation_model, get_config_param
-from materializationengine.database import dynamic_annotation_cache
-from dynamicannotationdb.key_utils import build_segmentation_table_name
+from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.sql.expression import except_
 
+from materializationengine.celery_init import celery
+from materializationengine.database import (dynamic_annotation_cache,
+                                            sqlalchemy_cache)
+from materializationengine.utils import (create_annotation_model,
+                                         get_config_param)
 
 celery_logger = get_task_logger(__name__)
 
@@ -220,7 +224,7 @@ def add_index(self, database: dict, command: str):
         command (str): sql command to create an index or constraint
 
     Raises:
-        self.retry: retrys task when an error creating an index occurs
+        self.retry: retries task when an error creating an index occurs
 
     Returns:
         str: String of SQL command
@@ -239,6 +243,9 @@ def add_index(self, database: dict, command: str):
         with engine.begin() as conn:
             celery_logger.info(f"Adding index: {command}")
             result = conn.execute(ADD_INDEX_SQL)
+    except ProgrammingError as index_error:
+        celery_logger.error(index_error)
+        return "Index already exists"
     except Exception as e:
         celery_logger.error(f"Index creation failed: {e}")
         raise self.retry(exc=e, countdown=3)        

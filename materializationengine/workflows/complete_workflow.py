@@ -17,9 +17,9 @@ from materializationengine.workflows.update_root_ids import (
 celery_logger = get_task_logger(__name__)
 
 
-@celery.task(name="process:run_complete_worflow")
-def run_complete_worflow(datastack_info: dict, days_to_expire: int = 5):
-    """Run complete materialziation workflow. 
+@celery.task(name="process:run_complete_workflow")
+def run_complete_workflow(datastack_info: dict, days_to_expire: int = 5):
+    """Run complete materialization workflow. 
     Workflow overview:
         - Find all annotations with missing segmentation rows 
         and lookup supervoxel_id and root_id
@@ -66,7 +66,7 @@ def run_complete_worflow(datastack_info: dict, days_to_expire: int = 5):
         else:
             update_live_database_workflow.append(update_expired_roots_workflow)
 
-    # copy live database as a materialized version and drop uneeded tables
+    # copy live database as a materialized version and drop unneeded tables
     setup_versioned_database_workflow = create_materializied_database_workflow(
         datastack_info, new_version_number, materialization_time_stamp, mat_info)
 

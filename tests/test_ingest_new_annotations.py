@@ -101,7 +101,7 @@ def test_get_new_root_ids(monkeypatch, mat_metadata, annotation_data):
 def test_insert_segmentation_data(test_app, annotation_data, mat_metadata):
     segmentation_data = annotation_data['new_segmentation_data']
     num_of_rows = insert_segmentation_data(segmentation_data, mat_metadata)
-    assert num_of_rows == {'New segmentations inserted': 1} 
+    assert num_of_rows == {'Segmentation data inserted': 1} 
 
 
 def test_get_sql_supervoxel_ids(test_app, mat_metadata):
