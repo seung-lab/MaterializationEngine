@@ -28,6 +28,7 @@ from functools import partial
 import shapely
 import itertools
 import logging
+import tempfile
 
 DEFAULT_SUFFIX_LIST = ['x','y','z','xx','yy','zz','xxx','yyy','zzz']
 
@@ -302,6 +303,17 @@ def specific_query(sqlalchemy_session, engine, model_dict, tables,
             return df
 
 
+def read_sql_tmpfile(query, db_engine):
+    with tempfile.TemporaryFile() as tmpfile:
+        copy_sql = "COPY ({query}) TO STDOUT WITH CSV {head}".format(
+           query=query, head="HEADER"
+        )
+        conn = db_engine.raw_connection()
+        cur = conn.cursor()
+        cur.copy_expert(copy_sql, tmpfile)
+        tmpfile.seek(0)
+        df = pd.read_csv(tmpfile)
+        return df
 
 def _make_query(this_sqlalchemy_session, query_args, join_args=None, filter_args=None,
                     select_columns=None, offset=None, limit=None):
@@ -335,7 +347,7 @@ def _make_query(this_sqlalchemy_session, query_args, join_args=None, filter_args
             query=query.limit(limit)
         return query
 
-def _execute_query(session, engine, query, fix_wkb=True, fix_decimal=True, n_threads=None, index_col=None, import_via_buffer=False):
+def _execute_query(session, engine, query, fix_wkb=True, fix_decimal=True, n_threads=None, index_col=None):
         """ Query the database and make a dataframe out of the results
 
         Args:
@@ -346,12 +358,10 @@ def _execute_query(session, engine, query, fix_wkb=True, fix_decimal=True, n_thr
         Returns:
             Dataframe with query results
         """
-        if import_via_buffer is True:
-            df = self._df_via_buffer(query, index_col=index_col)
-        else:
-            logging.info(query.statement)
-            df = pd.read_sql(query.statement, engine,
-                            coerce_float=False, index_col=index_col)
+        # logging.info(query.statement)
+        df = read_sql_tmpfile(query.statement.compile(engine, compile_kwargs={"literal_binds": True}), engine)
+        #df = pd.read_sql(query.statement, engine,
+        #                     coerce_float=False, index_col=index_col)
 
         df = fix_columns_with_query(df, query, fix_wkb=fix_wkb, fix_decimal=fix_decimal, n_threads=n_threads)
 
