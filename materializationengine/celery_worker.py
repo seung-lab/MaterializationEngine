@@ -9,10 +9,6 @@ from celery.utils.log import get_task_logger
 from materializationengine.celery_init import celery
 from materializationengine.errors import TaskNotFound
 from materializationengine.schemas import CeleryBeatSchema
-from materializationengine.workflows.periodic_database_removal import \
-    remove_expired_databases
-from materializationengine.workflows.periodic_materialization import \
-    run_periodic_materialization
 
 celery_logger = get_task_logger(__name__)
 
@@ -67,6 +63,10 @@ def celery_loggers(logger, *args, **kwargs):
 
 @celery.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
+    from materializationengine.workflows.periodic_database_removal import \
+        remove_expired_databases
+    from materializationengine.workflows.periodic_materialization import \
+        run_periodic_materialization
 
     periodic_tasks = {
         "run_daily_periodic_materialization": run_periodic_materialization.s(
