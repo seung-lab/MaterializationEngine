@@ -97,7 +97,7 @@ class QueueResource(Resource):
     def get(self):
         """Get queued tasks for celery workers
         """
-        from materializationengine.celery_status import get_celery_queue_items
+        from materializationengine.celery_worker import get_celery_queue_items
         status = get_celery_queue_items('process')
         return status
 
@@ -109,7 +109,7 @@ class CeleryResource(Resource):
     def get(self):
         """Get celery worker info
         """
-        from materializationengine.celery_status import \
+        from materializationengine.celery_worker import \
             get_celery_worker_status
         status = get_celery_worker_status()
         return status
