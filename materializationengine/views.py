@@ -4,7 +4,7 @@ import pandas as pd
 from dateutil import parser
 from emannotationschemas.models import (make_annotation_model,
                                         make_dataset_models)
-from flask import Blueprint, abort, redirect, render_template, request, url_for
+from flask import Blueprint, abort, redirect, render_template, request, url_for, current_app
 from sqlalchemy import and_, func, or_
 
 from materializationengine.celery_init import celery
@@ -114,7 +114,8 @@ def version_view(datastack_name:str, id:int):
         tables, AnalysisTableSchema(many=True), "views.table_view", "id",
         datastack_name=datastack_name
     )
-    df["schema"] = df.schema.map(lambda x: "<a href='/schema/type/{}/view'>{}</a>".format(x, x))
+    schema_url = "<a href='{}/schema/views/type/{}/view'>{}</a>"
+    df["schema"] = df.schema.map(lambda x: schema_url.format(current_app.config['GLOBAL_SERVER'],x, x))
     df["table_name"] = df.table_name.map(lambda x: "<a href='/annotation/views/aligned_volume/{}/table/{}'>{}</a>".format(aligned_volume_name, x, x))
     with pd.option_context("display.max_colwidth", -1):
         output_html = df.to_html(escape=False)
