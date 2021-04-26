@@ -145,14 +145,14 @@ class CompleteWorkflowResource(Resource):
             datastack_name (str): name of datastack from infoservice
         """
         from materializationengine.workflows.complete_workflow import \
-            run_complete_worflow
+            run_complete_workflow
         datastack_info = get_datastack_info(datastack_name)
         args = materialize_parser.parse_args()
         days_to_expire = args["days_to_expire"]
         
         datastack_info['database_expires'] = days_to_expire  
 
-        run_complete_worflow.s(datastack_info, days_to_expire).apply_async()
+        run_complete_workflow.s(datastack_info, days_to_expire).apply_async()
         return 200
 
 
