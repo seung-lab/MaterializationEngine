@@ -61,7 +61,7 @@ def celery_loggers(logger, *args, **kwargs):
     logger.addHandler(logging.StreamHandler(sys.stdout))
 
 
-@celery.on_after_finalize.connect
+@celery.on_after_configure.connect
 def setup_periodic_tasks(sender, **kwargs):
     from materializationengine.workflows.periodic_database_removal import \
         remove_expired_databases
